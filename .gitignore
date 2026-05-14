@@ -72,3 +72,6 @@ tests/fixtures/llm_traces/live/*.log
 
 # Local test artifacts
 .anvil/
+
+# macOS Finder noise
+**/.DS_Store
