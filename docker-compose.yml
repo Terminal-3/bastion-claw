@@ -125,6 +125,12 @@ services:
       T3N_MCP_RPC_URL: ${T3N_MCP_RPC_URL:-}
       T3N_MCP_DASHBOARD_URL: ${T3N_MCP_DASHBOARD_URL:-}
       PRIVATE_KEY: ${T3N_MCP_PRIVATE_KEY:-}
+      # Agent signing key for runPayroll. The Trinity-side handler prefers
+      # T3N_MCP_AGENT_SECRET_HEX when set so callers can omit the secret
+      # field in tool arguments (see client/mcp/t3n-mcp/src/server/tools/
+      # payroll/runPayroll/schema.ts in the trinity repo). Empty default
+      # keeps existing setups unchanged.
+      T3N_MCP_AGENT_SECRET_HEX: ${T3N_MCP_AGENT_SECRET_HEX:-}
       MCP_SOCKET_PATH: /var/run/t3n-mcp/t3n-mcp.sock
       # T3N_PROJECT_DIR is set in docker/t3n-mcp-sidecar.Dockerfile (/workspace/mcp/t3n-mcp).
     volumes:
