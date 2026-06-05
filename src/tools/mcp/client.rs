@@ -3506,4 +3506,143 @@ mod tests {
         // structured content is checked first and returns None (not an error)
         assert!(inspect_handler_error(&result).is_none());
     }
+
+    // ── downstream tool-error propagation (review item #6) ───────────────────
+    //
+    // When a payroll tool call fails because the billed DID is unfunded, the
+    // t3n-mcp child maps Trinity's `InsufficientCredit` to a structured
+    // `insufficient_credit` error carrying account / required / available
+    // detail (t3n-mcp `src/server/errorContract.ts`). These caller-level tests
+    // drive `McpToolWrapper::execute` end-to-end through a mock transport and
+    // assert that detail reaches the agent *verbatim* — t3-claw must not
+    // collapse it to a bare HTTP status word like "Forbidden". They cover both
+    // shapes the downstream error can arrive in: a JSON-RPC error object, and a
+    // tool result flagged `is_error: true`.
+
+    /// Build a wired-up `McpToolWrapper` whose mock transport answers the
+    /// initialize handshake (initialize + notifications/initialized) and then
+    /// returns `call_outcome` for the `tools/call` request. The server name is
+    /// deliberately non-t3n so the delegation-injection path is skipped and the
+    /// arguments pass through unchanged.
+    fn wrapper_with_call_outcome(call_outcome: McpResponse) -> McpToolWrapper {
+        let init_response = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            result: Some(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": {"name": "test", "version": "1.0"}
+            })),
+            error: None,
+        };
+        let notification_ack = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            result: None,
+            error: None,
+        };
+        let transport = Arc::new(MockTransport::new(
+            false,
+            vec![init_response, notification_ack, call_outcome],
+        ));
+        let client = Arc::new(McpClient::new_with_transport(
+            "trinity",
+            transport,
+            None,
+            None,
+            "test-user",
+            None,
+        ));
+        McpToolWrapper {
+            tool: make_test_mcp_tool(false),
+            prefixed_name: "trinity_do_thing".to_string(),
+            provider_extension: "trinity".to_string(),
+            client,
+        }
+    }
+
+    /// JSON-RPC error shape: the downstream `insufficient_credit` message and
+    /// code must surface through `ToolError::ExecutionFailed`, not be flattened
+    /// to a generic status word.
+    #[tokio::test]
+    async fn execute_surfaces_insufficient_credit_jsonrpc_error_verbatim() {
+        let call_outcome = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(3),
+            result: None,
+            error: Some(crate::tools::mcp::protocol::McpError {
+                code: -32000,
+                message: "insufficient_credit (account=did:t3n:agent0001, \
+                          required=500000, available=12000)"
+                    .to_string(),
+                data: None,
+            }),
+        };
+        let wrapper = wrapper_with_call_outcome(call_outcome);
+
+        let err = wrapper
+            .execute(serde_json::json!({"cycle_id": "2025-06"}), &JobContext::default())
+            .await
+            .expect_err("an insufficient-credit error must propagate as a tool error");
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, ToolError::ExecutionFailed(_)),
+            "downstream tool errors must map to ExecutionFailed, got: {err:?}"
+        );
+        assert!(
+            msg.contains("insufficient_credit"),
+            "the structured reason must be preserved verbatim: {msg}"
+        );
+        assert!(
+            msg.contains("required=500000") && msg.contains("available=12000"),
+            "account/required/available detail must reach the agent: {msg}"
+        );
+        assert!(
+            !msg.contains("Forbidden"),
+            "the real reason must not be flattened to a bare status word: {msg}"
+        );
+    }
+
+    /// Tool-result shape: a result flagged `is_error: true` whose text content
+    /// carries the `insufficient_credit` detail must reach the agent intact via
+    /// `ToolError::ExecutionFailed`.
+    #[tokio::test]
+    async fn execute_surfaces_insufficient_credit_is_error_content_verbatim() {
+        let call_outcome = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(3),
+            result: Some(serde_json::json!({
+                "content": [{
+                    "type": "text",
+                    "text": "insufficient_credit (account=did:t3n:agent0001, \
+                             required=500000, available=12000)"
+                }],
+                "is_error": true
+            })),
+            error: None,
+        };
+        let wrapper = wrapper_with_call_outcome(call_outcome);
+
+        let err = wrapper
+            .execute(serde_json::json!({"cycle_id": "2025-06"}), &JobContext::default())
+            .await
+            .expect_err("an is_error result must propagate as a tool error");
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, ToolError::ExecutionFailed(_)),
+            "an is_error result must map to ExecutionFailed, got: {err:?}"
+        );
+        assert!(
+            msg.contains("insufficient_credit")
+                && msg.contains("required=500000")
+                && msg.contains("available=12000"),
+            "the full insufficient-credit detail must be preserved: {msg}"
+        );
+        assert!(
+            !msg.contains("Forbidden"),
+            "the real reason must not be flattened to a bare status word: {msg}"
+        );
+    }
 }
