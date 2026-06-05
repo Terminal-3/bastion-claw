@@ -16,6 +16,7 @@ use crate::context::JobContext;
 use crate::secrets::SecretsStore;
 use crate::tools::mcp::auth::refresh_access_token;
 use crate::tools::mcp::config::McpServerConfig;
+use crate::tools::mcp::delegation_token::DelegationToken;
 use crate::tools::mcp::http_transport::HttpMcpTransport;
 use crate::tools::mcp::protocol::{
     CallToolResult, InitializeResult, ListToolsResult, McpRequest, McpResponse, McpTool,
@@ -692,13 +693,27 @@ impl McpClient {
 
     /// Inject the Trinity delegation credential into `arguments` for `t3n-mcp` tool calls.
     ///
-    /// Reads the per-user `t3n_delegation_token` secret (a JSON object with
-    /// `credential_jcs`, `user_sig`, and `agent_pubkey` produced by the Trinity FE),
-    /// then merges `credential_jcs_b64u` and `user_sig_b64u` into `arguments` so the
-    /// sidecar can forward them to the Trinity node via `runPayroll`'s schema fields.
+    /// Reads the per-user `t3n_delegation_token` secret, selects the credential for
+    /// this call's approver role, then merges `credential_jcs_b64u` and
+    /// `user_sig_b64u` into `arguments` so the sidecar can forward them to the Trinity
+    /// node via `runPayroll`'s schema fields.
     ///
-    /// Fails closed — returns an error when the secret is absent or malformed rather
-    /// than forwarding the call without a credential.
+    /// The secret has two supported shapes, modelled by
+    /// [`DelegationToken`](crate::tools::mcp::delegation_token::DelegationToken):
+    ///   - a multi-role map (`{ "roles": { ... }, "default_role": "cfo" }`) produced
+    ///     by the SDK bootstrap, where each role names its own credential;
+    ///   - a legacy single credential (top-level `credential_jcs` with no `roles`
+    ///     key), which is treated as the only, role-agnostic credential.
+    ///
+    /// When the map form is used, the role is chosen from the optional `as_role`
+    /// argument the LLM may set on the tool call; absent that, the map's
+    /// `default_role` is used. The `as_role` field is a sidecar-routing hint and is
+    /// stripped from the forwarded arguments so the downstream t3n-mcp tool never
+    /// sees it (Trinity has no such field).
+    ///
+    /// Fails closed — returns an error when the secret is absent, malformed, or names
+    /// a role missing from the map, rather than forwarding the call without (or with
+    /// the wrong) credential.
     async fn inject_t3n_delegation_credential(
         &self,
         arguments: serde_json::Value,
@@ -725,31 +740,47 @@ impl McpClient {
 
         let token_str = raw.expose();
 
-        let token: serde_json::Value = serde_json::from_str(token_str).map_err(|e| {
-            ToolError::ExternalService(format!(
-                "t3n-mcp: stored delegation token is not valid JSON: {e}"
-            ))
-        })?;
+        // Parse the secret through the canonical model shared with the write
+        // path (`channels::web::handlers::secrets`). The read path is lenient:
+        // it performs the outer-JSON parse and the single-vs-role-map branch but
+        // does not re-byte-check a credential that already passed write-time
+        // validation. The model's `Display` reproduces the read path's historical
+        // wording for every structural failure.
+        let token = DelegationToken::parse_lenient(token_str)
+            .map_err(|e| ToolError::ExternalService(e.to_string()))?;
 
-        let credential_jcs = token
-            .get("credential_jcs")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::ExternalService(
-                    "t3n-mcp: delegation token missing required field 'credential_jcs'".to_string(),
-                )
-            })?
-            .to_string();
+        // Build the working argument map up-front so we can read (and remove) the
+        // `as_role` routing hint before selecting the credential.
+        let mut merged = match arguments {
+            serde_json::Value::Object(map) => map,
+            other => {
+                // Caller passed a non-object value; wrap it so the credential fields
+                // can be merged in without losing the original payload.
+                let mut m = serde_json::Map::new();
+                m.insert("__args".to_string(), other);
+                m
+            }
+        };
 
-        let user_sig = token
-            .get("user_sig")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::ExternalService(
-                    "t3n-mcp: delegation token missing required field 'user_sig'".to_string(),
-                )
-            })?
-            .to_string();
+        // `as_role` selects which approver role's credential to inject. It is a
+        // sidecar-routing hint only — remove it now so it is never forwarded to the
+        // downstream t3n-mcp tool (Trinity's schema has no such field).
+        let requested_role = match merged.remove("as_role") {
+            None => None,
+            Some(serde_json::Value::String(s)) => Some(s),
+            Some(other) => {
+                return Err(ToolError::ExternalService(format!(
+                    "t3n-mcp: 'as_role' must be a string naming an approver role present in the \
+                     token (e.g. cfo, hr_admin), got {other}"
+                )));
+            }
+        };
+
+        let entry = token
+            .select(requested_role.as_deref())
+            .map_err(|e| ToolError::ExternalService(e.to_string()))?;
+        let credential_jcs = entry.credential_jcs.clone();
+        let user_sig = entry.user_sig.clone();
 
         // Decode the inner credential JCS to extract org_did, which is injected
         // server-side so the LLM never needs to supply it (and can't substitute
@@ -778,17 +809,6 @@ impl McpClient {
                 )
             })?
             .to_string();
-
-        let mut merged = match arguments {
-            serde_json::Value::Object(map) => map,
-            other => {
-                // Caller passed a non-object value; wrap it so the credential fields
-                // can be merged in without losing the original payload.
-                let mut m = serde_json::Map::new();
-                m.insert("__args".to_string(), other);
-                m
-            }
-        };
 
         // Cross-check if the LLM supplied org_did; the credential's value is authoritative.
         if let Some(caller_org_did) = merged.get("org_did").and_then(|v| v.as_str())
@@ -1003,6 +1023,10 @@ fn strip_delegation_fields_if_present(
     let had_cred = obj.remove("credential_jcs_b64u").is_some();
     let had_sig = obj.remove("user_sig_b64u").is_some();
     let had_org_did = obj.remove("org_did").is_some();
+    // `as_role` is a sidecar-routing hint consumed only by the delegation
+    // injection path. A non-delegating tool has nothing to do with it and
+    // Trinity has no such field, so strip it here too rather than forward it.
+    let had_as_role = obj.remove("as_role").is_some();
 
     if fe_requested_delegation {
         tracing::error!(
@@ -1021,12 +1045,13 @@ fn strip_delegation_fields_if_present(
         )));
     }
 
-    if had_cred || had_sig || had_org_did {
+    if had_cred || had_sig || had_org_did || had_as_role {
         tracing::error!(
             tool = %tool_name,
             stripped_credential = had_cred,
             stripped_signature = had_sig,
             stripped_org_did = had_org_did,
+            stripped_as_role = had_as_role,
             "delegation-shaped fields stripped from a non-delegating tool — possible \
              prompt-injection attempt, or sidecar/t3-claw skew if the FE intended \
              delegated mode"
@@ -2698,6 +2723,176 @@ mod tests {
         );
     }
 
+    // ── role-aware multi-credential selection (MVP2) ────────────────────────
+    //
+    // The stored delegation token generalises from a single legacy credential
+    // to a `{ roles: {cfo, hr_admin, junior}, default_role }` map. These tests
+    // exercise the secret-shape parsing and role-selection logic: legacy still
+    // works, `as_role` picks the named role, a missing role errors, the
+    // `default_role` is used when `as_role` is absent, and `as_role` is stripped
+    // from the forwarded arguments either way.
+
+    /// Build a multi-role delegation token where each role's credential binds a
+    /// distinct `user_sig` (so the selected role is identifiable in assertions),
+    /// all sharing one `org_did`.
+    fn make_role_map_token_json(org_did: &str, default_role: &str) -> String {
+        let role_entry = |sig: &str| {
+            serde_json::json!({
+                "credential_jcs": make_credential_jcs_b64u(org_did),
+                "user_sig": sig,
+                "agent_pubkey": "pubkey-value",
+            })
+        };
+        serde_json::json!({
+            "roles": {
+                "cfo": role_entry("usig-cfo"),
+                "hr_admin": role_entry("usig-hr"),
+                "junior": role_entry("usig-junior"),
+            },
+            "default_role": default_role,
+        })
+        .to_string()
+    }
+
+    async fn store_token(token_json: &str) -> McpClient {
+        use crate::secrets::CreateSecretParams;
+        let store = make_test_secrets_store();
+        store
+            .create(
+                "test-user",
+                CreateSecretParams::new(
+                    crate::tools::mcp::config::T3N_DELEGATION_TOKEN_SECRET,
+                    token_json,
+                ),
+            )
+            .await
+            .expect("store delegation token");
+        t3n_mcp_client_with_secrets(store)
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_as_role_selects_the_named_credential() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(
+                serde_json::json!({"cycle_id": "2025-06", "as_role": "hr_admin"}),
+            )
+            .await
+            .expect("as_role=hr_admin must select the HR credential");
+
+        assert_eq!(
+            merged["user_sig_b64u"], "usig-hr",
+            "the hr_admin role's credential must be injected"
+        );
+        assert_eq!(merged["org_did"], TEST_ORG_DID);
+        assert_eq!(merged["cycle_id"], "2025-06");
+        assert!(
+            merged.get("as_role").is_none(),
+            "as_role is a sidecar-routing hint and must be stripped from forwarded args"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_uses_default_role_when_as_role_absent() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "hr_admin")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"cycle_id": "2025-06"}))
+            .await
+            .expect("absent as_role must fall back to default_role");
+
+        assert_eq!(
+            merged["user_sig_b64u"], "usig-hr",
+            "default_role=hr_admin must select the HR credential when as_role is absent"
+        );
+        assert!(merged.get("as_role").is_none());
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_missing_role_errors_without_fallback() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "treasurer"}))
+            .await
+            .expect_err("an as_role naming a role absent from the map must error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("treasurer"),
+            "error must name the requested role: {msg}"
+        );
+        assert!(
+            msg.contains("cfo") && msg.contains("hr_admin") && msg.contains("junior"),
+            "error must list the available roles: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_legacy_single_credential_still_works() {
+        // Legacy shape: top-level credential_jcs, no `roles` key.
+        let client = store_token(&make_token_json(TEST_ORG_DID)).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"cycle_id": "2025-06"}))
+            .await
+            .expect("legacy single-credential token must still inject");
+
+        assert_eq!(
+            merged["credential_jcs_b64u"],
+            make_credential_jcs_b64u(TEST_ORG_DID)
+        );
+        assert_eq!(merged["user_sig_b64u"], "usig-value");
+        assert_eq!(merged["org_did"], TEST_ORG_DID);
+    }
+
+    #[tokio::test]
+    async fn inject_legacy_single_credential_rejects_as_role() {
+        let client = store_token(&make_token_json(TEST_ORG_DID)).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "cfo"}))
+            .await
+            .expect_err("as_role against a legacy single credential must error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("as_role") && msg.contains("legacy"),
+            "error must explain the legacy single-credential mismatch: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_non_string_as_role_errors() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": 42}))
+            .await
+            .expect_err("a non-string as_role must error");
+
+        assert!(
+            err.to_string().contains("'as_role' must be a string"),
+            "error must explain the as_role type requirement: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_strips_as_role_for_default_path_too() {
+        // Even when as_role is absent and default_role is used, no `as_role`
+        // field should ever be forwarded; this guards the no-hint path.
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "junior")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "junior"}))
+            .await
+            .expect("explicit as_role=junior must select the junior credential");
+
+        assert_eq!(merged["user_sig_b64u"], "usig-junior");
+        assert!(merged.get("as_role").is_none());
+    }
+
     // ── annotation-based delegation gating ──────────────────────────────────
     //
     // These tests exercise the annotation-based gating in `call_tool`: injection
@@ -3308,5 +3503,150 @@ mod tests {
         );
         // structured content is checked first and returns None (not an error)
         assert!(inspect_handler_error(&result).is_none());
+    }
+
+    // ── downstream tool-error propagation (review item #6) ───────────────────
+    //
+    // When a payroll tool call fails because the billed DID is unfunded, the
+    // t3n-mcp child maps Trinity's `InsufficientCredit` to a structured
+    // `insufficient_credit` error carrying account / required / available
+    // detail (t3n-mcp `src/server/errorContract.ts`). These caller-level tests
+    // drive `McpToolWrapper::execute` end-to-end through a mock transport and
+    // assert that detail reaches the agent *verbatim* — t3-claw must not
+    // collapse it to a bare HTTP status word like "Forbidden". They cover both
+    // shapes the downstream error can arrive in: a JSON-RPC error object, and a
+    // tool result flagged `is_error: true`.
+
+    /// Build a wired-up `McpToolWrapper` whose mock transport answers the
+    /// initialize handshake (initialize + notifications/initialized) and then
+    /// returns `call_outcome` for the `tools/call` request. The server name is
+    /// deliberately non-t3n so the delegation-injection path is skipped and the
+    /// arguments pass through unchanged.
+    fn wrapper_with_call_outcome(call_outcome: McpResponse) -> McpToolWrapper {
+        let init_response = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(1),
+            result: Some(serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": {"name": "test", "version": "1.0"}
+            })),
+            error: None,
+        };
+        let notification_ack = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: None,
+            result: None,
+            error: None,
+        };
+        let transport = Arc::new(MockTransport::new(
+            false,
+            vec![init_response, notification_ack, call_outcome],
+        ));
+        let client = Arc::new(McpClient::new_with_transport(
+            "trinity",
+            transport,
+            None,
+            None,
+            "test-user",
+            None,
+        ));
+        McpToolWrapper {
+            tool: make_test_mcp_tool(false),
+            prefixed_name: "trinity_do_thing".to_string(),
+            provider_extension: "trinity".to_string(),
+            client,
+        }
+    }
+
+    /// JSON-RPC error shape: the downstream `insufficient_credit` message and
+    /// code must surface through `ToolError::ExecutionFailed`, not be flattened
+    /// to a generic status word.
+    #[tokio::test]
+    async fn execute_surfaces_insufficient_credit_jsonrpc_error_verbatim() {
+        let call_outcome = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(3),
+            result: None,
+            error: Some(crate::tools::mcp::protocol::McpError {
+                code: -32000,
+                message: "insufficient_credit (account=did:t3n:agent0001, \
+                          required=500000, available=12000)"
+                    .to_string(),
+                data: None,
+            }),
+        };
+        let wrapper = wrapper_with_call_outcome(call_outcome);
+
+        let err = wrapper
+            .execute(
+                serde_json::json!({"cycle_id": "2025-06"}),
+                &JobContext::default(),
+            )
+            .await
+            .expect_err("an insufficient-credit error must propagate as a tool error");
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, ToolError::ExecutionFailed(_)),
+            "downstream tool errors must map to ExecutionFailed, got: {err:?}"
+        );
+        assert!(
+            msg.contains("insufficient_credit"),
+            "the structured reason must be preserved verbatim: {msg}"
+        );
+        assert!(
+            msg.contains("required=500000") && msg.contains("available=12000"),
+            "account/required/available detail must reach the agent: {msg}"
+        );
+        assert!(
+            !msg.contains("Forbidden"),
+            "the real reason must not be flattened to a bare status word: {msg}"
+        );
+    }
+
+    /// Tool-result shape: a result flagged `is_error: true` whose text content
+    /// carries the `insufficient_credit` detail must reach the agent intact via
+    /// `ToolError::ExecutionFailed`.
+    #[tokio::test]
+    async fn execute_surfaces_insufficient_credit_is_error_content_verbatim() {
+        let call_outcome = McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id: Some(3),
+            result: Some(serde_json::json!({
+                "content": [{
+                    "type": "text",
+                    "text": "insufficient_credit (account=did:t3n:agent0001, \
+                             required=500000, available=12000)"
+                }],
+                "is_error": true
+            })),
+            error: None,
+        };
+        let wrapper = wrapper_with_call_outcome(call_outcome);
+
+        let err = wrapper
+            .execute(
+                serde_json::json!({"cycle_id": "2025-06"}),
+                &JobContext::default(),
+            )
+            .await
+            .expect_err("an is_error result must propagate as a tool error");
+
+        let msg = err.to_string();
+        assert!(
+            matches!(err, ToolError::ExecutionFailed(_)),
+            "an is_error result must map to ExecutionFailed, got: {err:?}"
+        );
+        assert!(
+            msg.contains("insufficient_credit")
+                && msg.contains("required=500000")
+                && msg.contains("available=12000"),
+            "the full insufficient-credit detail must be preserved: {msg}"
+        );
+        assert!(
+            !msg.contains("Forbidden"),
+            "the real reason must not be flattened to a bare status word: {msg}"
+        );
     }
 }

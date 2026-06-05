@@ -4,247 +4,37 @@
 //! delete secrets on behalf of individual users so their T3Claw agent can
 //! call back to external services with per-user credentials.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use axum::{
     Json,
     extract::{Path, State},
     http::StatusCode,
 };
-use base64::Engine as _;
-use regex::Regex;
 
 use crate::channels::web::auth::AdminUser;
 use crate::channels::web::platform::state::GatewayState;
 use crate::secrets::CreateSecretParams;
-
-// ── Byte-length constants mirrored from client/t3n-sdk/src/client/delegation.ts ──
-const ETH_SIG_LEN: usize = 65;
-const AGENT_PUBKEY_LEN: usize = 33;
-
-static ORG_DID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^did:t3n:[0-9a-f]{40}$").expect("static regex"));
-
-/// Reasons a `t3n_delegation_token` value can fail shape validation.
-///
-/// Each variant corresponds to exactly one rejection path; the handler converts
-/// each to a structured `{ code, field, reason }` JSON body.
-#[derive(Debug)]
-enum DelegationTokenValidationError {
-    InvalidJson {
-        reason: String,
-    },
-    MissingField {
-        field: &'static str,
-    },
-    WrongType {
-        field: &'static str,
-        expected: &'static str,
-    },
-    InvalidB64u {
-        field: &'static str,
-        reason: String,
-    },
-    WrongByteLength {
-        field: &'static str,
-        expected: usize,
-        actual: usize,
-    },
-    InnerJsonInvalid {
-        reason: String,
-    },
-    MissingInnerField {
-        field: &'static str,
-    },
-    WrongInnerType {
-        field: &'static str,
-        expected: &'static str,
-    },
-    InvalidOrgDidShape {
-        value: String,
-    },
-}
-
-impl DelegationTokenValidationError {
-    fn field(&self) -> &str {
-        match self {
-            Self::InvalidJson { .. } => "<root>",
-            Self::MissingField { field } => field,
-            Self::WrongType { field, .. } => field,
-            Self::InvalidB64u { field, .. } => field,
-            Self::WrongByteLength { field, .. } => field,
-            Self::InnerJsonInvalid { .. } => "credential_jcs",
-            Self::MissingInnerField { field } => field,
-            Self::WrongInnerType { field, .. } => field,
-            Self::InvalidOrgDidShape { .. } => "org_did",
-        }
-    }
-
-    fn reason(&self) -> String {
-        match self {
-            Self::InvalidJson { reason } => reason.clone(),
-            Self::MissingField { field } => format!("required field '{field}' is missing"),
-            Self::WrongType { field, expected } => {
-                format!("field '{field}' must be a {expected}")
-            }
-            Self::InvalidB64u { field, reason } => {
-                format!("field '{field}' is not valid base64url: {reason}")
-            }
-            Self::WrongByteLength {
-                field,
-                expected,
-                actual,
-            } => {
-                format!(
-                    "field '{field}' must be {expected} bytes after base64url decode, got {actual}"
-                )
-            }
-            Self::InnerJsonInvalid { reason } => {
-                format!("credential_jcs does not decode to valid JSON: {reason}")
-            }
-            Self::MissingInnerField { field } => {
-                format!("credential_jcs is missing required inner field '{field}'")
-            }
-            Self::WrongInnerType { field, expected } => {
-                format!("credential_jcs inner field '{field}' must be a {expected}")
-            }
-            Self::InvalidOrgDidShape { value } => {
-                format!(
-                    "org_did '{value}' must match did:t3n:<40 lowercase hex> \
-                     (e.g. did:t3n:a1b2c3…)"
-                )
-            }
-        }
-    }
-
-    fn to_response(&self) -> (StatusCode, Json<serde_json::Value>) {
-        let body = serde_json::json!({
-            "code": "invalid_secret_shape",
-            "field": self.field(),
-            "reason": self.reason(),
-        });
-        (StatusCode::BAD_REQUEST, Json(body))
-    }
-}
+use crate::tools::mcp::delegation_token::{DelegationToken, DelegationTokenError};
 
 /// Validate the shape of a `t3n_delegation_token` secret value before persisting.
 ///
-/// Pure function: takes the raw value string, returns `Ok(())` on success.
-/// The caller is responsible for rejecting the PUT and returning the structured
-/// 400 body from `DelegationTokenValidationError::to_response`.
-fn validate_delegation_token(value: &str) -> Result<(), DelegationTokenValidationError> {
-    let b64u = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+/// Thin wrapper over the canonical [`DelegationToken::parse`] — the single
+/// source of truth for the secret shape, shared with the read path in
+/// `tools::mcp::client`. The caller is responsible for rejecting the PUT and
+/// returning the structured 400 body via [`to_response`].
+fn validate_delegation_token(value: &str) -> Result<(), DelegationTokenError> {
+    DelegationToken::parse(value).map(|_| ())
+}
 
-    // ── 1. Outer JSON parse ────────────────────────────────────────────────────
-    let token: serde_json::Value =
-        serde_json::from_str(value).map_err(|e| DelegationTokenValidationError::InvalidJson {
-            reason: e.to_string(),
-        })?;
-
-    // ── 2. Required top-level string fields ───────────────────────────────────
-    let get_str = |field: &'static str| -> Result<&str, DelegationTokenValidationError> {
-        match token.get(field) {
-            None => Err(DelegationTokenValidationError::MissingField { field }),
-            Some(v) => v.as_str().ok_or(DelegationTokenValidationError::WrongType {
-                field,
-                expected: "string",
-            }),
-        }
-    };
-
-    let credential_jcs = get_str("credential_jcs")?.to_string();
-    let user_sig = get_str("user_sig")?.to_string();
-    let agent_pubkey = get_str("agent_pubkey")?.to_string();
-
-    // ── 3. user_sig: b64url decode, assert 65 bytes ───────────────────────────
-    let sig_bytes = b64u.decode(user_sig.trim_end_matches('=')).map_err(|e| {
-        DelegationTokenValidationError::InvalidB64u {
-            field: "user_sig",
-            reason: e.to_string(),
-        }
-    })?;
-    if sig_bytes.len() != ETH_SIG_LEN {
-        return Err(DelegationTokenValidationError::WrongByteLength {
-            field: "user_sig",
-            expected: ETH_SIG_LEN,
-            actual: sig_bytes.len(),
-        });
-    }
-
-    // ── 4. agent_pubkey: hex (optional 0x prefix) or b64url, assert 33 bytes ──
-    let pubkey_bytes = {
-        let s = agent_pubkey.trim_start_matches("0x");
-        // Attempt hex first: must be exactly 66 hex chars (33 bytes × 2).
-        if s.len() == 66 && s.chars().all(|c| c.is_ascii_hexdigit()) {
-            hex::decode(s).map_err(|e| DelegationTokenValidationError::InvalidB64u {
-                field: "agent_pubkey",
-                reason: e.to_string(),
-            })?
-        } else {
-            b64u.decode(agent_pubkey.trim_end_matches('='))
-                .map_err(|e| DelegationTokenValidationError::InvalidB64u {
-                    field: "agent_pubkey",
-                    reason: e.to_string(),
-                })?
-        }
-    };
-    if pubkey_bytes.len() != AGENT_PUBKEY_LEN {
-        return Err(DelegationTokenValidationError::WrongByteLength {
-            field: "agent_pubkey",
-            expected: AGENT_PUBKEY_LEN,
-            actual: pubkey_bytes.len(),
-        });
-    }
-
-    // ── 5. credential_jcs: b64url decode, parse inner JSON ────────────────────
-    let jcs_bytes = b64u
-        .decode(credential_jcs.trim_end_matches('='))
-        .map_err(|e| DelegationTokenValidationError::InvalidB64u {
-            field: "credential_jcs",
-            reason: e.to_string(),
-        })?;
-    let inner: serde_json::Value = serde_json::from_slice(&jcs_bytes).map_err(|e| {
-        DelegationTokenValidationError::InnerJsonInvalid {
-            reason: e.to_string(),
-        }
-    })?;
-
-    // ── 6. Required inner string fields ───────────────────────────────────────
-    let get_inner_str = |field: &'static str| -> Result<&str, DelegationTokenValidationError> {
-        match inner.get(field) {
-            None => Err(DelegationTokenValidationError::MissingInnerField { field }),
-            Some(v) => v
-                .as_str()
-                .ok_or(DelegationTokenValidationError::WrongInnerType {
-                    field,
-                    expected: "string",
-                }),
-        }
-    };
-
-    let org_did = get_inner_str("org_did")?.to_string();
-    get_inner_str("vc_id")?;
-    get_inner_str("user_did")?;
-
-    // `not_before_secs` / `not_after_secs` are numbers on the wire; accepted as
-    // either number or string per the spec note.  We only check presence here.
-    if inner.get("not_before_secs").is_none() {
-        return Err(DelegationTokenValidationError::MissingInnerField {
-            field: "not_before_secs",
-        });
-    }
-    if inner.get("not_after_secs").is_none() {
-        return Err(DelegationTokenValidationError::MissingInnerField {
-            field: "not_after_secs",
-        });
-    }
-
-    // ── 7. org_did must be a fully-qualified did:t3n:<40 lowercase hex> ───────
-    if !ORG_DID_RE.is_match(&org_did) {
-        return Err(DelegationTokenValidationError::InvalidOrgDidShape { value: org_did });
-    }
-
-    Ok(())
+/// Build the structured `{ code, field, reason }` 400 body for a rejected token.
+fn to_response(err: &DelegationTokenError) -> (StatusCode, Json<serde_json::Value>) {
+    let body = serde_json::json!({
+        "code": "invalid_secret_shape",
+        "field": err.field(),
+        "reason": err.reason(),
+    });
+    (StatusCode::BAD_REQUEST, Json(body))
 }
 
 /// PUT /api/admin/users/{user_id}/secrets/{name} — create or update a secret.
@@ -301,8 +91,7 @@ pub async fn secrets_put_handler(
     if name == crate::tools::mcp::config::T3N_DELEGATION_TOKEN_SECRET
         && let Err(e) = validate_delegation_token(&value)
     {
-        let (status, body) = e.to_response();
-        return Err((status, body));
+        return Err(to_response(&e));
     }
 
     let provider = body
@@ -441,6 +230,13 @@ pub async fn secrets_delete_handler(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // The shape model now lives in `tools::mcp::delegation_token`; these aliases
+    // keep the write-path tests asserting against the canonical error type and
+    // byte-length constants without restating them here.
+    use crate::tools::mcp::delegation_token::DelegationTokenError as DelegationTokenValidationError;
+    const ETH_SIG_LEN: usize = 65;
+    const AGENT_PUBKEY_LEN: usize = 33;
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -620,5 +416,76 @@ mod tests {
             err,
             DelegationTokenValidationError::InvalidOrgDidShape { .. }
         ));
+    }
+
+    /// One credential object as a JSON value, optionally with a too-short
+    /// (invalid) signature, for building role-map tokens.
+    fn role_credential(bad_sig: bool) -> serde_json::Value {
+        let sig = if bad_sig {
+            b64u_encode(&[0xABu8; 39])
+        } else {
+            b64u_encode(&[0xABu8; ETH_SIG_LEN])
+        };
+        let pubkey = b64u_encode(&[0xCDu8; AGENT_PUBKEY_LEN]);
+        let cjcs = valid_credential_jcs_b64u("did:t3n:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+        serde_json::json!({ "credential_jcs": cjcs, "user_sig": sig, "agent_pubkey": pubkey })
+    }
+
+    #[test]
+    fn valid_role_map_passes() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({
+            "roles": { "cfo": cred.clone(), "hr_admin": cred.clone(), "junior": cred },
+            "default_role": "cfo",
+        });
+        assert!(validate_delegation_token(&token.to_string()).is_ok());
+    }
+
+    #[test]
+    fn role_map_rejects_unknown_default_role() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({ "roles": { "cfo": cred }, "default_role": "ceo" });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                DelegationTokenValidationError::DefaultRoleUnknown { .. }
+            ),
+            "expected DefaultRoleUnknown, got: {err:?}"
+        );
+        assert_eq!(err.field(), "default_role");
+    }
+
+    #[test]
+    fn role_map_rejects_missing_default_role() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({ "roles": { "cfo": cred } });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(matches!(
+            err,
+            DelegationTokenValidationError::MissingField {
+                field: "default_role"
+            }
+        ));
+    }
+
+    #[test]
+    fn role_map_rejects_bad_inner_credential() {
+        // The hr_admin entry has a too-short user_sig → per-credential validation fails.
+        let token = serde_json::json!({
+            "roles": { "cfo": role_credential(false), "hr_admin": role_credential(true) },
+            "default_role": "cfo",
+        });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                DelegationTokenValidationError::WrongByteLength {
+                    field: "user_sig",
+                    ..
+                }
+            ),
+            "expected WrongByteLength on user_sig, got: {err:?}"
+        );
     }
 }
