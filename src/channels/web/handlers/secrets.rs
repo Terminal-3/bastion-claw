@@ -63,6 +63,9 @@ enum DelegationTokenValidationError {
     InvalidOrgDidShape {
         value: String,
     },
+    DefaultRoleUnknown {
+        role: String,
+    },
 }
 
 impl DelegationTokenValidationError {
@@ -77,6 +80,7 @@ impl DelegationTokenValidationError {
             Self::MissingInnerField { field } => field,
             Self::WrongInnerType { field, .. } => field,
             Self::InvalidOrgDidShape { .. } => "org_did",
+            Self::DefaultRoleUnknown { .. } => "default_role",
         }
     }
 
@@ -114,6 +118,9 @@ impl DelegationTokenValidationError {
                      (e.g. did:t3n:a1b2c3…)"
                 )
             }
+            Self::DefaultRoleUnknown { role } => {
+                format!("default_role '{role}' is not present in roles")
+            }
         }
     }
 
@@ -133,13 +140,59 @@ impl DelegationTokenValidationError {
 /// The caller is responsible for rejecting the PUT and returning the structured
 /// 400 body from `DelegationTokenValidationError::to_response`.
 fn validate_delegation_token(value: &str) -> Result<(), DelegationTokenValidationError> {
-    let b64u = base64::engine::general_purpose::URL_SAFE_NO_PAD;
-
     // ── 1. Outer JSON parse ────────────────────────────────────────────────────
     let token: serde_json::Value =
         serde_json::from_str(value).map_err(|e| DelegationTokenValidationError::InvalidJson {
             reason: e.to_string(),
         })?;
+
+    // MVP2 multi-role map: `{ "roles": { "<role>": {credential triple}, … },
+    // "default_role": "<role>" }`. Each role entry is validated as a standalone
+    // credential; `default_role` must name a present role. Legacy single-
+    // credential tokens (top-level `credential_jcs`) keep working below.
+    if let Some(roles) = token.get("roles") {
+        let roles_obj =
+            roles
+                .as_object()
+                .ok_or(DelegationTokenValidationError::WrongType {
+                    field: "roles",
+                    expected: "object",
+                })?;
+        for cred in roles_obj.values() {
+            validate_one_credential(cred)?;
+        }
+        let default_role = match token.get("default_role") {
+            None => {
+                return Err(DelegationTokenValidationError::MissingField {
+                    field: "default_role",
+                })
+            }
+            Some(v) => v
+                .as_str()
+                .ok_or(DelegationTokenValidationError::WrongType {
+                    field: "default_role",
+                    expected: "string",
+                })?,
+        };
+        if !roles_obj.contains_key(default_role) {
+            return Err(DelegationTokenValidationError::DefaultRoleUnknown {
+                role: default_role.to_string(),
+            });
+        }
+        return Ok(());
+    }
+
+    // Legacy single-credential shape.
+    validate_one_credential(&token)
+}
+
+/// Validate one credential object — `{ credential_jcs, user_sig, agent_pubkey }`
+/// with the expected inner JCS fields. Used for both the legacy top-level token
+/// and each entry of the MVP2 multi-role map.
+fn validate_one_credential(
+    token: &serde_json::Value,
+) -> Result<(), DelegationTokenValidationError> {
+    let b64u = base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     // ── 2. Required top-level string fields ───────────────────────────────────
     let get_str = |field: &'static str| -> Result<&str, DelegationTokenValidationError> {
@@ -620,5 +673,73 @@ mod tests {
             err,
             DelegationTokenValidationError::InvalidOrgDidShape { .. }
         ));
+    }
+
+    /// One credential object as a JSON value, optionally with a too-short
+    /// (invalid) signature, for building role-map tokens.
+    fn role_credential(bad_sig: bool) -> serde_json::Value {
+        let sig = if bad_sig {
+            b64u_encode(&[0xABu8; 39])
+        } else {
+            b64u_encode(&[0xABu8; ETH_SIG_LEN])
+        };
+        let pubkey = b64u_encode(&[0xCDu8; AGENT_PUBKEY_LEN]);
+        let cjcs = valid_credential_jcs_b64u("did:t3n:a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2");
+        serde_json::json!({ "credential_jcs": cjcs, "user_sig": sig, "agent_pubkey": pubkey })
+    }
+
+    #[test]
+    fn valid_role_map_passes() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({
+            "roles": { "cfo": cred.clone(), "hr_admin": cred.clone(), "junior": cred },
+            "default_role": "cfo",
+        });
+        assert!(validate_delegation_token(&token.to_string()).is_ok());
+    }
+
+    #[test]
+    fn role_map_rejects_unknown_default_role() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({ "roles": { "cfo": cred }, "default_role": "ceo" });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(
+            matches!(err, DelegationTokenValidationError::DefaultRoleUnknown { .. }),
+            "expected DefaultRoleUnknown, got: {err:?}"
+        );
+        assert_eq!(err.field(), "default_role");
+    }
+
+    #[test]
+    fn role_map_rejects_missing_default_role() {
+        let cred = role_credential(false);
+        let token = serde_json::json!({ "roles": { "cfo": cred } });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(matches!(
+            err,
+            DelegationTokenValidationError::MissingField {
+                field: "default_role"
+            }
+        ));
+    }
+
+    #[test]
+    fn role_map_rejects_bad_inner_credential() {
+        // The hr_admin entry has a too-short user_sig → per-credential validation fails.
+        let token = serde_json::json!({
+            "roles": { "cfo": role_credential(false), "hr_admin": role_credential(true) },
+            "default_role": "cfo",
+        });
+        let err = validate_delegation_token(&token.to_string()).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                DelegationTokenValidationError::WrongByteLength {
+                    field: "user_sig",
+                    ..
+                }
+            ),
+            "expected WrongByteLength on user_sig, got: {err:?}"
+        );
     }
 }
