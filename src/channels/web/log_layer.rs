@@ -74,11 +74,14 @@ impl LogBroadcaster {
             .unwrap_or_else(|_| "[log message redacted: contained blocked secret]".to_string());
 
         // Persist info+ to DB (fire-and-forget; drops on full channel).
-        if entry.level != "DEBUG"
-            && entry.level != "TRACE"
-            && let Ok(guard) = self.db_writer.lock()
-            && let Some(ref tx) = *guard
-        {
+        // Snapshot the sender while holding the lock briefly so the guard is
+        // not held across the try_send.  Returns None when the level is below
+        // info, the mutex is poisoned, or no writer has been wired up yet.
+        let db_tx: Option<mpsc::Sender<LogEntry>> = (entry.level != "DEBUG"
+            && entry.level != "TRACE")
+            .then(|| self.db_writer.lock().ok()?.clone())
+            .flatten();
+        if let Some(tx) = db_tx {
             let _ = tx.try_send(entry.clone());
         }
 
