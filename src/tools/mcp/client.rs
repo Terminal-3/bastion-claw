@@ -692,13 +692,26 @@ impl McpClient {
 
     /// Inject the Trinity delegation credential into `arguments` for `t3n-mcp` tool calls.
     ///
-    /// Reads the per-user `t3n_delegation_token` secret (a JSON object with
-    /// `credential_jcs`, `user_sig`, and `agent_pubkey` produced by the Trinity FE),
-    /// then merges `credential_jcs_b64u` and `user_sig_b64u` into `arguments` so the
-    /// sidecar can forward them to the Trinity node via `runPayroll`'s schema fields.
+    /// Reads the per-user `t3n_delegation_token` secret, selects the credential for
+    /// this call's approver role, then merges `credential_jcs_b64u` and
+    /// `user_sig_b64u` into `arguments` so the sidecar can forward them to the Trinity
+    /// node via `runPayroll`'s schema fields.
     ///
-    /// Fails closed — returns an error when the secret is absent or malformed rather
-    /// than forwarding the call without a credential.
+    /// The secret has two supported shapes (see `select_role_credential`):
+    ///   - a multi-role map (`{ "roles": { ... }, "default_role": "cfo" }`) produced
+    ///     by the SDK bootstrap, where each role names its own credential;
+    ///   - a legacy single credential (top-level `credential_jcs` with no `roles`
+    ///     key), which is treated as the only, role-agnostic credential.
+    ///
+    /// When the map form is used, the role is chosen from the optional `as_role`
+    /// argument the LLM may set on the tool call; absent that, the map's
+    /// `default_role` is used. The `as_role` field is a sidecar-routing hint and is
+    /// stripped from the forwarded arguments so the downstream t3n-mcp tool never
+    /// sees it (Trinity has no such field).
+    ///
+    /// Fails closed — returns an error when the secret is absent, malformed, or names
+    /// a role missing from the map, rather than forwarding the call without (or with
+    /// the wrong) credential.
     async fn inject_t3n_delegation_credential(
         &self,
         arguments: serde_json::Value,
@@ -731,25 +744,35 @@ impl McpClient {
             ))
         })?;
 
-        let credential_jcs = token
-            .get("credential_jcs")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::ExternalService(
-                    "t3n-mcp: delegation token missing required field 'credential_jcs'".to_string(),
-                )
-            })?
-            .to_string();
+        // Build the working argument map up-front so we can read (and remove) the
+        // `as_role` routing hint before selecting the credential.
+        let mut merged = match arguments {
+            serde_json::Value::Object(map) => map,
+            other => {
+                // Caller passed a non-object value; wrap it so the credential fields
+                // can be merged in without losing the original payload.
+                let mut m = serde_json::Map::new();
+                m.insert("__args".to_string(), other);
+                m
+            }
+        };
 
-        let user_sig = token
-            .get("user_sig")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ToolError::ExternalService(
-                    "t3n-mcp: delegation token missing required field 'user_sig'".to_string(),
-                )
-            })?
-            .to_string();
+        // `as_role` selects which approver role's credential to inject. It is a
+        // sidecar-routing hint only — remove it now so it is never forwarded to the
+        // downstream t3n-mcp tool (Trinity's schema has no such field).
+        let requested_role = match merged.remove("as_role") {
+            None => None,
+            Some(serde_json::Value::String(s)) => Some(s),
+            Some(other) => {
+                return Err(ToolError::ExternalService(format!(
+                    "t3n-mcp: 'as_role' must be a string (one of cfo / hr_admin / junior), \
+                     got {other}"
+                )));
+            }
+        };
+
+        let (credential_jcs, user_sig) =
+            select_role_credential(&token, requested_role.as_deref())?;
 
         // Decode the inner credential JCS to extract org_did, which is injected
         // server-side so the LLM never needs to supply it (and can't substitute
@@ -778,17 +801,6 @@ impl McpClient {
                 )
             })?
             .to_string();
-
-        let mut merged = match arguments {
-            serde_json::Value::Object(map) => map,
-            other => {
-                // Caller passed a non-object value; wrap it so the credential fields
-                // can be merged in without losing the original payload.
-                let mut m = serde_json::Map::new();
-                m.insert("__args".to_string(), other);
-                m
-            }
-        };
 
         // Cross-check if the LLM supplied org_did; the credential's value is authoritative.
         if let Some(caller_org_did) = merged.get("org_did").and_then(|v| v.as_str())
@@ -962,6 +974,105 @@ impl McpClient {
     }
 }
 
+/// Pull `(credential_jcs, user_sig)` from one entry of the stored delegation
+/// token, selecting the entry by approver role.
+///
+/// Two secret shapes are accepted:
+///
+/// 1. **Multi-role map** — `{ "roles": { "cfo": {…}, "hr_admin": {…},
+///    "junior": {…} }, "default_role": "cfo" }`. Each role names its own
+///    credential (`credential_jcs` / `user_sig`). `requested_role` (the call's
+///    `as_role` hint, e.g. "cfo") picks the entry; when absent, `default_role`
+///    is used. A `requested_role` (or `default_role`) that names a role missing
+///    from the map is a hard error — never silently fall back, so a wrong-role
+///    call surfaces rather than dispatching the wrong approver's credential.
+///
+/// 2. **Legacy single credential** — a top-level `credential_jcs` with no
+///    `roles` key. Treated as the only, role-agnostic credential. Passing an
+///    `as_role` against this shape is rejected, because there is no role to
+///    select and silently ignoring it would mask a misconfiguration.
+fn select_role_credential(
+    token: &serde_json::Value,
+    requested_role: Option<&str>,
+) -> Result<(String, String), ToolError> {
+    if let Some(roles) = token.get("roles") {
+        let roles = roles.as_object().ok_or_else(|| {
+            ToolError::ExternalService(
+                "t3n-mcp: delegation token 'roles' must be a JSON object".to_string(),
+            )
+        })?;
+
+        let role = match requested_role {
+            Some(r) => r.to_string(),
+            None => token
+                .get("default_role")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    ToolError::ExternalService(
+                        "t3n-mcp: delegation token has a 'roles' map but no 'default_role', \
+                         and the call supplied no 'as_role' — cannot pick a credential"
+                            .to_string(),
+                    )
+                })?
+                .to_string(),
+        };
+
+        let entry = roles.get(&role).ok_or_else(|| {
+            let mut available: Vec<&str> = roles.keys().map(String::as_str).collect();
+            available.sort_unstable();
+            ToolError::ExternalService(format!(
+                "t3n-mcp: no delegation credential for role '{role}' — \
+                 the stored token only provides roles [{}]. Pass `as_role` matching one of \
+                 those, or re-run the SDK bootstrap to upload the missing role.",
+                available.join(", ")
+            ))
+        })?;
+
+        extract_credential_pair(entry, &format!("role '{role}'"))
+    } else {
+        // Legacy single-credential shape — role-agnostic. An `as_role` here has
+        // nothing to select against, so reject it rather than ignore it.
+        if let Some(role) = requested_role {
+            return Err(ToolError::ExternalService(format!(
+                "t3n-mcp: call supplied as_role='{role}' but the stored delegation token is a \
+                 single legacy credential with no role map — re-run the SDK bootstrap to upload \
+                 the per-role credentials, or omit `as_role`."
+            )));
+        }
+        extract_credential_pair(token, "delegation token")
+    }
+}
+
+/// Read the `credential_jcs` / `user_sig` string pair out of a single credential
+/// object (either a legacy top-level token or one role entry of the map).
+/// `context` names the entry for error messages.
+fn extract_credential_pair(
+    entry: &serde_json::Value,
+    context: &str,
+) -> Result<(String, String), ToolError> {
+    let credential_jcs = entry
+        .get("credential_jcs")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            ToolError::ExternalService(format!(
+                "t3n-mcp: {context} is missing required field 'credential_jcs'"
+            ))
+        })?
+        .to_string();
+
+    let user_sig = entry
+        .get("user_sig")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            ToolError::ExternalService(format!(
+                "t3n-mcp: {context} is missing required field 'user_sig'"
+            ))
+        })?
+        .to_string();
+
+    Ok((credential_jcs, user_sig))
+}
+
 /// FE-emitted placeholder marking a delegation field that t3-claw must
 /// substitute server-side. Anchored in two places: the chat prompt
 /// (`t3-apps/apps/trinity/app/(private)/delegations/new/helpers.ts`) and the
@@ -1003,6 +1114,10 @@ fn strip_delegation_fields_if_present(
     let had_cred = obj.remove("credential_jcs_b64u").is_some();
     let had_sig = obj.remove("user_sig_b64u").is_some();
     let had_org_did = obj.remove("org_did").is_some();
+    // `as_role` is a sidecar-routing hint consumed only by the delegation
+    // injection path. A non-delegating tool has nothing to do with it and
+    // Trinity has no such field, so strip it here too rather than forward it.
+    let had_as_role = obj.remove("as_role").is_some();
 
     if fe_requested_delegation {
         tracing::error!(
@@ -1021,12 +1136,13 @@ fn strip_delegation_fields_if_present(
         )));
     }
 
-    if had_cred || had_sig || had_org_did {
+    if had_cred || had_sig || had_org_did || had_as_role {
         tracing::error!(
             tool = %tool_name,
             stripped_credential = had_cred,
             stripped_signature = had_sig,
             stripped_org_did = had_org_did,
+            stripped_as_role = had_as_role,
             "delegation-shaped fields stripped from a non-delegating tool — possible \
              prompt-injection attempt, or sidecar/t3-claw skew if the FE intended \
              delegated mode"
@@ -2696,6 +2812,178 @@ mod tests {
             msg.contains("not valid JSON"),
             "error must mention JSON parse failure: {msg}"
         );
+    }
+
+    // ── role-aware multi-credential selection (MVP2) ────────────────────────
+    //
+    // The stored delegation token generalises from a single legacy credential
+    // to a `{ roles: {cfo, hr_admin, junior}, default_role }` map. These tests
+    // exercise the secret-shape parsing and role-selection logic: legacy still
+    // works, `as_role` picks the named role, a missing role errors, the
+    // `default_role` is used when `as_role` is absent, and `as_role` is stripped
+    // from the forwarded arguments either way.
+
+    /// Build a multi-role delegation token where each role's credential binds a
+    /// distinct `user_sig` (so the selected role is identifiable in assertions),
+    /// all sharing one `org_did`.
+    fn make_role_map_token_json(org_did: &str, default_role: &str) -> String {
+        let role_entry = |sig: &str| {
+            serde_json::json!({
+                "credential_jcs": make_credential_jcs_b64u(org_did),
+                "user_sig": sig,
+                "agent_pubkey": "pubkey-value",
+            })
+        };
+        serde_json::json!({
+            "roles": {
+                "cfo": role_entry("usig-cfo"),
+                "hr_admin": role_entry("usig-hr"),
+                "junior": role_entry("usig-junior"),
+            },
+            "default_role": default_role,
+        })
+        .to_string()
+    }
+
+    async fn store_token(token_json: &str) -> McpClient {
+        use crate::secrets::CreateSecretParams;
+        let store = make_test_secrets_store();
+        store
+            .create(
+                "test-user",
+                CreateSecretParams::new(
+                    crate::tools::mcp::config::T3N_DELEGATION_TOKEN_SECRET,
+                    token_json,
+                ),
+            )
+            .await
+            .expect("store delegation token");
+        t3n_mcp_client_with_secrets(store)
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_as_role_selects_the_named_credential() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(
+                serde_json::json!({"cycle_id": "2025-06", "as_role": "hr_admin"}),
+            )
+            .await
+            .expect("as_role=hr_admin must select the HR credential");
+
+        assert_eq!(
+            merged["user_sig_b64u"], "usig-hr",
+            "the hr_admin role's credential must be injected"
+        );
+        assert_eq!(merged["org_did"], TEST_ORG_DID);
+        assert_eq!(merged["cycle_id"], "2025-06");
+        assert!(
+            merged.get("as_role").is_none(),
+            "as_role is a sidecar-routing hint and must be stripped from forwarded args"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_uses_default_role_when_as_role_absent() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "hr_admin")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"cycle_id": "2025-06"}))
+            .await
+            .expect("absent as_role must fall back to default_role");
+
+        assert_eq!(
+            merged["user_sig_b64u"], "usig-hr",
+            "default_role=hr_admin must select the HR credential when as_role is absent"
+        );
+        assert!(merged.get("as_role").is_none());
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_missing_role_errors_without_fallback() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(
+                serde_json::json!({"as_role": "treasurer"}),
+            )
+            .await
+            .expect_err("an as_role naming a role absent from the map must error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("treasurer"),
+            "error must name the requested role: {msg}"
+        );
+        assert!(
+            msg.contains("cfo") && msg.contains("hr_admin") && msg.contains("junior"),
+            "error must list the available roles: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_legacy_single_credential_still_works() {
+        // Legacy shape: top-level credential_jcs, no `roles` key.
+        let client = store_token(&make_token_json(TEST_ORG_DID)).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"cycle_id": "2025-06"}))
+            .await
+            .expect("legacy single-credential token must still inject");
+
+        assert_eq!(
+            merged["credential_jcs_b64u"],
+            make_credential_jcs_b64u(TEST_ORG_DID)
+        );
+        assert_eq!(merged["user_sig_b64u"], "usig-value");
+        assert_eq!(merged["org_did"], TEST_ORG_DID);
+    }
+
+    #[tokio::test]
+    async fn inject_legacy_single_credential_rejects_as_role() {
+        let client = store_token(&make_token_json(TEST_ORG_DID)).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "cfo"}))
+            .await
+            .expect_err("as_role against a legacy single credential must error");
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("as_role") && msg.contains("legacy"),
+            "error must explain the legacy single-credential mismatch: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_non_string_as_role_errors() {
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
+
+        let err = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": 42}))
+            .await
+            .expect_err("a non-string as_role must error");
+
+        assert!(
+            err.to_string().contains("'as_role' must be a string"),
+            "error must explain the as_role type requirement: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_role_map_strips_as_role_for_default_path_too() {
+        // Even when as_role is absent and default_role is used, no `as_role`
+        // field should ever be forwarded; this guards the no-hint path.
+        let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "junior")).await;
+
+        let merged = client
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "junior"}))
+            .await
+            .expect("explicit as_role=junior must select the junior credential");
+
+        assert_eq!(merged["user_sig_b64u"], "usig-junior");
+        assert!(merged.get("as_role").is_none());
     }
 
     // ── annotation-based delegation gating ──────────────────────────────────
