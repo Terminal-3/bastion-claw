@@ -276,8 +276,16 @@ impl DelegationToken {
     /// `credential_jcs` / `user_sig` strings, and a token that already passed
     /// write-time validation is trusted thereafter; `default_role` is consulted
     /// (and its absence reported) only at [`DelegationToken::select`] time, and
-    /// only when no `as_role` was supplied — matching the historical read-path
-    /// behaviour exactly.
+    /// only when no `as_role` was supplied.
+    ///
+    /// **Invariant:** the injection path (`parse_lenient` + [`DelegationToken::select`])
+    /// does not re-byte-validate the stored credential triple. This is sound
+    /// because the secret PUT handler's strict [`DelegationToken::parse`] is the
+    /// only sanctioned writer of the `t3n_delegation_token` secret, so every
+    /// stored token is fully validated at write time. The read path must not be
+    /// the entry point through which an unvalidated triple reaches a dispatch — if
+    /// a second writer is ever added, that writer must run the strict `parse`, or
+    /// this invariant breaks and the read path would need its own byte-check.
     pub(crate) fn parse_lenient(value: &str) -> Result<Self, DelegationTokenError> {
         Self::parse_structure(value)
     }

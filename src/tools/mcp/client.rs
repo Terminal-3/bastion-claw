@@ -770,8 +770,8 @@ impl McpClient {
             Some(serde_json::Value::String(s)) => Some(s),
             Some(other) => {
                 return Err(ToolError::ExternalService(format!(
-                    "t3n-mcp: 'as_role' must be a string (one of cfo / hr_admin / junior), \
-                     got {other}"
+                    "t3n-mcp: 'as_role' must be a string naming an approver role present in the \
+                     token (e.g. cfo, hr_admin), got {other}"
                 )));
             }
         };
