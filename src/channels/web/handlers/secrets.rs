@@ -447,7 +447,10 @@ mod tests {
         let token = serde_json::json!({ "roles": { "cfo": cred }, "default_role": "ceo" });
         let err = validate_delegation_token(&token.to_string()).unwrap_err();
         assert!(
-            matches!(err, DelegationTokenValidationError::DefaultRoleUnknown { .. }),
+            matches!(
+                err,
+                DelegationTokenValidationError::DefaultRoleUnknown { .. }
+            ),
             "expected DefaultRoleUnknown, got: {err:?}"
         );
         assert_eq!(err.field(), "default_role");

@@ -52,8 +52,9 @@ const ETH_SIG_LEN: usize = 65;
 const AGENT_PUBKEY_LEN: usize = 33;
 
 /// A fully-qualified Trinity organisation DID: `did:t3n:<40 lowercase hex>`.
-static ORG_DID_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^did:t3n:[0-9a-f]{40}$").expect("static regex"));
+static ORG_DID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^did:t3n:[0-9a-f]{40}$").expect("static org-DID regex compiles") // safety: compile-time literal pattern; a malformed regex is a programmer error caught on first use, not a runtime input failure
+});
 
 /// One delegation credential — the `{ credential_jcs, user_sig, agent_pubkey }`
 /// triple stored either at the top level (legacy single token) or under each
@@ -163,12 +164,10 @@ impl CredentialEntry {
         let get_inner_str = |field: &'static str| -> Result<&str, DelegationTokenError> {
             match inner.get(field) {
                 None => Err(DelegationTokenError::MissingInnerField { field }),
-                Some(v) => v
-                    .as_str()
-                    .ok_or(DelegationTokenError::WrongInnerType {
-                        field,
-                        expected: "string",
-                    }),
+                Some(v) => v.as_str().ok_or(DelegationTokenError::WrongInnerType {
+                    field,
+                    expected: "string",
+                }),
             }
         };
 
@@ -296,19 +295,16 @@ impl DelegationToken {
     /// required here — the two callers differ on when its absence is an error
     /// (see [`DelegationToken::parse`] vs [`DelegationToken::select`]).
     fn parse_structure(value: &str) -> Result<Self, DelegationTokenError> {
-        let token: serde_json::Value = serde_json::from_str(value).map_err(|e| {
-            DelegationTokenError::InvalidJson {
+        let token: serde_json::Value =
+            serde_json::from_str(value).map_err(|e| DelegationTokenError::InvalidJson {
                 reason: e.to_string(),
-            }
-        })?;
+            })?;
 
         if let Some(roles) = token.get("roles") {
-            let roles_obj = roles
-                .as_object()
-                .ok_or(DelegationTokenError::WrongType {
-                    field: "roles",
-                    expected: "object",
-                })?;
+            let roles_obj = roles.as_object().ok_or(DelegationTokenError::WrongType {
+                field: "roles",
+                expected: "object",
+            })?;
 
             let mut roles = BTreeMap::new();
             for (role, cred) in roles_obj {
@@ -556,11 +552,14 @@ impl std::fmt::Display for DelegationTokenError {
 
             // ── Structural variants the read path can hit at parse time ──────
             Self::InvalidJson { reason } => {
-                write!(f, "t3n-mcp: stored delegation token is not valid JSON: {reason}")
+                write!(
+                    f,
+                    "t3n-mcp: stored delegation token is not valid JSON: {reason}"
+                )
             }
-            Self::WrongType {
-                field: "roles", ..
-            } => write!(f, "t3n-mcp: delegation token 'roles' must be a JSON object"),
+            Self::WrongType { field: "roles", .. } => {
+                write!(f, "t3n-mcp: delegation token 'roles' must be a JSON object")
+            }
             Self::MissingField { field } => write!(
                 f,
                 "t3n-mcp: delegation token is missing required field '{field}'"
@@ -650,7 +649,10 @@ mod tests {
             "default_role": "ceo",
         });
         let err = DelegationToken::parse(&json.to_string()).unwrap_err();
-        assert!(matches!(err, DelegationTokenError::DefaultRoleUnknown { .. }));
+        assert!(matches!(
+            err,
+            DelegationTokenError::DefaultRoleUnknown { .. }
+        ));
         assert_eq!(err.field(), "default_role");
     }
 
@@ -722,16 +724,21 @@ mod tests {
 
     #[test]
     fn select_single_no_role() {
-        let token = DelegationToken::parse_lenient(&loose_single("usig-value").to_string()).unwrap();
+        let token =
+            DelegationToken::parse_lenient(&loose_single("usig-value").to_string()).unwrap();
         let entry = token.select(None).expect("single selects with no role");
         assert_eq!(entry.user_sig, "usig-value");
     }
 
     #[test]
     fn select_single_rejects_as_role() {
-        let token = DelegationToken::parse_lenient(&loose_single("usig-value").to_string()).unwrap();
+        let token =
+            DelegationToken::parse_lenient(&loose_single("usig-value").to_string()).unwrap();
         let err = token.select(Some("cfo")).unwrap_err();
-        assert!(matches!(err, DelegationTokenError::AsRoleAgainstSingle { .. }));
+        assert!(matches!(
+            err,
+            DelegationTokenError::AsRoleAgainstSingle { .. }
+        ));
         assert!(err.to_string().contains("as_role") && err.to_string().contains("legacy"));
     }
 

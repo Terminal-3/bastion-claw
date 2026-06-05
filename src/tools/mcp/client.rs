@@ -2814,9 +2814,7 @@ mod tests {
         let client = store_token(&make_role_map_token_json(TEST_ORG_DID, "cfo")).await;
 
         let err = client
-            .inject_t3n_delegation_credential(
-                serde_json::json!({"as_role": "treasurer"}),
-            )
+            .inject_t3n_delegation_credential(serde_json::json!({"as_role": "treasurer"}))
             .await
             .expect_err("an as_role naming a role absent from the map must error");
 
@@ -3581,7 +3579,10 @@ mod tests {
         let wrapper = wrapper_with_call_outcome(call_outcome);
 
         let err = wrapper
-            .execute(serde_json::json!({"cycle_id": "2025-06"}), &JobContext::default())
+            .execute(
+                serde_json::json!({"cycle_id": "2025-06"}),
+                &JobContext::default(),
+            )
             .await
             .expect_err("an insufficient-credit error must propagate as a tool error");
 
@@ -3625,7 +3626,10 @@ mod tests {
         let wrapper = wrapper_with_call_outcome(call_outcome);
 
         let err = wrapper
-            .execute(serde_json::json!({"cycle_id": "2025-06"}), &JobContext::default())
+            .execute(
+                serde_json::json!({"cycle_id": "2025-06"}),
+                &JobContext::default(),
+            )
             .await
             .expect_err("an is_error result must propagate as a tool error");
 
