@@ -31,6 +31,7 @@
 pub mod auth;
 mod client;
 pub mod config;
+pub(crate) mod delegation_token;
 pub mod factory;
 pub(crate) mod http_transport;
 pub(crate) mod process;

@@ -16,6 +16,7 @@ use crate::context::JobContext;
 use crate::secrets::SecretsStore;
 use crate::tools::mcp::auth::refresh_access_token;
 use crate::tools::mcp::config::McpServerConfig;
+use crate::tools::mcp::delegation_token::DelegationToken;
 use crate::tools::mcp::http_transport::HttpMcpTransport;
 use crate::tools::mcp::protocol::{
     CallToolResult, InitializeResult, ListToolsResult, McpRequest, McpResponse, McpTool,
@@ -697,7 +698,8 @@ impl McpClient {
     /// `user_sig_b64u` into `arguments` so the sidecar can forward them to the Trinity
     /// node via `runPayroll`'s schema fields.
     ///
-    /// The secret has two supported shapes (see `select_role_credential`):
+    /// The secret has two supported shapes, modelled by
+    /// [`DelegationToken`](crate::tools::mcp::delegation_token::DelegationToken):
     ///   - a multi-role map (`{ "roles": { ... }, "default_role": "cfo" }`) produced
     ///     by the SDK bootstrap, where each role names its own credential;
     ///   - a legacy single credential (top-level `credential_jcs` with no `roles`
@@ -738,11 +740,14 @@ impl McpClient {
 
         let token_str = raw.expose();
 
-        let token: serde_json::Value = serde_json::from_str(token_str).map_err(|e| {
-            ToolError::ExternalService(format!(
-                "t3n-mcp: stored delegation token is not valid JSON: {e}"
-            ))
-        })?;
+        // Parse the secret through the canonical model shared with the write
+        // path (`channels::web::handlers::secrets`). The read path is lenient:
+        // it performs the outer-JSON parse and the single-vs-role-map branch but
+        // does not re-byte-check a credential that already passed write-time
+        // validation. The model's `Display` reproduces the read path's historical
+        // wording for every structural failure.
+        let token = DelegationToken::parse_lenient(token_str)
+            .map_err(|e| ToolError::ExternalService(e.to_string()))?;
 
         // Build the working argument map up-front so we can read (and remove) the
         // `as_role` routing hint before selecting the credential.
@@ -771,8 +776,11 @@ impl McpClient {
             }
         };
 
-        let (credential_jcs, user_sig) =
-            select_role_credential(&token, requested_role.as_deref())?;
+        let entry = token
+            .select(requested_role.as_deref())
+            .map_err(|e| ToolError::ExternalService(e.to_string()))?;
+        let credential_jcs = entry.credential_jcs.clone();
+        let user_sig = entry.user_sig.clone();
 
         // Decode the inner credential JCS to extract org_did, which is injected
         // server-side so the LLM never needs to supply it (and can't substitute
@@ -972,105 +980,6 @@ impl McpClient {
         self.list_tools().await?;
         Ok(())
     }
-}
-
-/// Pull `(credential_jcs, user_sig)` from one entry of the stored delegation
-/// token, selecting the entry by approver role.
-///
-/// Two secret shapes are accepted:
-///
-/// 1. **Multi-role map** — `{ "roles": { "cfo": {…}, "hr_admin": {…},
-///    "junior": {…} }, "default_role": "cfo" }`. Each role names its own
-///    credential (`credential_jcs` / `user_sig`). `requested_role` (the call's
-///    `as_role` hint, e.g. "cfo") picks the entry; when absent, `default_role`
-///    is used. A `requested_role` (or `default_role`) that names a role missing
-///    from the map is a hard error — never silently fall back, so a wrong-role
-///    call surfaces rather than dispatching the wrong approver's credential.
-///
-/// 2. **Legacy single credential** — a top-level `credential_jcs` with no
-///    `roles` key. Treated as the only, role-agnostic credential. Passing an
-///    `as_role` against this shape is rejected, because there is no role to
-///    select and silently ignoring it would mask a misconfiguration.
-fn select_role_credential(
-    token: &serde_json::Value,
-    requested_role: Option<&str>,
-) -> Result<(String, String), ToolError> {
-    if let Some(roles) = token.get("roles") {
-        let roles = roles.as_object().ok_or_else(|| {
-            ToolError::ExternalService(
-                "t3n-mcp: delegation token 'roles' must be a JSON object".to_string(),
-            )
-        })?;
-
-        let role = match requested_role {
-            Some(r) => r.to_string(),
-            None => token
-                .get("default_role")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    ToolError::ExternalService(
-                        "t3n-mcp: delegation token has a 'roles' map but no 'default_role', \
-                         and the call supplied no 'as_role' — cannot pick a credential"
-                            .to_string(),
-                    )
-                })?
-                .to_string(),
-        };
-
-        let entry = roles.get(&role).ok_or_else(|| {
-            let mut available: Vec<&str> = roles.keys().map(String::as_str).collect();
-            available.sort_unstable();
-            ToolError::ExternalService(format!(
-                "t3n-mcp: no delegation credential for role '{role}' — \
-                 the stored token only provides roles [{}]. Pass `as_role` matching one of \
-                 those, or re-run the SDK bootstrap to upload the missing role.",
-                available.join(", ")
-            ))
-        })?;
-
-        extract_credential_pair(entry, &format!("role '{role}'"))
-    } else {
-        // Legacy single-credential shape — role-agnostic. An `as_role` here has
-        // nothing to select against, so reject it rather than ignore it.
-        if let Some(role) = requested_role {
-            return Err(ToolError::ExternalService(format!(
-                "t3n-mcp: call supplied as_role='{role}' but the stored delegation token is a \
-                 single legacy credential with no role map — re-run the SDK bootstrap to upload \
-                 the per-role credentials, or omit `as_role`."
-            )));
-        }
-        extract_credential_pair(token, "delegation token")
-    }
-}
-
-/// Read the `credential_jcs` / `user_sig` string pair out of a single credential
-/// object (either a legacy top-level token or one role entry of the map).
-/// `context` names the entry for error messages.
-fn extract_credential_pair(
-    entry: &serde_json::Value,
-    context: &str,
-) -> Result<(String, String), ToolError> {
-    let credential_jcs = entry
-        .get("credential_jcs")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            ToolError::ExternalService(format!(
-                "t3n-mcp: {context} is missing required field 'credential_jcs'"
-            ))
-        })?
-        .to_string();
-
-    let user_sig = entry
-        .get("user_sig")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            ToolError::ExternalService(format!(
-                "t3n-mcp: {context} is missing required field 'user_sig'"
-            ))
-        })?
-        .to_string();
-
-    Ok((credential_jcs, user_sig))
 }
 
 /// FE-emitted placeholder marking a delegation field that t3-claw must
