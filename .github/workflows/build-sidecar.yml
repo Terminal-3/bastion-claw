@@ -1,0 +1,86 @@
+name: Build t3n MCP Sidecar
+
+# Builds the t3n-mcp-sidecar Docker image and pushes it to GitHub Container
+# Registry (ghcr.io/terminal-3/t3n-mcp-sidecar).  The VPS then pulls this
+# pre-built image — no GITHUB_TOKEN required on the host at deploy time.
+#
+# Image visibility: by default GHCR inherits the repo's visibility (private).
+# To allow unauthenticated pulls on a VPS, make the package public:
+#   github.com/orgs/Terminal-3/packages → t3n-mcp-sidecar → Package settings → Change visibility
+# Otherwise, VPS hosts need a one-time login:
+#   echo $GHCR_TOKEN | docker login ghcr.io -u <github-username> --password-stdin
+# (A classic PAT with read:packages scope is sufficient — no write access needed.)
+
+on:
+  # Disabled: push trigger removed until sidecar CI is re-enabled.
+  # Allow manual re-builds from the Actions UI.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and push
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      # Pin the bundled trinity tool surface to a reviewed commit rather than
+      # floating on trinity main — a silent main change would alter the MCP
+      # tools the agent sees. Single source of truth: .github/trinity-sdk-ref.
+      - name: Resolve pinned trinity ref
+        id: trinity_ref
+        run: |
+          ref="$(grep -vE '^[[:space:]]*#' .github/trinity-sdk-ref | grep -vE '^[[:space:]]*$' | head -1 | tr -d '[:space:]')"
+          if [ -z "$ref" ]; then
+            echo "::error::.github/trinity-sdk-ref holds no SHA — refusing to float on trinity main"
+            exit 1
+          fi
+          echo "Pinned trinity ref: $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout trinity (sidecar sources)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: Terminal-3/trinity
+          ref: ${{ steps.trinity_ref.outputs.ref }}
+          path: trinity
+          token: ${{ secrets.TRINITY_CHECKOUT_TOKEN }}
+
+      - name: Verify trinity build context
+        run: |
+          test -f trinity/client/pnpm-lock.yaml
+          test -d trinity/client/t3n-sdk
+          test -d trinity/client/mcp/t3n-mcp
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
+
+      - name: Build and push
+        uses: useblacksmith/build-push-action@v2
+        with:
+          context: .
+          file: docker/t3n-mcp-sidecar.Dockerfile
+          build-contexts: |
+            trinity_client=trinity/client
+          push: true
+          tags: |
+            ghcr.io/terminal-3/t3n-mcp-sidecar:latest
+            ghcr.io/terminal-3/t3n-mcp-sidecar:sha-${{ github.sha }}
+          # Pass the Actions GITHUB_TOKEN as a build secret so it is never
+          # baked into an image layer.  It has read:packages on the org, which
+          # is all that npm install @terminal-3/t3n-mcp requires.
+          secrets: |
+            npm_github_token=${{ secrets.NPM_GITHUB_TOKEN }}
