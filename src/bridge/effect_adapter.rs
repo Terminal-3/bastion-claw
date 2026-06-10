@@ -3822,12 +3822,12 @@ mod tests {
     #[tokio::test]
     async fn restart_uses_default_permission_floor_without_explicit_override() {
         let _guard = crate::config::helpers::lock_env();
-        let original_in_docker = std::env::var_os("IRONCLAW_IN_DOCKER");
-        let original_disable_restart = std::env::var_os("IRONCLAW_DISABLE_RESTART");
+        let original_in_docker = std::env::var_os("T3CLAW_IN_DOCKER");
+        let original_disable_restart = std::env::var_os("T3CLAW_DISABLE_RESTART");
         // SAFETY: This test serializes env access with lock_env().
         unsafe {
-            std::env::set_var("IRONCLAW_IN_DOCKER", "true");
-            std::env::set_var("IRONCLAW_DISABLE_RESTART", "true");
+            std::env::set_var("T3CLAW_IN_DOCKER", "true");
+            std::env::set_var("T3CLAW_DISABLE_RESTART", "true");
         }
 
         let adapter = make_restart_adapter_with_permission(None).await;
@@ -3848,14 +3848,14 @@ mod tests {
         // SAFETY: This test serializes env access with lock_env().
         unsafe {
             if let Some(value) = original_in_docker {
-                std::env::set_var("IRONCLAW_IN_DOCKER", value);
+                std::env::set_var("T3CLAW_IN_DOCKER", value);
             } else {
-                std::env::remove_var("IRONCLAW_IN_DOCKER");
+                std::env::remove_var("T3CLAW_IN_DOCKER");
             }
             if let Some(value) = original_disable_restart {
-                std::env::set_var("IRONCLAW_DISABLE_RESTART", value);
+                std::env::set_var("T3CLAW_DISABLE_RESTART", value);
             } else {
-                std::env::remove_var("IRONCLAW_DISABLE_RESTART");
+                std::env::remove_var("T3CLAW_DISABLE_RESTART");
             }
         }
 
@@ -3871,12 +3871,12 @@ mod tests {
     #[tokio::test]
     async fn restart_explicit_always_allow_override_bypasses_default_gate() {
         let _guard = crate::config::helpers::lock_env();
-        let original_in_docker = std::env::var_os("IRONCLAW_IN_DOCKER");
-        let original_disable_restart = std::env::var_os("IRONCLAW_DISABLE_RESTART");
+        let original_in_docker = std::env::var_os("T3CLAW_IN_DOCKER");
+        let original_disable_restart = std::env::var_os("T3CLAW_DISABLE_RESTART");
         // SAFETY: This test serializes env access with lock_env().
         unsafe {
-            std::env::set_var("IRONCLAW_IN_DOCKER", "true");
-            std::env::set_var("IRONCLAW_DISABLE_RESTART", "true");
+            std::env::set_var("T3CLAW_IN_DOCKER", "true");
+            std::env::set_var("T3CLAW_DISABLE_RESTART", "true");
         }
 
         let adapter = make_restart_adapter_with_permission(Some(
@@ -3900,14 +3900,14 @@ mod tests {
         // SAFETY: This test serializes env access with lock_env().
         unsafe {
             if let Some(value) = original_in_docker {
-                std::env::set_var("IRONCLAW_IN_DOCKER", value);
+                std::env::set_var("T3CLAW_IN_DOCKER", value);
             } else {
-                std::env::remove_var("IRONCLAW_IN_DOCKER");
+                std::env::remove_var("T3CLAW_IN_DOCKER");
             }
             if let Some(value) = original_disable_restart {
-                std::env::set_var("IRONCLAW_DISABLE_RESTART", value);
+                std::env::set_var("T3CLAW_DISABLE_RESTART", value);
             } else {
-                std::env::remove_var("IRONCLAW_DISABLE_RESTART");
+                std::env::remove_var("T3CLAW_DISABLE_RESTART");
             }
         }
 

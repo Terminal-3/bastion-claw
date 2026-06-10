@@ -3,8 +3,8 @@
 //! ## Architecture
 //!
 //! T3Claw runs inside a Docker container with an entrypoint loop that monitors exit codes:
-//! - **Exit code 0** (clean): Reset failure counter, wait `IRONCLAW_RESTART_DELAY` (default 5s), restart
-//! - **Exit code ≠ 0** (failure): Increment failure counter, exit after `IRONCLAW_MAX_FAILURES` (default 10)
+//! - **Exit code 0** (clean): Reset failure counter, wait `T3CLAW_RESTART_DELAY` (default 5s), restart
+//! - **Exit code ≠ 0** (failure): Increment failure counter, exit after `T3CLAW_MAX_FAILURES` (default 10)
 //!
 //! This tool triggers a restart by calling `std::process::exit(0)` after a brief delay, allowing
 //! the HTTP response to be flushed before the process terminates. The entrypoint loop then
@@ -71,14 +71,14 @@ impl Tool for RestartTool {
         tracing::info!("[RestartTool::execute] Restart tool invoked");
         let start = std::time::Instant::now();
 
-        // Check if running inside a Docker container via IRONCLAW_IN_DOCKER env var.
+        // Check if running inside a Docker container via T3CLAW_IN_DOCKER env var.
         // The Docker entrypoint sets this to "true". For local development, it's unset or "false".
         // The entrypoint restart loop only works inside a Docker container (t3claw-worker).
-        let in_docker = std::env::var("IRONCLAW_IN_DOCKER")
+        let in_docker = std::env::var("T3CLAW_IN_DOCKER")
             .map(|v| v.to_lowercase() == "true")
             .unwrap_or(false);
 
-        tracing::debug!("[RestartTool::execute] IRONCLAW_IN_DOCKER={}", in_docker);
+        tracing::debug!("[RestartTool::execute] T3CLAW_IN_DOCKER={}", in_docker);
 
         if !in_docker {
             tracing::error!("[RestartTool::execute] Not in Docker, rejecting restart");
@@ -103,9 +103,9 @@ impl Tool for RestartTool {
         //
         // - The t3claw-worker Docker container runs an entrypoint loop that monitors
         //   the exit code of the `t3claw run` process:
-        //   * Exit code 0 = clean restart: reset failure counter, wait IRONCLAW_RESTART_DELAY
+        //   * Exit code 0 = clean restart: reset failure counter, wait T3CLAW_RESTART_DELAY
         //     (default 5s), then restart the process
-        //   * Exit code ≠ 0 = failure: increment counter, exit after IRONCLAW_MAX_FAILURES
+        //   * Exit code ≠ 0 = failure: increment counter, exit after T3CLAW_MAX_FAILURES
         //     (default 10 failures)
         //
         // - std::process::exit(0) is a hard exit (no destructors, no graceful shutdown).
@@ -119,7 +119,7 @@ impl Tool for RestartTool {
         //   to properly drain Axum, close DB connections, and checkpoint jobs.
         // Check if restart is disabled (e.g., in tests). This allows tests to verify
         // parameter parsing and output without actually terminating the process.
-        let restart_disabled = std::env::var("IRONCLAW_DISABLE_RESTART")
+        let restart_disabled = std::env::var("T3CLAW_DISABLE_RESTART")
             .map(|v| {
                 let v = v.to_lowercase();
                 v == "1" || v == "true"
@@ -139,7 +139,7 @@ impl Tool for RestartTool {
                 std::process::exit(0);
             } else {
                 tracing::info!(
-                    "[RestartTool] Exit disabled (IRONCLAW_DISABLE_RESTART set), skipping std::process::exit(0)"
+                    "[RestartTool] Exit disabled (T3CLAW_DISABLE_RESTART set), skipping std::process::exit(0)"
                 );
             }
         });
@@ -188,13 +188,13 @@ mod tests {
     impl DockerEnvGuard {
         fn enable() -> Self {
             let lock = EnvLockGuard::new();
-            let original_in_docker = std::env::var_os("IRONCLAW_IN_DOCKER");
-            let original_disable_restart = std::env::var_os("IRONCLAW_DISABLE_RESTART");
+            let original_in_docker = std::env::var_os("T3CLAW_IN_DOCKER");
+            let original_disable_restart = std::env::var_os("T3CLAW_DISABLE_RESTART");
             // SAFETY: Tests serialize env access with lock_env().
             unsafe {
-                std::env::set_var("IRONCLAW_IN_DOCKER", "true");
+                std::env::set_var("T3CLAW_IN_DOCKER", "true");
                 // Keep restart tests from terminating the shared lib-test process.
-                std::env::set_var("IRONCLAW_DISABLE_RESTART", "true");
+                std::env::set_var("T3CLAW_DISABLE_RESTART", "true");
             }
             Self {
                 _lock: lock,
@@ -209,14 +209,14 @@ mod tests {
             // SAFETY: Tests serialize env access with lock_env().
             unsafe {
                 if let Some(ref value) = self.original_in_docker {
-                    std::env::set_var("IRONCLAW_IN_DOCKER", value);
+                    std::env::set_var("T3CLAW_IN_DOCKER", value);
                 } else {
-                    std::env::remove_var("IRONCLAW_IN_DOCKER");
+                    std::env::remove_var("T3CLAW_IN_DOCKER");
                 }
                 if let Some(ref value) = self.original_disable_restart {
-                    std::env::set_var("IRONCLAW_DISABLE_RESTART", value);
+                    std::env::set_var("T3CLAW_DISABLE_RESTART", value);
                 } else {
-                    std::env::remove_var("IRONCLAW_DISABLE_RESTART");
+                    std::env::remove_var("T3CLAW_DISABLE_RESTART");
                 }
             }
         }
@@ -515,18 +515,18 @@ mod tests {
     #[test]
     fn test_restart_tool_requires_docker_environment() {
         let _env_lock = crate::config::helpers::lock_env();
-        // Test that restart is rejected when not in Docker (IRONCLAW_IN_DOCKER not set or false)
+        // Test that restart is rejected when not in Docker (T3CLAW_IN_DOCKER not set or false)
         // Uses sync test to avoid async/env var ordering issues with test parallelization.
-        let in_docker = std::env::var("IRONCLAW_IN_DOCKER")
+        let in_docker = std::env::var("T3CLAW_IN_DOCKER")
             .map(|v| v.to_lowercase() == "true")
             .unwrap_or(false);
 
         // Verify logic: when not in Docker, env var should be false/unset
         if !in_docker {
-            // Simulating what the tool would do when IRONCLAW_IN_DOCKER is not set
+            // Simulating what the tool would do when T3CLAW_IN_DOCKER is not set
             assert!(
                 !in_docker,
-                "Test environment should have IRONCLAW_IN_DOCKER unset or false"
+                "Test environment should have T3CLAW_IN_DOCKER unset or false"
             );
         }
     }
