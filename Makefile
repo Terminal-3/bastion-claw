@@ -41,7 +41,7 @@ SIDECAR_SERVICE := t3n-mcp-sidecar
 SIDECAR_REGISTRY_IMAGE := ghcr.io/terminal-3/t3n-mcp-sidecar:latest
 SIDECAR_RUNTIME_IMAGE := t3claw/t3n-mcp-sidecar:local
 
-.PHONY: up build rebuild rebuild-claw up-no-t3n build-no-t3n rebuild-no-t3n build-sidecar rebuild-sidecar pull-sidecar down wipe wipe-all restart logs shell status help
+.PHONY: up build rebuild rebuild-claw up-no-t3n build-no-t3n rebuild-no-t3n build-sidecar rebuild-sidecar push-sidecar-gcp pull-sidecar down wipe wipe-all restart logs shell status help
 
 ## Start the full stack (detached). Builds images if they don't exist yet.
 up:
@@ -80,6 +80,17 @@ build-no-t3n:
 ## Build without sidecar then restart.
 rebuild-no-t3n: build-no-t3n
 	$(COMPOSE_CORE) up -d
+
+## Build the t3n-mcp-sidecar image for linux/amd64 and push to GCP Artifact Registry.
+## Requires the ../trinity repo to be checked out as a sibling directory.
+## Usage: make push-sidecar-gcp
+push-sidecar-gcp:
+	docker buildx build --platform linux/amd64 \
+		--build-context trinity_mcp=../trinity/client/mcp/t3n-mcp \
+		--build-context trinity_shared=../trinity/client/shared \
+		-f docker/t3n-mcp-sidecar.Dockerfile \
+		-t us-central1-docker.pkg.dev/gen-lang-client-0263867259/t3claw/t3n-mcp-sidecar:latest \
+		--push .
 
 ## Build the t3n-mcp-sidecar image locally for the compose stack.
 ## Requires the ../trinity repo to be checked out as a sibling directory.
