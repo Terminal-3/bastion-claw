@@ -15,7 +15,7 @@ Multi-user isolation assertion: a second user in a separate session gets its
 own independent ``auth_required`` event with a separate ``flow_id``.
 
 Browser tests are skeleton-only (``pytest.mark.skip``) until the binary
-includes the ``webui-v2-beta`` feature and the ``IRONCLAW_REBORN_WEBUI_TOKEN``
+includes the ``webui-v2-beta`` feature and the ``T3CLAW_REBORN_WEBUI_TOKEN``
 env is wired in the E2E environment.
 """
 
@@ -120,11 +120,11 @@ def _reset_mocks(mock_idp, mock_google_api):
 
 
 @pytest.fixture(scope="module")
-async def v2_gsuite_server(ironclaw_binary, mock_llm_server, mock_idp, mock_google_api, tmp_path_factory):
-    """Start ironclaw for GSuite OAuth E2E tests."""
+async def v2_gsuite_server(t3claw_binary, mock_llm_server, mock_idp, mock_google_api, tmp_path_factory):
+    """Start t3claw for GSuite OAuth E2E tests."""
     home_dir = str(tmp_path_factory.mktemp("gsuite-home"))
     db_dir = str(tmp_path_factory.mktemp("gsuite-db"))
-    skills_dir = os.path.join(home_dir, ".ironclaw", "skills")
+    skills_dir = os.path.join(home_dir, ".t3claw", "skills")
     os.makedirs(skills_dir, exist_ok=True)
     mock_api_host = urlparse(mock_google_api.base_url).netloc
     _write_gmail_skill(skills_dir, mock_api_host, mock_idp.token_url)
@@ -140,7 +140,7 @@ async def v2_gsuite_server(ironclaw_binary, mock_llm_server, mock_idp, mock_goog
 
     port = _reserve_loopback_port()
     async with _start_engine_v2_server(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server=mock_llm_server,
         port=port,
         home_dir=home_dir,
@@ -421,7 +421,7 @@ class TestGSuiteOAuthWireShape:
 
 @pytest.mark.skip(
     reason=(
-        "Playwright browser test requires ironclaw binary compiled with "
+        "Playwright browser test requires t3claw binary compiled with "
         "webui-v2-beta feature. Enable by building with: "
         "cargo build --features libsql,webui-v2-beta"
     )

@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use ironclaw_engine::{ActionDef, ActionDiscoverySummary, ActionInventory};
+use t3claw_engine::{ActionDef, ActionDiscoverySummary, ActionInventory};
 
 use crate::tools::require_str;
 use crate::tools::{ToolError, ToolOutput};
@@ -141,7 +141,7 @@ fn fallback_summary(schema: &serde_json::Value) -> ActionDiscoverySummary {
 #[cfg(test)]
 mod tests {
     use super::ActionDiscovery;
-    use ironclaw_engine::{
+    use t3claw_engine::{
         ActionDef, ActionDiscoveryMetadata, ActionDiscoverySummary, ActionInventory,
         ModelToolSurface,
     };

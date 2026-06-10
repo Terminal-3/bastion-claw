@@ -4,13 +4,13 @@ use std::{
 };
 
 use async_trait::async_trait;
-use ironclaw_loop_support::{
+use t3claw_loop_support::{
     HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
     HostIdentityMessageContent, IdentityApplicability, IdentityFileName,
     identity_applicability_allowed_for_run, identity_message_ref,
 };
-use ironclaw_memory::DEFAULT_PROMPT_PROTECTED_PATHS;
-use ironclaw_turns::{
+use t3claw_memory::DEFAULT_PROMPT_PROTECTED_PATHS;
+use t3claw_turns::{
     LoopMessageRef,
     run_profile::{LoopRunContext, PersonalContextPolicy, PromptMode},
 };
@@ -430,8 +430,8 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     async fn run_context() -> LoopRunContext {
-        use ironclaw_host_api::{TenantId, ThreadId};
-        use ironclaw_turns::{
+        use t3claw_host_api::{TenantId, ThreadId};
+        use t3claw_turns::{
             RunProfileResolutionRequest, RunProfileResolver, TurnId, TurnRunId, TurnScope,
             run_profile::InMemoryRunProfileResolver,
         };

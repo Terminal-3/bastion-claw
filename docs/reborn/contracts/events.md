@@ -1,15 +1,15 @@
-# IronClaw Reborn events and audit contract
+# T3Claw Reborn events and audit contract
 
 **Date:** 2026-04-25
 **Status:** V1 contract slice
-**Crate:** `crates/ironclaw_events`
+**Crate:** `crates/t3claw_events`
 **Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/dispatcher.md`, `docs/reborn/contracts/live-vertical-slice.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_events` defines two separate observability surfaces:
+`t3claw_events` defines two separate observability surfaces:
 
 ```text
 Runtime/process events -> RuntimeEvent + EventSink
@@ -68,7 +68,7 @@ Approval-specific runtime event kinds are deliberately absent. Approval resoluti
 
 ## 3. Audit sink shape
 
-`ironclaw_events` provides an async `AuditSink` for control-plane audit records:
+`t3claw_events` provides an async `AuditSink` for control-plane audit records:
 
 ```rust
 #[async_trait]
@@ -172,7 +172,7 @@ Runtime dispatcher event emission is best-effort observability. If the configure
 
 ## 8. Process lifecycle events
 
-`ironclaw_processes::EventingProcessStore` can emit lifecycle events around successful process state transitions:
+`t3claw_processes::EventingProcessStore` can emit lifecycle events around successful process state transitions:
 
 ```text
 start    -> process_started
@@ -192,7 +192,7 @@ ProcessId
 optional sanitized error_kind for process_failed
 ```
 
-Process event emission is observability for this slice. It is deliberately outside `ironclaw_dispatcher`, so dispatcher remains process-blind and continues to route only already-authorized runtime dispatch requests.
+Process event emission is observability for this slice. It is deliberately outside `t3claw_dispatcher`, so dispatcher remains process-blind and continues to route only already-authorized runtime dispatch requests.
 
 ---
 

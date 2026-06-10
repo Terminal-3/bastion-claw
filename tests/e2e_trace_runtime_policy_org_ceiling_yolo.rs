@@ -1,18 +1,18 @@
 //! Resolver invariant tests: org-policy ceiling × yolo narrowing.
 //!
 //! Complements the in-crate resolver tests in
-//! `crates/ironclaw_runtime_policy/src/resolver.rs:435-917` by promoting
+//! `crates/t3claw_runtime_policy/src/resolver.rs:435-917` by promoting
 //! a few high-stakes properties to the integration tier with **typed-error**
 //! pattern matches (not `is_err()`) and explicit `was_reduced()` assertions
 //! on the narrowed shape.
 //!
 //! All tests are pure resolver-property — no agent loop, no DB.
 
-use ironclaw_host_api::runtime_policy::{
+use t3claw_host_api::runtime_policy::{
     ApprovalPolicy, DeploymentMode, FilesystemBackendKind, NetworkMode, ProcessBackendKind,
     RuntimeProfile,
 };
-use ironclaw_runtime_policy::{OrgPolicyConstraints, ResolveError, ResolveRequest, resolve};
+use t3claw_runtime_policy::{OrgPolicyConstraints, ResolveError, ResolveRequest, resolve};
 
 #[test]
 fn local_yolo_with_local_safe_ceiling_narrows_to_local_safe_with_ask_writes_and_was_reduced_true() {

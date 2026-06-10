@@ -22,14 +22,14 @@ trap 'rm -rf "${workdir}"' EXIT
 cat > "${workdir}/failed.log" <<'LOG'
 Build step noise
 E2E (features)	Run E2E tests (features)	FAILED tests/e2e/scenarios/test_tool_approval.py::test_approval_flow - AssertionError: expected approval dialog
-Rust tests	Run Tests	thread 'runtime::manager::tests::stop_thread_works' panicked at crates/ironclaw_engine/src/runtime/manager.rs:123:5
+Rust tests	Run Tests	thread 'runtime::manager::tests::stop_thread_works' panicked at crates/t3claw_engine/src/runtime/manager.rs:123:5
 Coverage	Generate coverage	Error: No space left on device
 Runner	Complete job	Process completed with exit code 101.
 LOG
 
 extract_failure_excerpt "${workdir}/failed.log" "${workdir}/excerpt.txt" 20
 assert_contains "${workdir}/excerpt.txt" "FAILED tests/e2e/scenarios/test_tool_approval.py::test_approval_flow"
-assert_contains "${workdir}/excerpt.txt" "panicked at crates/ironclaw_engine/src/runtime/manager.rs"
+assert_contains "${workdir}/excerpt.txt" "panicked at crates/t3claw_engine/src/runtime/manager.rs"
 assert_contains "${workdir}/excerpt.txt" "No space left on device"
 assert_contains "${workdir}/excerpt.txt" "Process completed with exit code 101"
 

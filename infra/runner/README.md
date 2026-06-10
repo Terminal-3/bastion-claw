@@ -9,7 +9,7 @@ thread, for the reasoning — the short version is:
 - The lane runs a real code-for-token grant + refresh against Google.
 - The provider OAuth app has a fixed redirect URI bound to this runner's
   egress IP / hostname.
-- Rotated refresh tokens are written to ironclaw's libsql DB and must
+- Rotated refresh tokens are written to t3claw's libsql DB and must
   survive container restarts.
 
 None of that works on rotating GitHub-hosted runner IPs or ephemeral
@@ -33,7 +33,7 @@ actually exercises it.
   (`infra/runner/`). Railway will build the `Dockerfile` on push.
 - Attach a **persistent volume** to the service, mounted at
   `/runner-data`. Size ~20 GB — covers runner self-updates, cargo/rustup
-  caches, ironclaw `target/`, and the libsql DB.
+  caches, t3claw `target/`, and the libsql DB.
 - Set the deploy strategy to **"Overlap: off" / Recreate** (not rolling):
   rolling deploys could kill a container mid-OAuth-refresh, leaving the
   refresh token rotated on the provider side but not persisted locally.
@@ -52,7 +52,7 @@ feature). Write down the IP — you'll register it in step 4.
   - `GH_RUNNER_TOKEN` = the token from the step above (one-shot)
   - `RUNNER_NAME` = e.g. `railway-private-oauth` (optional, defaults to
     that)
-  - `RUNNER_LABELS` = `self-hosted,ironclaw-live` (optional, defaults to
+  - `RUNNER_LABELS` = `self-hosted,t3claw-live` (optional, defaults to
     that — must include both for the workflow's `runs-on` match)
 - Deploy. The container boots, `entrypoint.sh` downloads the runner,
   `./config.sh` registers it, and `./run.sh` starts polling.
@@ -132,7 +132,7 @@ provider invalidated the session), the lane fails with a token-refresh
 error. Recovery:
 
 1. Trigger the `drive_auth_gate_roundtrip` flow manually against the
-   runner (via the normal ironclaw onboarding UI, pointed at the
+   runner (via the normal t3claw onboarding UI, pointed at the
    runner's gateway).
 2. That re-mints a fresh refresh token and writes it to the volume DB.
 3. Re-run `private-oauth`.
@@ -162,5 +162,5 @@ state. After wipe:
 |--------|----------|-----|
 | `GH_RUNNER_TOKEN` | Railway env (then deleted after first boot) | One-shot registration token. Expires in ~1h. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` | **Railway env** | The lane's `private-oauth` job deliberately doesn't expose these via `env:` — the runner is the identity. |
-| Rotated OAuth refresh tokens | Runner volume (`/runner-data/home/.ironclaw/…libsql db`) | Must survive container restart. Encrypted at rest by Railway. |
+| Rotated OAuth refresh tokens | Runner volume (`/runner-data/home/.t3claw/…libsql db`) | Must survive container restart. Encrypted at rest by Railway. |
 | Any `AUTH_LIVE_*` tokens | GitHub Actions secrets | Used by `auth-live-seeded` (a different lane, on `ubuntu-latest`). Not this lane. |

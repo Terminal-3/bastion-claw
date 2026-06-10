@@ -24,61 +24,61 @@ run_test() {
 }
 
 run_architecture() {
-  run_test ironclaw_architecture reborn_dependency_boundaries
-  run_test ironclaw_host_runtime host_runtime_contract
-  run_test ironclaw_host_runtime host_runtime_services_contract
-  run_test ironclaw_host_runtime reborn_e2e_gate
-  run_test ironclaw_host_runtime reborn_invoke_vertical_slice
-  run_test ironclaw_host_runtime runtime_http_egress_contract
-  run_test ironclaw_host_runtime builtin_obligation_handler_contract
-  run_test ironclaw_host_runtime obligation_services_composition_contract
-  run_test ironclaw_host_runtime production_trust_contract
-  run_test ironclaw_capabilities capability_boundary_contract
-  run_test ironclaw_capabilities capability_host_contract
-  run_test ironclaw_capabilities capability_host_dispatcher_integration
-  run_test ironclaw_capabilities capability_host_process_integration
-  run_test ironclaw_capabilities capability_host_run_state_contract
-  run_test ironclaw_capabilities capability_host_spawn_contract
-  run_test ironclaw_capabilities capability_obligation_handler_contract
+  run_test t3claw_architecture reborn_dependency_boundaries
+  run_test t3claw_host_runtime host_runtime_contract
+  run_test t3claw_host_runtime host_runtime_services_contract
+  run_test t3claw_host_runtime reborn_e2e_gate
+  run_test t3claw_host_runtime reborn_invoke_vertical_slice
+  run_test t3claw_host_runtime runtime_http_egress_contract
+  run_test t3claw_host_runtime builtin_obligation_handler_contract
+  run_test t3claw_host_runtime obligation_services_composition_contract
+  run_test t3claw_host_runtime production_trust_contract
+  run_test t3claw_capabilities capability_boundary_contract
+  run_test t3claw_capabilities capability_host_contract
+  run_test t3claw_capabilities capability_host_dispatcher_integration
+  run_test t3claw_capabilities capability_host_process_integration
+  run_test t3claw_capabilities capability_host_run_state_contract
+  run_test t3claw_capabilities capability_host_spawn_contract
+  run_test t3claw_capabilities capability_obligation_handler_contract
 }
 
 run_runtimes() {
-  run_test ironclaw_dispatcher boundary_contract
-  run_test ironclaw_dispatcher dispatch_contract
-  run_test ironclaw_dispatcher event_dispatch_contract
-  run_test ironclaw_dispatcher runtime_dispatcher_integration
-  run_test ironclaw_dispatcher vertical_slice_contract
-  run_test ironclaw_wasm wasm_dispatch_integration
-  run_test ironclaw_wasm wasm_http_adapter_contract
-  run_test ironclaw_wasm wit_tool_runtime_contract
-  run_test ironclaw_scripts script_dispatch_integration
-  run_test ironclaw_scripts script_http_adapter_contract
-  run_test ironclaw_scripts script_runner_contract
-  run_test ironclaw_mcp mcp_adapter_contract
-  run_test ironclaw_mcp mcp_dispatch_integration
-  run_test ironclaw_processes process_dispatch_integration
-  run_test ironclaw_processes process_host_contract
-  run_test ironclaw_processes process_services_contract
-  run_test ironclaw_processes process_store_contract
+  run_test t3claw_dispatcher boundary_contract
+  run_test t3claw_dispatcher dispatch_contract
+  run_test t3claw_dispatcher event_dispatch_contract
+  run_test t3claw_dispatcher runtime_dispatcher_integration
+  run_test t3claw_dispatcher vertical_slice_contract
+  run_test t3claw_wasm wasm_dispatch_integration
+  run_test t3claw_wasm wasm_http_adapter_contract
+  run_test t3claw_wasm wit_tool_runtime_contract
+  run_test t3claw_scripts script_dispatch_integration
+  run_test t3claw_scripts script_http_adapter_contract
+  run_test t3claw_scripts script_runner_contract
+  run_test t3claw_mcp mcp_adapter_contract
+  run_test t3claw_mcp mcp_dispatch_integration
+  run_test t3claw_processes process_dispatch_integration
+  run_test t3claw_processes process_host_contract
+  run_test t3claw_processes process_services_contract
+  run_test t3claw_processes process_store_contract
 }
 
 run_substrates() {
-  run_test ironclaw_events durable_log_contract
-  run_test ironclaw_filesystem catalog_contract
-  run_test ironclaw_filesystem filesystem_contract
-  run_test ironclaw_network boundary_contract
-  run_test ironclaw_network network_http_egress_contract
-  run_test ironclaw_network network_policy_contract
-  run_test ironclaw_secrets boundary_contract
-  run_test ironclaw_secrets secret_store_contract
-  run_test ironclaw_resources resource_governor_contract
-  run_test ironclaw_run_state approval_resolution_contract
-  run_test ironclaw_run_state run_state_contract
-  run_test ironclaw_approvals approval_resolution_contract
-  run_test ironclaw_approvals boundary_contract
-  run_test ironclaw_authorization boundary_contract
-  run_test ironclaw_authorization capability_access_contract
-  run_test ironclaw_authorization capability_lease_contract
+  run_test t3claw_events durable_log_contract
+  run_test t3claw_filesystem catalog_contract
+  run_test t3claw_filesystem filesystem_contract
+  run_test t3claw_network boundary_contract
+  run_test t3claw_network network_http_egress_contract
+  run_test t3claw_network network_policy_contract
+  run_test t3claw_secrets boundary_contract
+  run_test t3claw_secrets secret_store_contract
+  run_test t3claw_resources resource_governor_contract
+  run_test t3claw_run_state approval_resolution_contract
+  run_test t3claw_run_state run_state_contract
+  run_test t3claw_approvals approval_resolution_contract
+  run_test t3claw_approvals boundary_contract
+  run_test t3claw_authorization boundary_contract
+  run_test t3claw_authorization capability_access_contract
+  run_test t3claw_authorization capability_lease_contract
 }
 
 case "${group}" in

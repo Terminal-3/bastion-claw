@@ -1,6 +1,6 @@
 """Full-process Telegram E2E tests.
 
-Boot IronClaw → activate Telegram via setup API → POST webhook updates
+Boot T3Claw → activate Telegram via setup API → POST webhook updates
 → verify sendMessage round-trip through mock LLM to fake Telegram API.
 """
 
@@ -280,7 +280,7 @@ async def pair_telegram_user(
     user_id: int,
     first_name: str,
 ) -> int:
-    """Pair an arbitrary Telegram user to the current IronClaw owner scope.
+    """Pair an arbitrary Telegram user to the current T3Claw owner scope.
 
     Returns the webhook update_id used for the pairing message so callers can
     send strictly newer updates afterward. Telegram update IDs are monotonic,
@@ -414,7 +414,7 @@ async def post_telegram_webhook(
     *,
     secret: str | None = None,
 ) -> httpx.Response:
-    """POST a Telegram-shaped update to IronClaw's webhook endpoint."""
+    """POST a Telegram-shaped update to T3Claw's webhook endpoint."""
     headers = {"Content-Type": "application/json"}
     if secret is not None:
         headers["X-Telegram-Bot-Api-Secret-Token"] = secret

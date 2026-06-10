@@ -214,13 +214,13 @@ Implementation should verify at least:
 ## Files likely involved
 
 Primary:
-- `crates/ironclaw_gateway/static/js/surfaces/projects.js`
-- `crates/ironclaw_gateway/static/styles/surfaces/projects.css` (if present)
-- `crates/ironclaw_gateway/static/styles/surfaces/missions.css` only if shared patterns are intentionally reused
-- `crates/ironclaw_gateway/static/index.html` if layout hooks need adjustment
+- `crates/t3claw_gateway/static/js/surfaces/projects.js`
+- `crates/t3claw_gateway/static/styles/surfaces/projects.css` (if present)
+- `crates/t3claw_gateway/static/styles/surfaces/missions.css` only if shared patterns are intentionally reused
+- `crates/t3claw_gateway/static/index.html` if layout hooks need adjustment
 
 Possible supporting files:
-- routing/navigation helpers under `crates/ironclaw_gateway/static/js/core/`
+- routing/navigation helpers under `crates/t3claw_gateway/static/js/core/`
 - shared markdown rendering styles if thread-inspector typography should be reused elsewhere
 
 ## Implementation recommendation

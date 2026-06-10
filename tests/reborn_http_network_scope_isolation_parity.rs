@@ -3,16 +3,16 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_host_api::{CapabilityId, NetworkPolicy, NetworkScheme, NetworkTargetPattern};
-use ironclaw_host_runtime::HTTP_CAPABILITY_ID;
-use ironclaw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
-use ironclaw_turns::TurnStatus;
 use reborn_support::{
     harness::RebornBinaryE2EHarness,
     model_replay::{
         RebornModelReplayStep, RebornScriptedProviderToolCall, RebornTraceReplayModelGateway,
     },
 };
+use t3claw_host_api::{CapabilityId, NetworkPolicy, NetworkScheme, NetworkTargetPattern};
+use t3claw_host_runtime::HTTP_CAPABILITY_ID;
+use t3claw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
+use t3claw_turns::TurnStatus;
 
 #[tokio::test]
 async fn reborn_http_network_scope_isolation_parity() {

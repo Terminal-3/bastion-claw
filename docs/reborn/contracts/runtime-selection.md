@@ -1,4 +1,4 @@
-# IronClaw Reborn runtime selection contract
+# T3Claw Reborn runtime selection contract
 
 **Date:** 2026-04-26
 **Status:** Decision guide / contract boundary
@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-IronClaw Reborn has several execution needs that look similar but have different security and ergonomics requirements:
+T3Claw Reborn has several execution needs that look similar but have different security and ergonomics requirements:
 
 - code-as-control-flow for agent reasoning and capability composition
 - extension-provided durable capabilities
@@ -88,7 +88,7 @@ RuntimeKind::Experiment         -> disposable or persistent coding workspace, us
 
 ## 4. Comparison table
 
-| Runtime / approach | What it is | Real language? | Full OS / shell? | Isolation model | Best IronClaw role | Recommendation |
+| Runtime / approach | What it is | Real language? | Full OS / shell? | Isolation model | Best T3Claw role | Recommendation |
 |---|---|---:|---:|---|---|---|
 | Monty | Embedded pseudo-Python CodeAct VM | Partial Python-like | No | Interpreter-level no-ambient-authority sandbox | Legacy CodeAct/tool-composition runtime | Deprecate as primary path |
 | QuickJS ActionScript | Embedded real JavaScript runtime | Yes, JS | No | JS isolate / embedded VM with host-defined globals | Primary Monty replacement for CodeAct | Strong yes |
@@ -151,10 +151,10 @@ ic.state
 Generated stubs may sit on top of the SDK:
 
 ```javascript
-import { web_fetch, github_list_issues } from "ironclaw/tools";
+import { web_fetch, github_list_issues } from "t3claw/tools";
 
 const page = await web_fetch({ url: "https://example.com" });
-const issues = await github_list_issues({ owner: "nearai", repo: "ironclaw" });
+const issues = await github_list_issues({ owner: "nearai", repo: "t3claw" });
 ic.final({ page: page.text.slice(0, 500), issue_count: issues.items.length });
 ```
 

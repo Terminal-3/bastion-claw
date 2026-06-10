@@ -3,10 +3,10 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_product_adapters::ProductInboundAck;
-use ironclaw_threads::{MessageKind, MessageStatus};
-use ironclaw_turns::TurnStatus;
 use reborn_support::harness::RebornBinaryE2EHarness;
+use t3claw_product_adapters::ProductInboundAck;
+use t3claw_threads::{MessageKind, MessageStatus};
+use t3claw_turns::TurnStatus;
 
 #[tokio::test]
 async fn reborn_minimal_dispatch_parity() {

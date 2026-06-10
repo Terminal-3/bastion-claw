@@ -443,7 +443,7 @@ pub enum Submission {
     /// Claim a pairing code from any chat surface (e.g. `approve telegram CODE`).
     ///
     /// The user-facing pairing flow tells users to type exactly this in any
-    /// IronClaw chat. The handler delegates to the same pairing store and
+    /// T3Claw chat. The handler delegates to the same pairing store and
     /// extension-manager hooks that `POST /api/pairing/{channel}/approve`
     /// uses, so the TUI/CLI/web/telegram surfaces all behave consistently.
     PairingClaim {
@@ -1110,7 +1110,7 @@ mod tests {
 
     // Pairing-claim parser — regression tests for #3317. The Telegram bot's
     // pairing reply tells users to type `approve telegram CODE` in any
-    // IronClaw chat surface; before this variant existed, the agent
+    // T3Claw chat surface; before this variant existed, the agent
     // unhelpfully routed those to the LLM and answered "wrong place".
     #[test]
     fn test_parser_pairing_claim_bare() {

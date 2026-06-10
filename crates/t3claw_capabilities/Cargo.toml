@@ -1,0 +1,26 @@
+[package]
+name = "t3claw_capabilities"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+t3claw_authorization = { path = "../t3claw_authorization" }
+t3claw_extensions = { path = "../t3claw_extensions" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_processes = { path = "../t3claw_processes" }
+t3claw_run_state = { path = "../t3claw_run_state" }
+t3claw_trust = { path = "../t3claw_trust" }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+chrono = "0.4"
+t3claw_approvals = { path = "../t3claw_approvals" }
+t3claw_dispatcher = { path = "../t3claw_dispatcher" }
+t3claw_events = { path = "../t3claw_events" }
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_resources = { path = "../t3claw_resources" }
+tokio = { version = "1", features = ["macros", "rt"] }

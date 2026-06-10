@@ -118,9 +118,9 @@ The visible CX win is gated on **Step 1 only** (compaction). Steps 2–5 (durabl
 
 Three intertwined gaps surfaced from the past two days of triage:
 
-1. **Background subagents are disabled.** `SpawnSubagentMode::Background` exists in the type system but `TryFrom<SpawnSubagentWireArgs>` returns `Err(background_subagents_disabled())` for any background request (rejection call-sites at `crates/ironclaw_loop_support/src/subagent_spawn_port.rs:183–188`, checking both `run_in_background: true` and `mode == Some(Background)`; the helper itself is defined at `:1223`). Users cannot fan out asynchronous work.
+1. **Background subagents are disabled.** `SpawnSubagentMode::Background` exists in the type system but `TryFrom<SpawnSubagentWireArgs>` returns `Err(background_subagents_disabled())` for any background request (rejection call-sites at `crates/t3claw_loop_support/src/subagent_spawn_port.rs:183–188`, checking both `run_in_background: true` and `mode == Some(Background)`; the helper itself is defined at `:1223`). Users cannot fan out asynchronous work.
 
-2. **Subagent runs are invisible to the parent UI.** `TurnRunRecord` already carries `parent_run_id`, `subagent_depth`, and `spawn_tree_root_run_id` (`crates/ironclaw_turns/src/store.rs:189–193`), but that lineage lives in the turn-store, **not in the event log**. The `RuntimeEvent` stream carries only `parent_invocation_id` (one hop) and the WebUI projection (`RunStatusProjection`) drops even that. The browser cannot render subagent runs nested under the parent.
+2. **Subagent runs are invisible to the parent UI.** `TurnRunRecord` already carries `parent_run_id`, `subagent_depth`, and `spawn_tree_root_run_id` (`crates/t3claw_turns/src/store.rs:189–193`), but that lineage lives in the turn-store, **not in the event log**. The `RuntimeEvent` stream carries only `parent_invocation_id` (one hop) and the WebUI projection (`RunStatusProjection`) drops even that. The browser cannot render subagent runs nested under the parent.
 
 3. **Large capability returns blow context.** Compaction is only triggered inside `PromptStage` after the next prompt is built. An 80k-token `spawn_subagent` reply is appended to state unchecked, then the next iteration assembles a bloated prompt, then compaction kicks in (or the model errors and `ShrinkContext` retries reactively). There is no proactive check at the moment a large capability result arrives.
 
@@ -128,7 +128,7 @@ These three gaps share one root: the loop pipeline has no stage that owns "what 
 
 ## Current pipeline (one turn)
 
-Verified against `crates/ironclaw_agent_loop/src/executor/canonical.rs`:
+Verified against `crates/t3claw_agent_loop/src/executor/canonical.rs`:
 
 ```
 0. CheckpointStage (cancel_if_requested)              executor.rs
@@ -177,7 +177,7 @@ The compaction check does not need its own stage type: `PostCapabilityStage`'s s
 
 ### Responsibility 2 — background result drain (step 4, depends on durable stores)
 
-1. Call `LoopBackgroundChildPort::drain_settled(parent_run_id) -> Vec<SettledChild>` (mailbox-shaped; cursor-polling may back the v1 impl) on `AgentLoopDriverHost` (`crates/ironclaw_turns/src/run_profile/host.rs:2057`, currently 11 Loop*Port traits + Send + Sync = 13 super-traits, no background-child port). No-op stub until the durable store + port land.
+1. Call `LoopBackgroundChildPort::drain_settled(parent_run_id) -> Vec<SettledChild>` (mailbox-shaped; cursor-polling may back the v1 impl) on `AgentLoopDriverHost` (`crates/t3claw_turns/src/run_profile/host.rs:2057`, currently 11 Loop*Port traits + Send + Sync = 13 super-traits, no background-child port). No-op stub until the durable store + port land.
 2. For each drained child: hydrate its `LoopResultRef`, append to `state.result_refs`, emit a `LoopProgressEvent` so the WebUI projection sees it.
 3. Update `pending_capability_bytes`.
 4. Apply the per-iteration drain cap (≤K results/pass; carry the rest to next iteration — see backpressure under Extensibility).
@@ -215,11 +215,11 @@ Plus:
 
 The source-of-truth lineage exists on `TurnRunRecord` but is **not in the event log**, so the projection layer cannot see it today. Real chain:
 
-1. `crates/ironclaw_events/src/runtime_event.rs:80` — `RuntimeEvent` carries only `parent_invocation_id`. Add `subagent_depth` and `spawn_tree_root_invocation_id` to the event schema.
+1. `crates/t3claw_events/src/runtime_event.rs:80` — `RuntimeEvent` carries only `parent_invocation_id`. Add `subagent_depth` and `spawn_tree_root_invocation_id` to the event schema.
 2. Runtime emission site — populate the two new fields from `TurnRunRecord` when the run-start event is emitted.
-3. `crates/ironclaw_event_projections/src/lib.rs` — `apply_run_event` (`runtime_projection.rs:157`) must fold `parent_invocation_id` + the two new fields into `RunStatusProjection` (it currently folds the run's own `invocation_id` from `event.scope.invocation_id`, but does not fold `parent_invocation_id`, `subagent_depth`, or `spawn_tree_root_invocation_id`).
-4. `crates/ironclaw_event_projections/src/lib.rs:264` — extend `RunStatusProjection` with `parent_run_id`, `subagent_depth`, `tree_root_run_id`.
-5. `crates/ironclaw_product_adapters/src/outbound.rs:638` — extend `ProductProjectionItem::RunStatus`; `crates/ironclaw_reborn_composition/src/projection.rs:1025` (`run_status_projection_state`) will need to pass them through (does not today).
+3. `crates/t3claw_event_projections/src/lib.rs` — `apply_run_event` (`runtime_projection.rs:157`) must fold `parent_invocation_id` + the two new fields into `RunStatusProjection` (it currently folds the run's own `invocation_id` from `event.scope.invocation_id`, but does not fold `parent_invocation_id`, `subagent_depth`, or `spawn_tree_root_invocation_id`).
+4. `crates/t3claw_event_projections/src/lib.rs:264` — extend `RunStatusProjection` with `parent_run_id`, `subagent_depth`, `tree_root_run_id`.
+5. `crates/t3claw_product_adapters/src/outbound.rs:638` — extend `ProductProjectionItem::RunStatus`; `crates/t3claw_reborn_composition/src/projection.rs:1025` (`run_status_projection_state`) will need to pass them through (does not today).
 
 **Alternative to steps 1–2:** projection-time join against the turn-store instead of threading through the event schema. Pick one explicitly before execution — the original "3-file change" framing only covered steps 4–5 and is insufficient.
 
@@ -309,22 +309,22 @@ Alternative seams (inside CapabilityStage, before PromptStage, on `DefaultPlanne
 
 ## Hot files (combined, verified)
 
-- `crates/ironclaw_agent_loop/src/executor/canonical.rs` — insert `PostCapabilityStage`
-- `crates/ironclaw_agent_loop/src/executor/pipeline.rs` — `PostCapabilityStage` field on the pipeline; `ExecutorStage` trait
-- `crates/ironclaw_agent_loop/src/executor/capabilities.rs:367` — result flush (`handle_capability_outcome`) feeding `PostCapabilityStage` Responsibility 1; `append_spawned_child_result` at `:673`
-- `crates/ironclaw_agent_loop/src/executor/capability_helpers.rs:218` — `push_completed_result` updates `pending_capability_bytes`
-- `crates/ironclaw_agent_loop/src/state.rs:48` — `result_refs: Vec<LoopResultRef>` (NOT `completed_results`); add `pending_capability_bytes`
-- `crates/ironclaw_agent_loop/src/state/slots.rs:21` — `force_compact_on_next_iteration` (exists)
-- `crates/ironclaw_agent_loop/src/strategies/compaction.rs:42,76` — `DEFAULT_CONTEXT_LIMIT_TOKENS`, `should_compact`; Responsibility 1 threshold table per `capability_id`
-- `crates/ironclaw_agent_loop/src/executor/prompt.rs:303` — `PromptCompactionStep::run()` (compaction decision)
-- `crates/ironclaw_loop_support/src/subagent_spawn_port.rs:183` — re-enable Background mode in `TryFrom`; `:207` `SubagentDefinition`
-- `crates/ironclaw_reborn/src/subagent/completion_observer.rs:180` — Background branch (exists); `:516` `write_terminal_result`
-- `crates/ironclaw_turns/src/run_profile/host.rs:2057` — add `LoopBackgroundChildPort` to `AgentLoopDriverHost`
-- `crates/ironclaw_turns/src/store.rs:189` — `TurnRunRecord` parent/depth/tree fields (source of truth)
-- `crates/ironclaw_events/src/runtime_event.rs:80` — `RuntimeEvent`; add depth + tree-root fields
-- `crates/ironclaw_event_projections/src/lib.rs:264` — `RunStatusProjection` field extension; `runtime_projection.rs:157` `apply_run_event` fold
-- `crates/ironclaw_product_adapters/src/outbound.rs:638` — `ProductProjectionItem::RunStatus` field extension
-- `crates/ironclaw_reborn_composition/src/projection.rs:1025` — `run_status_projection_state` plumbing
+- `crates/t3claw_agent_loop/src/executor/canonical.rs` — insert `PostCapabilityStage`
+- `crates/t3claw_agent_loop/src/executor/pipeline.rs` — `PostCapabilityStage` field on the pipeline; `ExecutorStage` trait
+- `crates/t3claw_agent_loop/src/executor/capabilities.rs:367` — result flush (`handle_capability_outcome`) feeding `PostCapabilityStage` Responsibility 1; `append_spawned_child_result` at `:673`
+- `crates/t3claw_agent_loop/src/executor/capability_helpers.rs:218` — `push_completed_result` updates `pending_capability_bytes`
+- `crates/t3claw_agent_loop/src/state.rs:48` — `result_refs: Vec<LoopResultRef>` (NOT `completed_results`); add `pending_capability_bytes`
+- `crates/t3claw_agent_loop/src/state/slots.rs:21` — `force_compact_on_next_iteration` (exists)
+- `crates/t3claw_agent_loop/src/strategies/compaction.rs:42,76` — `DEFAULT_CONTEXT_LIMIT_TOKENS`, `should_compact`; Responsibility 1 threshold table per `capability_id`
+- `crates/t3claw_agent_loop/src/executor/prompt.rs:303` — `PromptCompactionStep::run()` (compaction decision)
+- `crates/t3claw_loop_support/src/subagent_spawn_port.rs:183` — re-enable Background mode in `TryFrom`; `:207` `SubagentDefinition`
+- `crates/t3claw_reborn/src/subagent/completion_observer.rs:180` — Background branch (exists); `:516` `write_terminal_result`
+- `crates/t3claw_turns/src/run_profile/host.rs:2057` — add `LoopBackgroundChildPort` to `AgentLoopDriverHost`
+- `crates/t3claw_turns/src/store.rs:189` — `TurnRunRecord` parent/depth/tree fields (source of truth)
+- `crates/t3claw_events/src/runtime_event.rs:80` — `RuntimeEvent`; add depth + tree-root fields
+- `crates/t3claw_event_projections/src/lib.rs:264` — `RunStatusProjection` field extension; `runtime_projection.rs:157` `apply_run_event` fold
+- `crates/t3claw_product_adapters/src/outbound.rs:638` — `ProductProjectionItem::RunStatus` field extension
+- `crates/t3claw_reborn_composition/src/projection.rs:1025` — `run_status_projection_state` plumbing
 - Durable backends: `gate_resolution.rs:38`, `goal_store.rs:241`, `product_live_adapters.rs:281`, `local_dev.rs:524`
 
 ## Test matrix

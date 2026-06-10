@@ -2,8 +2,8 @@
 //!
 //! # Modes
 //!
-//! - **Live mode** (`IRONCLAW_LIVE_TEST=1`): Uses real LLM provider from
-//!   `~/.ironclaw/.env`, records traces to `tests/fixtures/llm_traces/live/`.
+//! - **Live mode** (`T3CLAW_LIVE_TEST=1`): Uses real LLM provider from
+//!   `~/.t3claw/.env`, records traces to `tests/fixtures/llm_traces/live/`.
 //! - **Replay mode** (default): Loads saved trace JSON, deterministic, no API keys.
 //!
 //! # Usage
@@ -30,8 +30,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ironclaw_llm::recording::RecordingLlm;
-use ironclaw_llm::{ChatMessage, CompletionRequest, LlmProvider, SessionConfig, SessionManager};
+use t3claw_llm::recording::RecordingLlm;
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider, SessionConfig, SessionManager};
 
 use crate::support::test_rig::{TestRig, TestRigBuilder};
 use crate::support::trace_llm::LlmTrace;
@@ -150,7 +150,7 @@ impl LiveTestHarness {
     ///   the agent is expected to recover by writing the file. We surface it
     ///   as a soft warning but don't fail the test.
     pub fn collect_trace_errors(&self) -> Vec<String> {
-        use ironclaw::channels::StatusUpdate;
+        use t3claw::channels::StatusUpdate;
 
         let mut errors = Vec::new();
         for event in self.rig.captured_status_events() {
@@ -188,7 +188,7 @@ impl LiveTestHarness {
     /// Both `tool_name` and `needle` are matched case-insensitively.
     /// Returns `true` on the first match.
     pub fn trace_contains_tool_call(&self, tool_name: &str, needle: &str) -> bool {
-        use ironclaw::channels::StatusUpdate;
+        use t3claw::channels::StatusUpdate;
 
         let tool_lc = tool_name.to_ascii_lowercase();
         let needle_lc = needle.to_ascii_lowercase();
@@ -223,7 +223,7 @@ impl LiveTestHarness {
         if self.trace_contains_tool_call(tool_name, needle) {
             return;
         }
-        use ironclaw::channels::StatusUpdate;
+        use t3claw::channels::StatusUpdate;
         let mut activity = String::new();
         for event in self.rig.captured_status_events() {
             match event {
@@ -341,7 +341,7 @@ impl LiveTestHarness {
     /// Live mode writes to `tests/fixtures/llm_traces/live/{name}.log` (ignored).
     /// Replay mode writes to a temp file so it can be diffed against the live log.
     fn save_session_log(&self, turns: &[SessionTurn]) {
-        use ironclaw::channels::StatusUpdate;
+        use t3claw::channels::StatusUpdate;
 
         let (log_path, live_log_path) = match self.mode {
             TestMode::Live => {
@@ -349,7 +349,7 @@ impl LiveTestHarness {
                 (p, None)
             }
             TestMode::Replay => {
-                let replay_dir = std::env::temp_dir().join("ironclaw-live-tests");
+                let replay_dir = std::env::temp_dir().join("t3claw-live-tests");
                 let _ = std::fs::create_dir_all(&replay_dir);
                 let p = replay_dir.join(format!("{}.replay.log", self.test_name));
                 let live = trace_fixture_path(&self.test_name).with_extension("log");
@@ -480,7 +480,7 @@ impl LiveTestHarnessBuilder {
     /// `tests/fixtures/llm_traces/live/{test_name}.json`
     ///
     /// **Live test contract:** the test rig starts from a *clean* libSQL
-    /// database. It does NOT clone the developer's `~/.ironclaw/ironclaw.db`.
+    /// database. It does NOT clone the developer's `~/.t3claw/t3claw.db`.
     /// Tests that need real credentials must declare them explicitly via
     /// [`with_secrets`](Self::with_secrets); tests that need workspace
     /// memory or conversation history must seed it themselves through
@@ -509,7 +509,7 @@ impl LiveTestHarnessBuilder {
     }
 
     /// Declare secret names to copy from the developer's real
-    /// `~/.ironclaw/ironclaw.db` (or whatever `LIBSQL_PATH` resolves to)
+    /// `~/.t3claw/t3claw.db` (or whatever `LIBSQL_PATH` resolves to)
     /// into the test rig under the same owner_user_id. Only the named
     /// rows are copied; nothing else (memory, history, other secrets)
     /// crosses the boundary.
@@ -572,11 +572,11 @@ impl LiveTestHarnessBuilder {
         self
     }
 
-    /// Build the harness, auto-detecting mode from the `IRONCLAW_LIVE_TEST` env var.
+    /// Build the harness, auto-detecting mode from the `T3CLAW_LIVE_TEST` env var.
     #[cfg(feature = "libsql")]
     pub async fn build(self) -> LiveTestHarness {
         let trace_path = trace_fixture_path(&self.test_name);
-        let is_live = std::env::var("IRONCLAW_LIVE_TEST")
+        let is_live = std::env::var("T3CLAW_LIVE_TEST")
             .ok()
             .filter(|v| !v.is_empty() && v != "0")
             .is_some();
@@ -586,7 +586,7 @@ impl LiveTestHarnessBuilder {
         } else if !self.record_trace {
             eprintln!(
                 "[LiveTest] '{}' has trace recording disabled and no replay fixture — \
-                 skipping. Run with IRONCLAW_LIVE_TEST=1 to execute live.",
+                 skipping. Run with T3CLAW_LIVE_TEST=1 to execute live.",
                 self.test_name
             );
             self.build_skip().await
@@ -608,18 +608,18 @@ impl LiveTestHarnessBuilder {
         let _ = tracing_subscriber::fmt()
             .with_env_filter(
                 tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ironclaw=info")),
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("t3claw=info")),
             )
             .with_test_writer()
             .try_init();
 
-        // Load env from ~/.ironclaw/.env so LLM API keys are available.
+        // Load env from ~/.t3claw/.env so LLM API keys are available.
         let _ = dotenvy::dotenv();
-        ironclaw::bootstrap::load_ironclaw_env();
+        t3claw::bootstrap::load_t3claw_env();
 
         // Hydrate LLM credentials from the user's real secrets store into
         // process env vars BEFORE config resolution. The test rig runs
-        // against an isolated temp libSQL database, so the real ironclaw DB's
+        // against an isolated temp libSQL database, so the real t3claw DB's
         // secrets aren't automatically visible to the provider chain. For
         // backends that support env-var fallback (nearai via NEARAI_API_KEY,
         // anthropic via ANTHROPIC_API_KEY, etc.), setting the env var before
@@ -628,10 +628,10 @@ impl LiveTestHarnessBuilder {
         hydrate_llm_secrets_into_env().await;
 
         // Resolve full config (reads LLM_BACKEND, ENGINE_V2, ALLOW_LOCAL_TOOLS, etc.)
-        // This mirrors the exact config the real `ironclaw` binary would use.
-        let mut config = ironclaw::config::Config::from_env().await.expect(
+        // This mirrors the exact config the real `t3claw` binary would use.
+        let mut config = t3claw::config::Config::from_env().await.expect(
             "Failed to load config for live test. \
-                 Ensure ~/.ironclaw/.env has valid LLM credentials.",
+                 Ensure ~/.t3claw/.env has valid LLM credentials.",
         );
 
         // Apply builder overrides.
@@ -656,7 +656,7 @@ impl LiveTestHarnessBuilder {
 
         // If the test asked for specific secrets via `with_secrets(...)`
         // and the resolved config points at a local libSQL file (the
-        // typical `~/.ironclaw/ironclaw.db` setup), figure out the source
+        // typical `~/.t3claw/t3claw.db` setup), figure out the source
         // path now. We do NOT clone the file. The test rig will copy
         // *only* the named rows out of the source `secrets` table after
         // its own migrations run. Memory, conversation history, and any
@@ -666,16 +666,14 @@ impl LiveTestHarnessBuilder {
             None
         } else {
             match config.database.backend {
-                ironclaw::config::DatabaseBackend::LibSql
-                    if config.database.libsql_url.is_none() =>
-                {
+                t3claw::config::DatabaseBackend::LibSql if config.database.libsql_url.is_none() => {
                     config
                         .database
                         .libsql_path
                         .clone()
                         .filter(|p| p.exists())
                         .or_else(|| {
-                            let default = ironclaw::config::default_libsql_path();
+                            let default = t3claw::config::default_libsql_path();
                             default.exists().then_some(default)
                         })
                 }
@@ -706,7 +704,7 @@ impl LiveTestHarnessBuilder {
         let source_user_id = config.owner_id.clone();
 
         let session = Arc::new(SessionManager::new(SessionConfig::default()));
-        let (provider, cheap_llm, _, _) = ironclaw_llm::build_provider_chain(&config.llm, session)
+        let (provider, cheap_llm, _, _) = t3claw_llm::build_provider_chain(&config.llm, session)
             .await
             .expect("Failed to build LLM provider chain for live test");
 
@@ -779,7 +777,7 @@ impl LiveTestHarnessBuilder {
         let trace = LlmTrace::from_file(&trace_path).unwrap_or_else(|e| {
             panic!(
                 "Failed to load trace fixture '{}': {e}\n\
-                 Hint: Run with IRONCLAW_LIVE_TEST=1 to record the trace first.",
+                 Hint: Run with T3CLAW_LIVE_TEST=1 to record the trace first.",
                 trace_path.display()
             )
         });
@@ -1047,9 +1045,9 @@ fn scan_preview_for_errors(preview: &str) -> Option<String> {
 
 /// Load LLM API keys from the user's real secrets store into process env vars.
 ///
-/// Live tests use an isolated temp libSQL database, so the real ironclaw DB's
+/// Live tests use an isolated temp libSQL database, so the real t3claw DB's
 /// encrypted secrets are invisible to the test provider chain. This helper
-/// opens the user's real libSQL DB at `~/.ironclaw/ironclaw.db` (libsql does
+/// opens the user's real libSQL DB at `~/.t3claw/t3claw.db` (libsql does
 /// not expose a read-only open mode here, so the handle is technically
 /// writable, but this code path only ever calls `get_decrypted` and never
 /// writes), resolves the master key from the OS keychain, decrypts known
@@ -1062,9 +1060,7 @@ fn scan_preview_for_errors(preview: &str) -> Option<String> {
 /// native auth path it supports.
 #[cfg(feature = "libsql")]
 async fn hydrate_llm_secrets_into_env() {
-    use ironclaw::secrets::{
-        LibSqlSecretsStore, SecretsStore, crypto_from_hex, resolve_master_key,
-    };
+    use t3claw::secrets::{LibSqlSecretsStore, SecretsStore, crypto_from_hex, resolve_master_key};
 
     // Known (secret_name, env_var) pairs. When a backend supports multiple
     // env-var fallbacks we pick the most canonical one.
@@ -1098,10 +1094,10 @@ async fn hydrate_llm_secrets_into_env() {
         }
     };
 
-    // Open the user's real libSQL DB at ~/.ironclaw/ironclaw.db directly
-    // (bypassing the ironclaw Database wrapper — LibSqlSecretsStore needs a
+    // Open the user's real libSQL DB at ~/.t3claw/t3claw.db directly
+    // (bypassing the t3claw Database wrapper — LibSqlSecretsStore needs a
     // raw libsql::Database handle).
-    let db_path = ironclaw::bootstrap::ironclaw_base_dir().join("ironclaw.db");
+    let db_path = t3claw::bootstrap::t3claw_base_dir().join("t3claw.db");
     if !db_path.exists() {
         eprintln!(
             "[LiveTest] hydrate_llm_secrets: real DB not found at {} — skipping",
@@ -1121,13 +1117,13 @@ async fn hydrate_llm_secrets_into_env() {
     let store = LibSqlSecretsStore::new(raw_db, crypto);
 
     // Owner id selection: a user with a non-default scope (e.g. via
-    // `IRONCLAW_OWNER_ID` or settings.json) stores secrets under that
+    // `T3CLAW_OWNER_ID` or settings.json) stores secrets under that
     // user_id, not "default". Try the env-resolved value first; if it's
     // unset, fall back to the legacy "default" scope that single-user
     // installs use. We don't reach into Config::from_env() here to avoid
     // pulling in the full settings file resolution chain inside test
     // hydration.
-    let env_owner = std::env::var("IRONCLAW_OWNER_ID")
+    let env_owner = std::env::var("T3CLAW_OWNER_ID")
         .ok()
         .filter(|s| !s.is_empty());
     let owner_id_owned = env_owner.unwrap_or_else(|| "default".to_string());
@@ -1143,12 +1139,12 @@ async fn hydrate_llm_secrets_into_env() {
         }
         match store.get_decrypted(owner_id, secret_name).await {
             Ok(decrypted) => {
-                ironclaw::config::set_runtime_env(env_var, decrypted.expose());
+                t3claw::config::set_runtime_env(env_var, decrypted.expose());
                 eprintln!(
                     "[LiveTest] hydrate_llm_secrets: set {env_var} from secret '{secret_name}'"
                 );
             }
-            Err(ironclaw::secrets::SecretError::NotFound { .. }) => {
+            Err(t3claw::secrets::SecretError::NotFound { .. }) => {
                 // Normal: user hasn't configured this backend.
             }
             Err(e) => {

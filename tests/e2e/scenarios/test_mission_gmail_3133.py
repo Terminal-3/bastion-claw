@@ -54,11 +54,11 @@ mechanism end-to-end:
 Live infrastructure (see `tests/e2e/live_harness.py` and
 `tests/e2e/live_llm_proxy.py`):
 
-  * Run with `IRONCLAW_LIVE_TEST=1` plus `IRONCLAW_LIVE_LLM_BASE_URL` /
-    `IRONCLAW_LIVE_LLM_API_KEY` / `IRONCLAW_LIVE_LLM_MODEL` to record
+  * Run with `T3CLAW_LIVE_TEST=1` plus `T3CLAW_LIVE_LLM_BASE_URL` /
+    `T3CLAW_LIVE_LLM_API_KEY` / `T3CLAW_LIVE_LLM_MODEL` to record
     a fresh trace into `tests/e2e/fixtures/live/<test_name>.json`.
     Commit the resulting JSON so CI can replay deterministically.
-  * Without `IRONCLAW_LIVE_TEST`, the test runs in replay mode against
+  * Without `T3CLAW_LIVE_TEST`, the test runs in replay mode against
     the committed fixture. If the fixture is missing the test is
     skipped (not failed) so a fresh checkout doesn't bog down on
     missing recordings.
@@ -87,7 +87,7 @@ CHAT_PROMPT = (
     "  name = 'gmail-draft-3133'\n"
     "  goal = 'Use the gmail tool with action=create_draft to send a "
     "draft to owner@example.com with subject \"Test mission #3133\" and "
-    "body \"Mock draft from the IronClaw e2e test.\". Just call the "
+    "body \"Mock draft from the T3Claw e2e test.\". Just call the "
     "gmail tool directly — the runtime handles authentication. Do NOT "
     "call tool_activate, tool_install, or any other setup tool first.'\n"
     "  cadence = cron expression '*/3 * * * *'\n"
@@ -247,7 +247,7 @@ async def test_mission_gmail_draft_3133(
     """Issue #3133 / #3166: full chat-driven mission lifecycle.
 
     In replay mode this runs deterministically against the committed
-    LLM trace. In record mode (`IRONCLAW_LIVE_TEST=1`) it forwards to
+    LLM trace. In record mode (`T3CLAW_LIVE_TEST=1`) it forwards to
     a real LLM, captures the trace into the fixture file, and asserts
     the same end-state — so a re-recording can't accidentally bake in
     a regression.

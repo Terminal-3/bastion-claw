@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ironclaw::channels::{IncomingMessage, StatusUpdate};
+use t3claw::channels::{IncomingMessage, StatusUpdate};
 use uuid::Uuid;
 
 use crate::support::test_channel::TestChannel;
@@ -109,12 +109,11 @@ impl ApprovalAutoResponder {
                                 "[ApprovalAutoResponder] Auto-approving '{tool_name}' \
                                  (request_id={rid})"
                             );
-                            let submission =
-                                ironclaw::agent::submission::Submission::ExecApproval {
-                                    request_id: rid,
-                                    approved: true,
-                                    always: false,
-                                };
+                            let submission = t3claw::agent::submission::Submission::ExecApproval {
+                                request_id: rid,
+                                approved: true,
+                                always: false,
+                            };
                             let msg =
                                 IncomingMessage::new(channel.channel_name(), channel.user_id(), "")
                                     .with_structured_submission(submission);

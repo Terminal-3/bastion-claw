@@ -93,37 +93,37 @@ jobs:
           echo "=== parser regex ==="
           # Valid: authorized + parseable
           assert_parse 'smoke suite, no model' \
-            '/benchmark ironclaw-smoke' \
-            'ironclaw-smoke' ''
+            '/benchmark t3claw-smoke' \
+            't3claw-smoke' ''
           assert_parse 'full suite, no model' \
-            '/benchmark ironclaw' \
-            'ironclaw' ''
+            '/benchmark t3claw' \
+            't3claw' ''
           assert_parse 'smoke + lowercase OpenRouter model' \
-            '/benchmark ironclaw-smoke --model qwen/qwen3.5-35b-a3b' \
-            'ironclaw-smoke' 'qwen/qwen3.5-35b-a3b'
+            '/benchmark t3claw-smoke --model qwen/qwen3.5-35b-a3b' \
+            't3claw-smoke' 'qwen/qwen3.5-35b-a3b'
           assert_parse 'smoke + mixed-case HF-style model' \
-            '/benchmark ironclaw-smoke --model Qwen/Qwen3.5-122B-A10B' \
-            'ironclaw-smoke' 'Qwen/Qwen3.5-122B-A10B'
+            '/benchmark t3claw-smoke --model Qwen/Qwen3.5-122B-A10B' \
+            't3claw-smoke' 'Qwen/Qwen3.5-122B-A10B'
           assert_parse 'three-segment model id' \
-            '/benchmark ironclaw --model openrouter/anthropic/claude-sonnet-4' \
-            'ironclaw' 'openrouter/anthropic/claude-sonnet-4'
+            '/benchmark t3claw --model openrouter/anthropic/claude-sonnet-4' \
+            't3claw' 'openrouter/anthropic/claude-sonnet-4'
           assert_parse 'trailing whitespace ok' \
-            '/benchmark ironclaw-smoke   ' \
-            'ironclaw-smoke' ''
+            '/benchmark t3claw-smoke   ' \
+            't3claw-smoke' ''
 
           # Invalid: parser must reject (both outputs empty)
           assert_parse 'empty command' \
             '/benchmark' '' ''
           assert_parse 'extra positional token' \
-            '/benchmark ironclaw-smoke garbage' '' ''
+            '/benchmark t3claw-smoke garbage' '' ''
           assert_parse 'two positional tokens' \
             '/benchmark foo bar' '' ''
           assert_parse '--model flag without value' \
-            '/benchmark ironclaw-smoke --model' '' ''
+            '/benchmark t3claw-smoke --model' '' ''
           assert_parse 'unrelated comment' \
             'looks good to me' '' ''
           assert_parse 'starts with /benchmark but in a quote' \
-            '> /benchmark ironclaw-smoke' '' ''
+            '> /benchmark t3claw-smoke' '' ''
 
           # ─── Guard fixtures ──────────────────────────────────────────
           echo
@@ -131,9 +131,9 @@ jobs:
           assert_guard 'bare command' \
             '/benchmark' 'match'
           assert_guard 'command with suite' \
-            '/benchmark ironclaw-smoke' 'match'
+            '/benchmark t3claw-smoke' 'match'
           assert_guard 'command with suite + model' \
-            '/benchmark ironclaw-smoke --model qwen/qwen3.5-35b-a3b' 'match'
+            '/benchmark t3claw-smoke --model qwen/qwen3.5-35b-a3b' 'match'
 
           assert_guard 'prefix collision: /benchmarking-something' \
             '/benchmarking-something' 'skip'
@@ -144,7 +144,7 @@ jobs:
           assert_guard 'unrelated comment' \
             'looks good to me' 'skip'
           assert_guard 'markdown-quoted command' \
-            '> /benchmark ironclaw-smoke' 'skip'
+            '> /benchmark t3claw-smoke' 'skip'
 
           echo
           if [ "$fail" = "1" ]; then

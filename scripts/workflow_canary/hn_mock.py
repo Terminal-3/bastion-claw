@@ -2,7 +2,7 @@
 
 Single-port aiohttp; announces via ``MOCK_HN_PORT=<n>`` on stdout.
 Routes via
-``IRONCLAW_TEST_HTTP_REMAP=news.ycombinator.com=<mock_url>`` set in
+``T3CLAW_TEST_HTTP_REMAP=news.ycombinator.com=<mock_url>`` set in
 ``run_workflow_canary.py``.
 
 Surface:
@@ -141,7 +141,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock Hacker News for IronClaw workflow-canary."
+        description="Mock Hacker News for T3Claw workflow-canary."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

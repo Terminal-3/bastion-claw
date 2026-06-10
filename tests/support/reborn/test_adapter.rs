@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use ironclaw_product_adapters::{
+use serde::{Deserialize, Serialize};
+use t3claw_product_adapters::{
     AdapterInstallationId, AuthRequirement, DeliveryStatus, ExternalActorRef,
     ExternalConversationRef, ExternalEventId, OutboundDeliverySink, ParsedProductInbound,
     ProductAdapter, ProductAdapterCapabilities, ProductAdapterError, ProductAdapterHealth,
@@ -9,7 +10,6 @@ use ironclaw_product_adapters::{
     ProjectionSubscriptionPayload, ProtocolAuthEvidence, ProtocolAuthFailure, ProtocolHttpEgress,
     TrustedInboundContext, UserMessagePayload,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone)]
 pub struct RebornTestProductAdapter {
@@ -65,7 +65,7 @@ impl RebornTestProductAdapter {
             after_cursor: None,
         })
         .map_err(|error| ProductAdapterError::MalformedInboundPayload {
-            reason: ironclaw_product_adapters::RedactedString::new(error.to_string()),
+            reason: t3claw_product_adapters::RedactedString::new(error.to_string()),
         })
     }
 
@@ -87,7 +87,7 @@ impl RebornTestProductAdapter {
             after_cursor,
         })
         .map_err(|error| ProductAdapterError::MalformedInboundPayload {
-            reason: ironclaw_product_adapters::RedactedString::new(error.to_string()),
+            reason: t3claw_product_adapters::RedactedString::new(error.to_string()),
         })
     }
 }
@@ -130,7 +130,7 @@ impl ProductAdapter for RebornTestProductAdapter {
         let payload: OwnedRebornTestInboundPayload =
             serde_json::from_slice(raw_payload).map_err(|error| {
                 ProductAdapterError::MalformedInboundPayload {
-                    reason: ironclaw_product_adapters::RedactedString::new(error.to_string()),
+                    reason: t3claw_product_adapters::RedactedString::new(error.to_string()),
                 }
             })?;
         let claim = auth_evidence
@@ -141,7 +141,7 @@ impl ProductAdapter for RebornTestProductAdapter {
         if claim.subject() != payload.user_id {
             return Err(ProductAdapterError::Authentication(
                 ProtocolAuthFailure::Other {
-                    detail: ironclaw_product_adapters::RedactedString::new(
+                    detail: t3claw_product_adapters::RedactedString::new(
                         "verified subject does not match inbound actor",
                     ),
                 },
@@ -153,14 +153,14 @@ impl ProductAdapter for RebornTestProductAdapter {
                     payload
                         .text
                         .ok_or_else(|| ProductAdapterError::MalformedInboundPayload {
-                            reason: ironclaw_product_adapters::RedactedString::new(
+                            reason: t3claw_product_adapters::RedactedString::new(
                                 "user message payload missing text",
                             ),
                         })?,
                     Vec::new(),
                     payload.trigger.ok_or_else(|| {
                         ProductAdapterError::MalformedInboundPayload {
-                            reason: ironclaw_product_adapters::RedactedString::new(
+                            reason: t3claw_product_adapters::RedactedString::new(
                                 "user message payload missing trigger",
                             ),
                         }

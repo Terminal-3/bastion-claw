@@ -1,17 +1,17 @@
-//! LLM bridge adapter — wraps `LlmProvider` as `ironclaw_engine::LlmBackend`.
+//! LLM bridge adapter — wraps `LlmProvider` as `t3claw_engine::LlmBackend`.
 
 use std::sync::Arc;
 
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 #[cfg(test)]
-use ironclaw_engine::ModelToolSurface;
-use ironclaw_engine::{
+use t3claw_engine::ModelToolSurface;
+use t3claw_engine::{
     ActionDef, EngineError, LlmBackend, LlmCallConfig, LlmOutput, LlmResponse, ThreadMessage,
     TokenUsage,
 };
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
-use ironclaw_llm::{
+use t3claw_llm::{
     ChatMessage, LlmProvider, Role, ToolCall, ToolCompletionRequest, ToolDefinition,
     clean_response, recover_tool_calls_from_content, sanitize_tool_messages,
 };
@@ -122,7 +122,7 @@ impl LlmBackend for LlmBridgeAdapter {
         // (see `prompt::build_codeact_system_prompt_inner`). PR #3665 review.
         let tools: Vec<ToolDefinition> = if config.force_text {
             vec![] // No tools when forcing text
-        } else if ironclaw_engine::executor::prompt::codeact_disabled() {
+        } else if t3claw_engine::executor::prompt::codeact_disabled() {
             actions.iter().map(action_def_to_tool_def).collect()
         } else {
             actions
@@ -138,7 +138,7 @@ impl LlmBackend for LlmBridgeAdapter {
 
         if tools.is_empty() {
             // No tools: use plain completion (matches existing no-tools path)
-            let mut request = ironclaw_llm::CompletionRequest::new(chat_messages)
+            let mut request = t3claw_llm::CompletionRequest::new(chat_messages)
                 .with_max_tokens(max_tokens)
                 .with_temperature(temperature);
             request.metadata = config.metadata.clone();
@@ -198,10 +198,10 @@ impl LlmBackend for LlmBridgeAdapter {
 
         // Convert response — check for code blocks (CodeAct/RLM pattern)
         let llm_response = if !response.tool_calls.is_empty() {
-            let mut calls: Vec<ironclaw_engine::ActionCall> = response
+            let mut calls: Vec<t3claw_engine::ActionCall> = response
                 .tool_calls
                 .iter()
-                .map(|tc| ironclaw_engine::ActionCall {
+                .map(|tc| t3claw_engine::ActionCall {
                     id: tc.id.clone(),
                     action_name: tc.name.clone(),
                     parameters: tc.arguments.clone(),
@@ -233,9 +233,9 @@ impl LlmBackend for LlmBridgeAdapter {
             let recovered_calls = recover_tool_calls_from_content(&raw_text, &tools);
 
             if !recovered_calls.is_empty() {
-                let calls: Vec<ironclaw_engine::ActionCall> = recovered_calls
+                let calls: Vec<t3claw_engine::ActionCall> = recovered_calls
                     .iter()
-                    .map(|tc| ironclaw_engine::ActionCall {
+                    .map(|tc| t3claw_engine::ActionCall {
                         id: tc.id.clone(),
                         action_name: tc.name.clone(),
                         parameters: tc.arguments.clone(),
@@ -375,7 +375,7 @@ fn resolve_template_refs_in_json(
 fn build_tool_result_index(messages: &[ThreadMessage]) -> Vec<(String, serde_json::Value)> {
     messages
         .iter()
-        .filter(|m| m.role == ironclaw_engine::MessageRole::ActionResult)
+        .filter(|m| m.role == t3claw_engine::MessageRole::ActionResult)
         .filter_map(|m| {
             let call_id = m.action_call_id.as_deref()?;
             // Try to parse the content as JSON; fall back to wrapping as a string
@@ -399,7 +399,7 @@ fn json_has_template_refs(value: &serde_json::Value) -> bool {
 // ── Conversion helpers ──────────────────────────────────────
 
 fn thread_msg_to_chat(msg: &ThreadMessage) -> ChatMessage {
-    use ironclaw_engine::MessageRole;
+    use t3claw_engine::MessageRole;
 
     let role = match msg.role {
         MessageRole::System => Role::System,
@@ -528,7 +528,7 @@ fn extract_code_block(text: &str) -> Option<String> {
 }
 
 fn text_response_from_cleaned_text(cleaned_text: String) -> LlmResponse {
-    if ironclaw_engine::executor::prompt::codeact_disabled() {
+    if t3claw_engine::executor::prompt::codeact_disabled() {
         if cleaned_text.trim().is_empty() {
             return LlmResponse::Text(EMPTY_CLEANED_RESPONSE_FALLBACK.to_string());
         }
@@ -638,10 +638,10 @@ mod tests {
     use async_trait::async_trait;
     use rust_decimal::Decimal;
 
-    use ironclaw_engine::{ActionCall, ActionDef, EffectType, LlmResponse, ThreadMessage};
+    use t3claw_engine::{ActionCall, ActionDef, EffectType, LlmResponse, ThreadMessage};
 
     use crate::error::LlmError;
-    use ironclaw_llm::ToolCompletionResponse;
+    use t3claw_llm::ToolCompletionResponse;
 
     #[derive(Default)]
     struct CapturingProviderState {
@@ -667,8 +667,8 @@ mod tests {
 
         async fn complete(
             &self,
-            req: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
+            req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
             self.state.models.lock().await.push(req.model.clone());
             self.state
                 .completion_requests
@@ -676,11 +676,11 @@ mod tests {
                 .await
                 .push(req.messages);
 
-            Ok(ironclaw_llm::CompletionResponse {
+            Ok(t3claw_llm::CompletionResponse {
                 content: "ok".to_string(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
@@ -704,7 +704,7 @@ mod tests {
                 tool_calls: Vec::new(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -857,8 +857,8 @@ mod tests {
 
         async fn complete(
             &self,
-            _req: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
             unreachable!("test only uses complete_with_tools")
         }
 
@@ -871,7 +871,7 @@ mod tests {
                 tool_calls: Vec::new(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -894,11 +894,11 @@ mod tests {
             effects: vec![EffectType::WriteExternal],
             requires_approval: false,
             model_tool_surface: ModelToolSurface::FullSchema,
-            discovery: Some(ironclaw_engine::ActionDiscoveryMetadata {
+            discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
                 name: "gmail_send".to_string(),
-                summary: Some(ironclaw_engine::ActionDiscoverySummary {
+                summary: Some(t3claw_engine::ActionDiscoverySummary {
                     notes: vec!["Subject/body rules".to_string()],
-                    ..ironclaw_engine::ActionDiscoverySummary::default()
+                    ..t3claw_engine::ActionDiscoverySummary::default()
                 }),
                 schema_override: Some(serde_json::json!({
                     "type": "object",
@@ -990,13 +990,13 @@ mod tests {
 
         async fn complete(
             &self,
-            _req: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
-            Ok(ironclaw_llm::CompletionResponse {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+            Ok(t3claw_llm::CompletionResponse {
                 content: self.content.clone(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
@@ -1091,7 +1091,7 @@ mod tests {
         });
         let adapter = LlmBridgeAdapter::new(provider, None);
 
-        let config = ironclaw_engine::LlmCallConfig {
+        let config = t3claw_engine::LlmCallConfig {
             model: Some("gpt-4o".into()),
             ..Default::default()
         };
@@ -1138,7 +1138,7 @@ mod tests {
             .complete(
                 &[ThreadMessage::user("hi")],
                 &[],
-                &ironclaw_engine::LlmCallConfig::default(),
+                &t3claw_engine::LlmCallConfig::default(),
             )
             .await
             .unwrap();
@@ -1152,14 +1152,14 @@ mod tests {
     #[tokio::test]
     async fn complete_with_tools_only_emits_full_schema_provider_tools() {
         // Both this test and `complete_emits_compact_actions_when_codeact_disabled`
-        // read the process-global `IRONCLAW_DISABLE_CODEACT` env var. Serialize
+        // read the process-global `T3CLAW_DISABLE_CODEACT` env var. Serialize
         // via lock_env() and pin the value here so the other test setting
         // `=true` can't leak across when `cargo test` runs them in parallel.
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var_os("IRONCLAW_DISABLE_CODEACT");
+        let original = std::env::var_os("T3CLAW_DISABLE_CODEACT");
         // SAFETY: serialized via lock_env().
         unsafe {
-            std::env::remove_var("IRONCLAW_DISABLE_CODEACT");
+            std::env::remove_var("T3CLAW_DISABLE_CODEACT");
         }
 
         let state = Arc::new(CapturingProviderState::default());
@@ -1198,9 +1198,9 @@ mod tests {
         // SAFETY: serialized via lock_env().
         unsafe {
             if let Some(value) = original {
-                std::env::set_var("IRONCLAW_DISABLE_CODEACT", value);
+                std::env::set_var("T3CLAW_DISABLE_CODEACT", value);
             } else {
-                std::env::remove_var("IRONCLAW_DISABLE_CODEACT");
+                std::env::remove_var("T3CLAW_DISABLE_CODEACT");
             }
         }
 
@@ -1226,10 +1226,10 @@ mod tests {
     #[tokio::test]
     async fn complete_emits_compact_actions_when_codeact_disabled() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var_os("IRONCLAW_DISABLE_CODEACT");
+        let original = std::env::var_os("T3CLAW_DISABLE_CODEACT");
         // SAFETY: serialized via lock_env().
         unsafe {
-            std::env::set_var("IRONCLAW_DISABLE_CODEACT", "true");
+            std::env::set_var("T3CLAW_DISABLE_CODEACT", "true");
         }
 
         let state = Arc::new(CapturingProviderState::default());
@@ -1268,9 +1268,9 @@ mod tests {
         // SAFETY: serialized via lock_env().
         unsafe {
             if let Some(value) = original {
-                std::env::set_var("IRONCLAW_DISABLE_CODEACT", value);
+                std::env::set_var("T3CLAW_DISABLE_CODEACT", value);
             } else {
-                std::env::remove_var("IRONCLAW_DISABLE_CODEACT");
+                std::env::remove_var("T3CLAW_DISABLE_CODEACT");
             }
         }
 
@@ -1674,8 +1674,8 @@ And also check the token price:\n\
         }
         async fn complete(
             &self,
-            _req: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
             unreachable!("should use complete_with_tools")
         }
         async fn complete_with_tools(
@@ -1686,7 +1686,7 @@ And also check the token price:\n\
             // a prior tool result's project_id via template ref.
             Ok(ToolCompletionResponse {
                 content: Some("Creating mission in the new project".to_string()),
-                tool_calls: vec![ironclaw_llm::ToolCall {
+                tool_calls: vec![t3claw_llm::ToolCall {
                     id: "call-2".to_string(),
                     name: "mission_create".to_string(),
                     arguments: serde_json::json!({
@@ -1700,7 +1700,7 @@ And also check the token price:\n\
                 }],
                 input_tokens: 10,
                 output_tokens: 10,
-                finish_reason: ironclaw_llm::FinishReason::ToolUse,
+                finish_reason: t3claw_llm::FinishReason::ToolUse,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -1785,13 +1785,13 @@ And also check the token price:\n\
         }
         async fn complete(
             &self,
-            _req: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
-            Ok(ironclaw_llm::CompletionResponse {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+            Ok(t3claw_llm::CompletionResponse {
                 content: "hello".to_string(),
                 input_tokens: 1000,
                 output_tokens: 500,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
@@ -1806,7 +1806,7 @@ And also check the token price:\n\
                 tool_calls: Vec::new(),
                 input_tokens: 1000,
                 output_tokens: 500,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -1876,13 +1876,13 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: ironclaw_llm::CompletionRequest,
-            ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
-                Ok(ironclaw_llm::CompletionResponse {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 1000,
                     output_tokens: 500,
-                    finish_reason: ironclaw_llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
@@ -1936,13 +1936,13 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: ironclaw_llm::CompletionRequest,
-            ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
-                Ok(ironclaw_llm::CompletionResponse {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 10_000,
                     output_tokens: 5_000,
-                    finish_reason: ironclaw_llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
@@ -2005,15 +2005,15 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: ironclaw_llm::CompletionRequest,
-            ) -> Result<ironclaw_llm::CompletionResponse, LlmError> {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
                 // Total input = 10_000; 2_000 cache-read, 1_000 cache-write,
                 // 7_000 uncached. Output = 500.
-                Ok(ironclaw_llm::CompletionResponse {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 10_000,
                     output_tokens: 500,
-                    finish_reason: ironclaw_llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     reasoning: None,
                     cache_read_input_tokens: 2_000,
                     cache_creation_input_tokens: 1_000,

@@ -9,23 +9,23 @@ use secrecy::SecretString;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
-use ironclaw::agent::routine_engine::RoutineEngine;
-use ironclaw::agent::{Agent, AgentDeps, SessionManager as AgentSessionManager};
-use ironclaw::app::{AppBuilder, AppBuilderFlags};
-use ironclaw::channels::IncomingMessage;
-use ironclaw::channels::web::auth::MultiAuthState;
-use ironclaw::channels::web::log_layer::LogBroadcaster;
-use ironclaw::channels::web::platform::router::start_server;
-use ironclaw::channels::web::platform::state::{GatewayState, PerUserRateLimiter, RateLimiter};
-use ironclaw::channels::web::sse::SseManager;
-use ironclaw::channels::web::ws::WsConnectionTracker;
-use ironclaw::config::{Config, RegistryProviderConfig, RoutineConfig};
-use ironclaw::db::Database;
-use ironclaw::db::libsql::LibSqlBackend;
-use ironclaw::secrets::SecretsStore;
-use ironclaw::tools::{Tool, ToolError, ToolOutput};
-use ironclaw_llm::registry::ProviderProtocol;
-use ironclaw_llm::{
+use t3claw::agent::routine_engine::RoutineEngine;
+use t3claw::agent::{Agent, AgentDeps, SessionManager as AgentSessionManager};
+use t3claw::app::{AppBuilder, AppBuilderFlags};
+use t3claw::channels::IncomingMessage;
+use t3claw::channels::web::auth::MultiAuthState;
+use t3claw::channels::web::log_layer::LogBroadcaster;
+use t3claw::channels::web::platform::router::start_server;
+use t3claw::channels::web::platform::state::{GatewayState, PerUserRateLimiter, RateLimiter};
+use t3claw::channels::web::sse::SseManager;
+use t3claw::channels::web::ws::WsConnectionTracker;
+use t3claw::config::{Config, RegistryProviderConfig, RoutineConfig};
+use t3claw::db::Database;
+use t3claw::db::libsql::LibSqlBackend;
+use t3claw::secrets::SecretsStore;
+use t3claw::tools::{Tool, ToolError, ToolOutput};
+use t3claw_llm::registry::ProviderProtocol;
+use t3claw_llm::{
     SessionConfig as LlmSessionConfig, SessionManager as LlmSessionManager, create_llm_provider,
 };
 
@@ -50,7 +50,7 @@ impl Tool for MockGithubWebhookTool {
     async fn execute(
         &self,
         params: serde_json::Value,
-        _ctx: &ironclaw::context::JobContext,
+        _ctx: &t3claw::context::JobContext,
     ) -> Result<ToolOutput, ToolError> {
         let event = params
             .pointer("/webhook/headers/x-github-event")
@@ -90,8 +90,8 @@ impl Tool for MockGithubWebhookTool {
         ))
     }
 
-    fn webhook_capability(&self) -> Option<ironclaw::tools::wasm::WebhookCapability> {
-        Some(ironclaw::tools::wasm::WebhookCapability {
+    fn webhook_capability(&self) -> Option<t3claw::tools::wasm::WebhookCapability> {
+        Some(t3claw::tools::wasm::WebhookCapability {
             secret_name: Some("github_webhook_secret".to_string()),
             secret_header: Some("x-webhook-secret".to_string()),
             ..Default::default()
@@ -194,7 +194,7 @@ impl GatewayWorkflowHarness {
 
         let test_channel = Arc::new(TestChannel::new());
         let handle = TestChannelHandle::with_name(Arc::clone(&test_channel), "gateway");
-        let channel_manager = ironclaw::channels::ChannelManager::new();
+        let channel_manager = t3claw::channels::ChannelManager::new();
         channel_manager.add(Box::new(handle)).await;
         let channels = Arc::new(channel_manager);
 
@@ -207,7 +207,7 @@ impl GatewayWorkflowHarness {
             }
         });
 
-        let scheduler_slot: ironclaw::tools::builtin::SchedulerSlot =
+        let scheduler_slot: t3claw::tools::builtin::SchedulerSlot =
             Arc::new(tokio::sync::RwLock::new(None));
         let agent_session_manager = Arc::new(AgentSessionManager::new());
 
@@ -245,7 +245,7 @@ impl GatewayWorkflowHarness {
             routine_engine: Arc::clone(&routine_slot),
             startup_time: Instant::now(),
             active_config: Arc::new(tokio::sync::RwLock::new(
-                ironclaw::channels::web::platform::state::ActiveConfigSnapshot::default(),
+                t3claw::channels::web::platform::state::ActiveConfigSnapshot::default(),
             )),
             secrets_store: None,
             db_auth: None,
@@ -285,10 +285,10 @@ impl GatewayWorkflowHarness {
                 transcription: None,
                 document_extraction: None,
                 sandbox_readiness:
-                    ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+                    t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
                 builder: None,
                 llm_backend: "nearai".to_string(),
-                tenant_rates: std::sync::Arc::new(ironclaw::tenant::TenantRateRegistry::new(4, 3)),
+                tenant_rates: std::sync::Arc::new(t3claw::tenant::TenantRateRegistry::new(4, 3)),
                 runtime_policy: None,
             },
             channels,
@@ -327,8 +327,8 @@ impl GatewayWorkflowHarness {
         .await
         .expect("failed to start gateway server");
 
-        let webhook_secrets = Arc::new(ironclaw::secrets::InMemorySecretsStore::new(Arc::new(
-            ironclaw::secrets::SecretsCrypto::new(SecretString::from(
+        let webhook_secrets = Arc::new(t3claw::secrets::InMemorySecretsStore::new(Arc::new(
+            t3claw::secrets::SecretsCrypto::new(SecretString::from(
                 "test-key-at-least-32-chars-long!!".to_string(),
             ))
             .expect("crypto"),
@@ -336,22 +336,22 @@ impl GatewayWorkflowHarness {
         webhook_secrets
             .create(
                 &user_id,
-                ironclaw::secrets::CreateSecretParams::new(
+                t3claw::secrets::CreateSecretParams::new(
                     "github_webhook_secret",
                     "test-webhook-secret",
                 ),
             )
             .await
             .expect("store webhook secret");
-        let webhook_state = ironclaw::webhooks::ToolWebhookState {
+        let webhook_state = t3claw::webhooks::ToolWebhookState {
             tools: Arc::clone(gateway_state.tool_registry.as_ref().expect("tool registry")),
             routine_engine: Arc::clone(&routine_slot),
             user_id: user_id.clone(),
             secrets_store: Some(
-                webhook_secrets as Arc<dyn ironclaw::secrets::SecretsStore + Send + Sync>,
+                webhook_secrets as Arc<dyn t3claw::secrets::SecretsStore + Send + Sync>,
             ),
         };
-        let webhook_app = ironclaw::webhooks::routes(webhook_state);
+        let webhook_app = t3claw::webhooks::routes(webhook_state);
         let webhook_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("failed to bind webhook listener");

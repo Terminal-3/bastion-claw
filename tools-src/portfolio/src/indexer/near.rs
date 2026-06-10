@@ -369,7 +369,7 @@ fn warn_unparseable_number(field: &str, raw: &str) {
 fn near_http_get(url: &str) -> Result<String, String> {
     let headers = serde_json::json!({
         "Accept": "application/json",
-        "User-Agent": "IronClaw-Portfolio-Tool/0.1"
+        "User-Agent": "T3Claw-Portfolio-Tool/0.1"
     });
 
     let response =

@@ -1,4 +1,4 @@
-# IronClaw Reborn runtime profiles contract
+# T3Claw Reborn runtime profiles contract
 
 **Date:** 2026-04-26
 **Status:** Decision guide / profile boundary
@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-IronClaw should support secure default assistant runtimes, fast local coding-agent sessions, hosted multi-tenant deployments, and enterprise-dedicated deployments without forking the architecture.
+T3Claw should support secure default assistant runtimes, fast local coding-agent sessions, hosted multi-tenant deployments, and enterprise-dedicated deployments without forking the architecture.
 
 The mechanism is a host-owned `RuntimeProfile` constrained by `DeploymentMode`:
 
@@ -46,7 +46,7 @@ ActionScript, Wasm, DeclarativeHttp, Script, Mcp, LocalProcess, AgentLoopProcess
 None, Srt, SmolVm, Docker
 ```
 
-`DeploymentMode` answers: where is IronClaw running and who owns the machine boundary?
+`DeploymentMode` answers: where is T3Claw running and who owns the machine boundary?
 
 ```text
 LocalSingleUser, HostedMultiTenant, EnterpriseDedicated
@@ -236,16 +236,16 @@ This contract intentionally does not include a hosted-control-plane-to-local-run
 A local coding-agent command should be a profile over the normal host runtime, not a separate product architecture:
 
 ```bash
-ironclaw code . --profile local-dev
-ironclaw code . --profile local-safe
-ironclaw code . --profile local-yolo
-ironclaw code . --profile sandboxed
+t3claw code . --profile local-dev
+t3claw code . --profile local-safe
+t3claw code . --profile local-yolo
+t3claw code . --profile sandboxed
 ```
 
 Startup should print the active trust boundary:
 
 ```text
-IronClaw Local Coding Agent
+T3Claw Local Coding Agent
 Profile: local-dev
 Filesystem: direct workspace writes under /repo
 Shell: local host shell; approval for dangerous commands
@@ -404,7 +404,7 @@ A local coding agent can borrow the `pi-mono` `packages/coding-agent` ergonomics
 - extension hooks
 - streaming UI events
 
-But the IronClaw version must replace authority-bearing implementations:
+But the T3Claw version must replace authority-bearing implementations:
 
 ```text
 coding-agent style tool surface
@@ -495,4 +495,4 @@ agent_loop
   -> HostWorkspace / LocalHost / DeclarativeHttp / QuickJS / Experiment backends
 ```
 
-This gives IronClaw a fast local coding-agent mode while preserving the ability to switch the same loop and tools to hosted multi-tenant or enterprise-dedicated profiles later.
+This gives T3Claw a fast local coding-agent mode while preserving the ability to switch the same loop and tools to hosted multi-tenant or enterprise-dedicated profiles later.

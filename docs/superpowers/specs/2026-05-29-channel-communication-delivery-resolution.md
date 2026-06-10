@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-29
 **Status:** Design draft
-**Target architecture:** IronClaw Reborn (`crates/ironclaw_*`)
+**Target architecture:** T3Claw Reborn (`crates/t3claw_*`)
 **Related specs:** companion trigger-loop draft in nearai/ironclaw#3874,
 `docs/reborn/contracts/events-projections.md`,
 `docs/reborn/contracts/approvals.md`,
@@ -14,13 +14,13 @@ Define the layer that decides where user-visible communication should go after a
 Reborn run emits an event.
 
 This layer answers: given the run scope, actor, event kind, origin, and
-modality, which outbound target should IronClaw try? The answer is a
-**candidate only**. `ironclaw_outbound` still owns reply-target validation and
+modality, which outbound target should T3Claw try? The answer is a
+**candidate only**. `t3claw_outbound` still owns reply-target validation and
 delivery-attempt records before any transport sends.
 
 This design keeps three concepts separate:
 
-- **Ingress identity:** how a message or trigger entered IronClaw.
+- **Ingress identity:** how a message or trigger entered T3Claw.
 - **Execution authority:** which tenant/user/agent/project scope runs the turn.
 - **Communication destination:** where final replies, progress, or approval
   notifications should be delivered.
@@ -29,13 +29,13 @@ This design keeps three concepts separate:
 
 | Area | Owner | Notes |
 | --- | --- | --- |
-| Inbound binding and replay | `ironclaw_conversations` | Owns `InboundTurnRequest`, `ExternalConversationRef`, `external_event_id`, reply-target binding semantics. |
+| Inbound binding and replay | `t3claw_conversations` | Owns `InboundTurnRequest`, `ExternalConversationRef`, `external_event_id`, reply-target binding semantics. |
 | Run execution events | agent loop / run-state / event-stream crates | Emit final reply, progress, blocked approval/auth/resource states. |
-| Approval resolution | `ironclaw_approvals` | Resolves durable pending approvals into scoped leases. It does not prompt users or route UI. |
-| Outbound policy and validation | `ironclaw_outbound` | Owns notification policy state, `ReplyTargetBindingRef` validation, delivery attempts, sanitized failure records. |
+| Approval resolution | `t3claw_approvals` | Resolves durable pending approvals into scoped leases. It does not prompt users or route UI. |
+| Outbound policy and validation | `t3claw_outbound` | Owns notification policy state, `ReplyTargetBindingRef` validation, delivery attempts, sanitized failure records. |
 | Product transport rendering | product adapters / channels | Web UI, Telegram, etc. render/send after outbound policy authorizes a target. |
 
-Current implementation caveat: `ironclaw_outbound` is presently a policy and
+Current implementation caveat: `t3claw_outbound` is presently a policy and
 delivery-attempt preflight boundary, not the concrete sender. P0 delivery
 resolution applies only to Reborn product-adapter outbound paths such as
 `ProductAdapter::render_outbound` and adapter-declared outbound capabilities.
@@ -46,7 +46,7 @@ not a P0 acceptance criterion.
 
 ## 3. Proposed Layer
 
-Add `ironclaw_outbound::OutboundResolutionEngine` inside the outbound policy
+Add `t3claw_outbound::OutboundResolutionEngine` inside the outbound policy
 boundary. Every Reborn product-adapter outbound decision enters this engine
 before transport rendering. P0 is a **small deterministic rule engine**, not a
 user-authored or general-purpose rules platform: it applies an ordered set of
@@ -59,7 +59,7 @@ Run event
   FinalReplyReady | ProgressUpdate | ApprovalNeeded | AuthRequired | RunBlocked
         |
         v
-ironclaw_outbound::OutboundResolutionEngine
+t3claw_outbound::OutboundResolutionEngine
   entrypoints:
     resolve_requested_outbound(RequestedOutboundResolutionRequest)
     resolve_run_notification(RunNotificationResolutionRequest)
@@ -72,7 +72,7 @@ CommunicationDeliveryCandidate
   kind: final_reply | progress | approval_needed | auth_required | delivery_status
         |
         v
-ironclaw_outbound::OutboundPolicyService
+t3claw_outbound::OutboundPolicyService
   revalidates target
   records delivery attempt
   returns sealed ValidatedReplyTargetBinding or rejection
@@ -81,11 +81,11 @@ ironclaw_outbound::OutboundPolicyService
 Product outbound adapter / transport
 ```
 
-`ironclaw_outbound` owns this engine because the existing Reborn event /
+`t3claw_outbound` owns this engine because the existing Reborn event /
 projection contract already assigns outbound notification policy state,
 reply-target validation, delivery attempts, and sanitized failure records to
-that crate. The resolution engine must not live in `ironclaw_triggers`,
-`ironclaw_conversations`, or `ironclaw_approvals`. Reborn composition wires the
+that crate. The resolution engine must not live in `t3claw_triggers`,
+`t3claw_conversations`, or `t3claw_approvals`. Reborn composition wires the
 engine and store dependencies, but does not own the policy semantics.
 
 The resolution engine is read-only with respect to ingress and authority. It
@@ -237,7 +237,7 @@ enum RequestedOutboundKind {
 ```
 
 `requested_target` is a candidate, not send authority. It must still pass
-`ironclaw_outbound` validation before transport send. This context must not
+`t3claw_outbound` validation before transport send. This context must not
 carry raw message payloads, credentials, channel tokens, OAuth state, or backend
 error details.
 
@@ -268,7 +268,7 @@ SourceRouteContext {
 ```
 
 The `reply_target_binding_ref` is an outbound candidate, not authority. It still
-requires `ironclaw_outbound` revalidation before send.
+requires `t3claw_outbound` revalidation before send.
 
 ### Trigger Context
 
@@ -288,7 +288,7 @@ or `adapter_kind` as a communication destination.
 ## 5. Preferences and Overrides
 
 Users need changeable persisted defaults for normal communication and approvals.
-`ironclaw_outbound` owns this configuration because it owns notification policy,
+`t3claw_outbound` owns this configuration because it owns notification policy,
 reply-target validation, delivery attempts, and sanitized failure records. Store
 preferences by tenant and user:
 
@@ -342,7 +342,7 @@ Rules:
 - Trigger delivery overrides must not grant approval authority or bypass the
   approval resolver.
 - Stored targets are candidates only; every send revalidates through
-  `ironclaw_outbound`.
+  `t3claw_outbound`.
 
 ## 6. Resolution Rules
 
@@ -473,7 +473,7 @@ CapabilityHost returns RequireApproval
   -> ApprovalRequestStore saves Pending request
   -> RunState marks BlockedApproval
   -> EventStream publishes approval_needed
-  -> ironclaw_outbound::OutboundResolutionEngine may notify approval_prompt_target
+  -> t3claw_outbound::OutboundResolutionEngine may notify approval_prompt_target
   -> Product adapter renders GatePrompt if validated capabilities allow it
   -> Product inbound receives ApprovalResolution
   -> ApprovalResolver handles approve/deny
@@ -555,7 +555,7 @@ Communication delivery resolution must not change inbound acceptance, replay, or
 resume semantics.
 
 - Inbound user-message binding stays in product workflow and
-  `ironclaw_conversations`. The engine consumes canonical scope, actor, and
+  `t3claw_conversations`. The engine consumes canonical scope, actor, and
   route context after inbound acceptance; it does not parse product payloads or
   submit turns.
 - Approval and auth resume stay in their existing gateway / bridge / control

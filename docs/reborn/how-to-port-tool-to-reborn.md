@@ -1,6 +1,6 @@
 # How to port a v1 tool to Reborn
 
-This guide helps maintainers decide how an IronClaw v1 tool should move onto the Reborn capability path.
+This guide helps maintainers decide how an T3Claw v1 tool should move onto the Reborn capability path.
 
 The important distinction is that v1 used one `Tool` abstraction plus sidecar `*.capabilities.json` files for several different things. Reborn should keep those categories separate and describe them through Extension Manifest v2.
 
@@ -21,7 +21,7 @@ Ask first: **is this tool host-owned, sandboxed extension code, a process wrappe
 
 Rule of thumb:
 
-- If IronClaw owns the implementation and it needs privileged host services, make it **FirstParty**.
+- If T3Claw owns the implementation and it needs privileged host services, make it **FirstParty**.
 - If a user or registry installs it and it can run in a sandbox, make it **WASM**.
 - If it must execute a real process or CLI, make it **Script**.
 - If the integration already speaks MCP, make it **MCP**.
@@ -87,7 +87,7 @@ Important v2 rules:
 - `ManifestSource` comes from loader/install path, not TOML.
 - Installed local/registry manifests may declare only `wasm`, `mcp`, or `script` runtimes.
 - `first_party` and `system` runtimes are host-bundled only.
-- `ironclaw.*` extension IDs are reserved for host-bundled extensions.
+- `t3claw.*` extension IDs are reserved for host-bundled extensions.
 - Every capability uses extension-local `input_schema_ref` and `output_schema_ref`; no inline schemas, absolute paths, URLs, or `..` traversal.
 - `prompt_doc_ref` is optional lazy help metadata. Do not add one just to make a capability model-visible.
 - The default host-runtime catalog currently validates `host.runtime.http_egress`; other host-port names are future/deferred vocabulary until added to the catalog.
@@ -312,7 +312,7 @@ If the tool only wraps one or a few HTTP endpoints, prefer this order:
 
 1. WASM tool today.
 2. Future `DeclarativeHttp` runtime once implemented.
-3. FirstParty only if IronClaw owns the behavior and host policy requires host-owned code.
+3. FirstParty only if T3Claw owns the behavior and host policy requires host-owned code.
 
 Do not add a bespoke host HTTP client for one provider. HTTP must go through Reborn network/egress policy and credential injection paths.
 
@@ -347,7 +347,7 @@ For every Reborn capability invocation:
 
 - [ ] Manifest source is known (`HostBundled`, `InstalledLocal`, or `RegistryInstalled`) and used for validation.
 - [ ] Installed extensions cannot request FirstParty/System trust or runtime.
-- [ ] `ironclaw.*` IDs are host-bundled only.
+- [ ] `t3claw.*` IDs are host-bundled only.
 - [ ] Every capability declares effects matching its side effects.
 - [ ] Host ports are known to the host registry; unknown ports fail validation.
 - [ ] Schema/doc refs are relative extension-local paths only.
@@ -365,7 +365,7 @@ For manifest parsing:
 - [ ] valid v2 WASM manifest parses
 - [ ] installed FirstParty/System request is rejected
 - [ ] HostBundled FirstParty manifest parses but still requires matching handler
-- [ ] `ironclaw.*` ID is rejected for installed manifests
+- [ ] `t3claw.*` ID is rejected for installed manifests
 - [ ] schema refs reject absolute paths, URLs, backslashes, and `..`
 - [ ] model-visible capability without `prompt_doc_ref` parses and publishes without prompt docs
 - [ ] declared `prompt_doc_ref` still fails closed when missing, invalid UTF-8, oversized, or outside the package root
@@ -393,7 +393,7 @@ For ported WASM tools:
 
 This guide is useful for planning and initial ports, but several production paths still depend on follow-up work:
 
-- Extension Manifest v2 hard cutover in `ironclaw_extensions`.
+- Extension Manifest v2 hard cutover in `t3claw_extensions`.
 - `ManifestSource`-aware validation for installed vs host-bundled manifests.
 - Host-port vocabulary and scoped `HostPortView` handoff through `CapabilityHost`.
 - Hot Capability Surface construction from `visibility`, `prompt_doc_ref`, profiles, trust, grants, and surface policy.

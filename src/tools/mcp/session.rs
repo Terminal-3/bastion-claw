@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use ironclaw_common::McpServerName;
+use t3claw_common::McpServerName;
 use tokio::sync::RwLock;
 
 /// Composite key for an MCP session. A given user holds one session per

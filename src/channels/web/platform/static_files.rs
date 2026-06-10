@@ -21,13 +21,13 @@ use axum::{
 };
 use sha2::{Digest, Sha256};
 
-use ironclaw_gateway::assets;
-use ironclaw_gateway::{
+use t3claw_gateway::assets;
+use t3claw_gateway::{
     FrontendBundle, LayoutConfig, NONCE_PLACEHOLDER, ResolvedWidget, WidgetManifest,
     is_safe_widget_id,
 };
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 use crate::channels::web::auth::AuthenticatedUser;
 use crate::channels::web::platform::state::{FrontendCacheKey, FrontendHtmlCache, GatewayState};
 use crate::channels::web::types::HealthResponse;
@@ -184,8 +184,8 @@ async fn compute_frontend_cache_key(workspace: &crate::workspace::Workspace) -> 
 /// customization can ride a future JS-side fetch against
 /// `/api/frontend/layout`, which is authenticated and routes through
 /// `resolve_workspace(&state, &user)` so it returns the right workspace.
-/// See `crates/ironclaw_gateway/static/js/core/widgets.js` — the
-/// layout-config IIFE already reads `window.__IRONCLAW_LAYOUT__`, which
+/// See `crates/t3claw_gateway/static/js/core/widgets.js` — the
+/// layout-config IIFE already reads `window.__T3CLAW_LAYOUT__`, which
 /// a future change can populate from a `fetch('/api/frontend/layout')`
 /// after auth.
 ///
@@ -253,10 +253,7 @@ pub(crate) async fn build_frontend_html(state: &GatewayState) -> Option<String> 
             // double-application — see the doc comment on this function.
             custom_css: None,
         };
-        Some(ironclaw_gateway::assemble_index(
-            assets::INDEX_HTML,
-            &bundle,
-        ))
+        Some(t3claw_gateway::assemble_index(assets::INDEX_HTML, &bundle))
     };
 
     // Store in cache. If another request raced us here, either writer wins —
@@ -509,7 +506,7 @@ pub(crate) async fn load_resolved_widgets(
 
 // --- Static file handlers ---
 //
-// All frontend assets are embedded in the `ironclaw_gateway` crate.
+// All frontend assets are embedded in the `t3claw_gateway` crate.
 // These handlers serve them with appropriate MIME types and cache headers.
 
 /// Substitute [`NONCE_PLACEHOLDER`] sentinels in the assembled HTML with a
@@ -519,14 +516,14 @@ pub(crate) async fn load_resolved_widgets(
 /// assembled HTML embeds widget JavaScript inline (so a CSP-protected
 /// `<script src>` doesn't need to authenticate against `/api/frontend/widget/...`).
 /// A widget author has every right to write the literal string
-/// `__IRONCLAW_CSP_NONCE__` inside their own source — in a comment, a log
+/// `__T3CLAW_CSP_NONCE__` inside their own source — in a comment, a log
 /// line, a test fixture, or just as a constant they happen to define. A
 /// naive `html.replace(NONCE_PLACEHOLDER, nonce)` would silently rewrite
 /// every such occurrence into a per-request nonce, mutating widget code
 /// in a way the author didn't ask for.
 ///
 /// The substitution here targets the full attribute form
-/// `nonce="__IRONCLAW_CSP_NONCE__"`, which is the exact shape
+/// `nonce="__T3CLAW_CSP_NONCE__"`, which is the exact shape
 /// `assemble_index` emits when stamping nonces onto `<script>` tags. The
 /// double-quoted sentinel is unambiguous in HTML context — it can never
 /// accidentally match free text in a JS module body, a comment, or a
@@ -914,7 +911,7 @@ async fn verify_project_ownership(state: &GatewayState, project_id: &str, user_i
     }
 }
 
-/// Shared logic: resolve the file inside `~/.ironclaw/projects/{project_id}/`,
+/// Shared logic: resolve the file inside `~/.t3claw/projects/{project_id}/`,
 /// guard against path traversal, and stream the content with the right MIME type.
 async fn serve_project_file(project_id: &str, path: &str) -> axum::response::Response {
     // Reject project_id values that could escape the projects directory.
@@ -926,7 +923,7 @@ async fn serve_project_file(project_id: &str, path: &str) -> axum::response::Res
         return (StatusCode::BAD_REQUEST, "Invalid project ID").into_response();
     }
 
-    let base = ironclaw_base_dir().join("projects").join(project_id);
+    let base = t3claw_base_dir().join("projects").join(project_id);
 
     let file_path = base.join(path);
 
@@ -957,7 +954,7 @@ async fn serve_project_file(project_id: &str, path: &str) -> axum::response::Res
 // Tests for these helpers live alongside the route-level handler tests in
 // `src/channels/web/server.rs` (for now), where the full `GatewayState`
 // fixture is already in scope. They will migrate here once `server.rs` is
-// further trimmed in the next ironclaw#2599 increment.
+// further trimmed in the next t3claw#2599 increment.
 
 #[cfg(test)]
 mod tests {
@@ -979,7 +976,7 @@ mod tests {
     use crate::db::Database;
 
     use crate::workspace::Workspace;
-    use ironclaw_gateway::{NONCE_PLACEHOLDER, assets};
+    use t3claw_gateway::{NONCE_PLACEHOLDER, assets};
 
     #[tokio::test]
     async fn test_csp_header_present_on_responses() {
@@ -1214,7 +1211,7 @@ mod tests {
         use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
         use crate::db::Database as _;
         use crate::db::libsql::LibSqlBackend;
-        use ironclaw_embeddings::EmbeddingCacheConfig;
+        use t3claw_embeddings::EmbeddingCacheConfig;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("multi_tenant_css.db"))
@@ -1315,7 +1312,7 @@ mod tests {
         // Regression for the PR #1725 Copilot finding: a bare-string
         // replace would also rewrite any *body content* that happens to
         // contain the literal sentinel — e.g. a widget JS module that
-        // mentions `__IRONCLAW_CSP_NONCE__` in a comment, log line, or
+        // mentions `__T3CLAW_CSP_NONCE__` in a comment, log line, or
         // string constant. The attribute-targeted replace must leave
         // those untouched.
         //
@@ -1363,7 +1360,7 @@ mod tests {
         use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
         use crate::db::Database as _;
         use crate::db::libsql::LibSqlBackend;
-        use ironclaw_embeddings::EmbeddingCacheConfig;
+        use t3claw_embeddings::EmbeddingCacheConfig;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("multi_tenant_index.db"))

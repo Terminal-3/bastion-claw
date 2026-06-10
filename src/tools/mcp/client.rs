@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
-use ironclaw_common::McpServerName;
+use t3claw_common::McpServerName;
 use tokio::sync::RwLock;
 
 use crate::auth::resolve_access_token_string_with_refresh;
@@ -64,7 +64,7 @@ pub struct McpClient {
     ///
     /// Typed via `McpServerName` so session-manager lookups and logging
     /// are both compile-time-gated behind the allowlist validation that
-    /// lives in `ironclaw_common::identity`.
+    /// lives in `t3claw_common::identity`.
     server_name: McpServerName,
 
     /// Request ID counter.
@@ -632,7 +632,7 @@ impl McpClient {
                         )
                     } else {
                         format!(
-                            "MCP server '{}' requires authentication. Run: ironclaw mcp auth {}",
+                            "MCP server '{}' requires authentication. Run: t3claw mcp auth {}",
                             self.server_name, self.server_name
                         )
                     };
@@ -848,7 +848,7 @@ fn extract_server_name(url: &str) -> String {
 /// Build the canonical registry identifier for an MCP tool.
 ///
 /// MCP tool names commonly contain dashes (e.g. `notion-search`), and so do
-/// user-supplied server names (`my-server`). The IronClaw runtime converges
+/// user-supplied server names (`my-server`). The T3Claw runtime converges
 /// on snake_case identifiers (see `ToolRegistry::resolve_name`), and LLMs,
 /// Codex / GPT-5 in particular, silently normalize tool names to valid
 /// Python identifiers by converting dashes to underscores. If we registered

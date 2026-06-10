@@ -40,7 +40,7 @@ workspace/
 ```rust
 use std::sync::Arc;
 use crate::workspace::{Workspace, paths};
-use ironclaw_embeddings::{create_provider, EmbeddingCacheConfig, ProviderDeps};
+use t3claw_embeddings::{create_provider, EmbeddingCacheConfig, ProviderDeps};
 
 // Construct an embedding provider through the factory — concrete provider
 // types (OpenAI, NEAR AI, Ollama, Bedrock) are crate-private and must be
@@ -63,8 +63,8 @@ if let Some(emb) = embeddings {
 }
 
 // For tests: skip the cache layer and use the deterministic mock
-// (gated behind the `testing` feature on `ironclaw_embeddings`).
-// use ironclaw_embeddings::MockEmbeddings;
+// (gated behind the `testing` feature on `t3claw_embeddings`).
+// use t3claw_embeddings::MockEmbeddings;
 // let workspace = Workspace::new("user_123", pool)
 //     .with_embeddings_uncached(Arc::new(MockEmbeddings::new(1536)));
 

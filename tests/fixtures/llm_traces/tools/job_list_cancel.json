@@ -5,7 +5,7 @@
     "all_tools_succeeded": true,
     "min_responses": 1
   },
-  "_comment": "Steps 1-4 are pinned to the parent chat turn via the hint \"list jobs, then cancel\". The agent's create_job spawns a real background sub-job that runs its own LoopDelegate against the same TraceLlm queue; without hint scoping, sub-job + parent race for steps (depending on scheduler/await timing) and the parent can lose its third step. Step 5 catches the sub-job's first LLM call via the \"Continue.\" hint (the sub-job worker auto-injects a `Continue.` prompt as its first user turn) and returns immediate text, so the sub-job exits its loop without dipping back into parent's queue. Reference: ironclaw#3641 review thread.",
+  "_comment": "Steps 1-4 are pinned to the parent chat turn via the hint \"list jobs, then cancel\". The agent's create_job spawns a real background sub-job that runs its own LoopDelegate against the same TraceLlm queue; without hint scoping, sub-job + parent race for steps (depending on scheduler/await timing) and the parent can lose its third step. Step 5 catches the sub-job's first LLM call via the \"Continue.\" hint (the sub-job worker auto-injects a `Continue.` prompt as its first user turn) and returns immediate text, so the sub-job exits its loop without dipping back into parent's queue. Reference: t3claw#3641 review thread.",
   "steps": [
     {
       "request_hint": { "last_user_message_contains": "list jobs, then cancel" },

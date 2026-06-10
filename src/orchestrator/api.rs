@@ -24,8 +24,8 @@ use crate::worker::api::{
     CompletionReport, CredentialResponse, JobDescription, ProxyCompletionRequest,
     ProxyCompletionResponse, ProxyToolCompletionRequest, ProxyToolCompletionResponse, StatusUpdate,
 };
-use ironclaw_common::{AppEvent, JobResultStatus};
-use ironclaw_llm::{CompletionRequest, LlmProvider, ToolCompletionRequest};
+use t3claw_common::{AppEvent, JobResultStatus};
+use t3claw_llm::{CompletionRequest, LlmProvider, ToolCompletionRequest};
 
 /// A follow-up prompt queued for a Claude Code bridge.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -578,13 +578,13 @@ async fn get_credentials_handler(
     ))
 }
 
-fn format_finish_reason(reason: ironclaw_llm::FinishReason) -> String {
+fn format_finish_reason(reason: t3claw_llm::FinishReason) -> String {
     match reason {
-        ironclaw_llm::FinishReason::Stop => "stop".to_string(),
-        ironclaw_llm::FinishReason::Length => "length".to_string(),
-        ironclaw_llm::FinishReason::ToolUse => "tool_use".to_string(),
-        ironclaw_llm::FinishReason::ContentFilter => "content_filter".to_string(),
-        ironclaw_llm::FinishReason::Unknown => "unknown".to_string(),
+        t3claw_llm::FinishReason::Stop => "stop".to_string(),
+        t3claw_llm::FinishReason::Length => "length".to_string(),
+        t3claw_llm::FinishReason::ToolUse => "tool_use".to_string(),
+        t3claw_llm::FinishReason::ContentFilter => "content_filter".to_string(),
+        t3claw_llm::FinishReason::Unknown => "unknown".to_string(),
     }
 }
 

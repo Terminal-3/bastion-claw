@@ -34,7 +34,7 @@ mod tests {
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::LlmTrace;
-    use ironclaw_host_api::runtime_policy::{DeploymentMode, RuntimeProfile};
+    use t3claw_host_api::runtime_policy::{DeploymentMode, RuntimeProfile};
 
     /// Tools that declare `ToolRuntimeAffordance::HostFilesystem` under PR
     /// #3243. These resolve as visible iff `policy.filesystem_backend ==

@@ -1,7 +1,7 @@
-//! TUI channel — bridges the `Channel` trait to `ironclaw_tui`.
+//! TUI channel — bridges the `Channel` trait to `t3claw_tui`.
 //!
 //! The TUI crate owns the terminal and event loop. This module translates
-//! between the agent's `Channel` trait and `ironclaw_tui`'s event/message
+//! between the agent's `Channel` trait and `t3claw_tui`'s event/message
 //! channels.
 
 use std::path::Path;
@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use tokio::sync::{Mutex, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
-use ironclaw_tui::{SkillCategory, ToolCategory, TuiAppConfig, TuiEvent, TuiLayout, start_tui};
+use t3claw_tui::{SkillCategory, ToolCategory, TuiAppConfig, TuiEvent, TuiLayout, start_tui};
 
 use crate::channels::web::log_layer::LogBroadcaster;
 use crate::channels::{
@@ -117,7 +117,7 @@ fn infer_context_window(model_id: &str) -> u64 {
 }
 
 fn build_tui_incoming_message(
-    user_msg: ironclaw_tui::TuiUserMessage,
+    user_msg: t3claw_tui::TuiUserMessage,
     user_id: &str,
     sys_tz: &str,
 ) -> IncomingMessage {
@@ -155,7 +155,7 @@ fn build_engine_thread_detail_event(detail: crate::bridge::EngineThreadDetail) -
     let messages = detail
         .messages
         .into_iter()
-        .map(|message| ironclaw_tui::EngineThreadMessageEntry {
+        .map(|message| t3claw_tui::EngineThreadMessageEntry {
             role: message
                 .get("role")
                 .and_then(serde_json::Value::as_str)
@@ -175,7 +175,7 @@ fn build_engine_thread_detail_event(detail: crate::bridge::EngineThreadDetail) -
         .collect();
 
     TuiEvent::EngineThreadDetail {
-        detail: ironclaw_tui::EngineThreadDetailEntry {
+        detail: t3claw_tui::EngineThreadDetailEntry {
             id: detail.info.id,
             goal: detail.info.goal,
             thread_type: detail.info.thread_type,
@@ -194,7 +194,7 @@ fn build_engine_thread_detail_event(detail: crate::bridge::EngineThreadDetail) -
     }
 }
 
-/// TUI channel backed by `ironclaw_tui`.
+/// TUI channel backed by `t3claw_tui`.
 pub struct TuiChannel {
     user_id: String,
     event_tx: Arc<Mutex<Option<mpsc::Sender<TuiEvent>>>>,
@@ -320,7 +320,7 @@ impl Channel for TuiChannel {
             available_models: self.available_models.clone(),
         };
 
-        let ironclaw_tui::TuiAppHandle {
+        let t3claw_tui::TuiAppHandle {
             event_tx,
             mut msg_rx,
             join_handle: _join,
@@ -371,7 +371,7 @@ impl Channel for TuiChannel {
             while let Some(user_msg) = msg_rx.recv().await {
                 if let Some(action) = user_msg.ui_action {
                     match action {
-                        ironclaw_tui::TuiUiAction::OpenEngineThreadDetail { thread_id } => {
+                        t3claw_tui::TuiUiAction::OpenEngineThreadDetail { thread_id } => {
                             match crate::bridge::get_engine_thread(&thread_id, &user_id).await {
                                 Ok(Some(detail)) => {
                                     let _ = detail_event_tx
@@ -578,7 +578,7 @@ impl Channel for TuiChannel {
             StatusUpdate::ThreadList { threads } => TuiEvent::ThreadList {
                 threads: threads
                     .into_iter()
-                    .map(|t| ironclaw_tui::ThreadEntry {
+                    .map(|t| t3claw_tui::ThreadEntry {
                         id: t.id,
                         title: t.title,
                         message_count: t.message_count,
@@ -590,7 +590,7 @@ impl Channel for TuiChannel {
             StatusUpdate::EngineThreadList { threads } => TuiEvent::EngineThreadList {
                 threads: threads
                     .into_iter()
-                    .map(|t| ironclaw_tui::EngineThreadEntry {
+                    .map(|t| t3claw_tui::EngineThreadEntry {
                         id: t.id,
                         goal: t.goal,
                         thread_type: t.thread_type,
@@ -610,14 +610,14 @@ impl Channel for TuiChannel {
                 thread_id,
                 messages: messages
                     .into_iter()
-                    .map(|m| ironclaw_tui::HistoryMessage {
+                    .map(|m| t3claw_tui::HistoryMessage {
                         role: m.role,
                         content: m.content,
                         timestamp: m.timestamp,
                     })
                     .collect(),
                 pending_approval: pending_approval.map(|approval| {
-                    ironclaw_tui::HistoryApprovalRequest {
+                    t3claw_tui::HistoryApprovalRequest {
                         request_id: approval.request_id,
                         tool_name: approval.tool_name,
                         description: approval.description,
@@ -666,7 +666,7 @@ impl Channel for TuiChannel {
 
 #[cfg(test)]
 mod tests {
-    use ironclaw_tui::TuiUserMessage;
+    use t3claw_tui::TuiUserMessage;
 
     #[test]
     fn resolve_tui_layout_merges_file_and_config() {

@@ -3,10 +3,10 @@ title: Database Backends
 description: PostgreSQL vs libSQL — choosing your database
 ---
 
-IronClaw supports two database backends: **PostgreSQL** and **libSQL** (embedded SQLite). **PostgreSQL is the default** — if you don't set `DATABASE_BACKEND`, IronClaw will use PostgreSQL and require a `DATABASE_URL`. Choose libSQL for zero-config personal use.
+T3Claw supports two database backends: **PostgreSQL** and **libSQL** (embedded SQLite). **PostgreSQL is the default** — if you don't set `DATABASE_BACKEND`, T3Claw will use PostgreSQL and require a `DATABASE_URL`. Choose libSQL for zero-config personal use.
 
 <Warning>
-If you start IronClaw without configuring a database, you'll see: `DATABASE_URL is required`. Run `ironclaw onboard` or set the environment variables manually.
+If you start T3Claw without configuring a database, you'll see: `DATABASE_URL is required`. Run `t3claw onboard` or set the environment variables manually.
 </Warning>
 
 ## Quick Comparison
@@ -33,14 +33,14 @@ Recommended for production deployments, multi-user scenarios, and high-throughpu
 
 <AccordionGroup>
   <Accordion title="Docker Compose (recommended)" icon="container">
-    The fastest way to get started. A `docker-compose.yml` is included in the IronClaw repository:
+    The fastest way to get started. A `docker-compose.yml` is included in the T3Claw repository:
 
     ```bash
-    cd ironclaw
+    cd t3claw
     docker compose up -d postgres
     ```
 
-    This starts `pgvector/pgvector:pg16` on `127.0.0.1:5432` with database, user, and password all set to `ironclaw`.
+    This starts `pgvector/pgvector:pg16` on `127.0.0.1:5432` with database, user, and password all set to `t3claw`.
 
     <Warning>
     These credentials are for local development only. Change `POSTGRES_PASSWORD` for any non-local deployment.
@@ -67,15 +67,15 @@ Recommended for production deployments, multi-user scenarios, and high-throughpu
 
 ```bash
 # Create database
-sudo -u postgres psql -c "CREATE DATABASE ironclaw;"
-sudo -u postgres psql -c "CREATE USER ironclaw WITH PASSWORD 'your-password';"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE ironclaw TO ironclaw;"
+sudo -u postgres psql -c "CREATE DATABASE t3claw;"
+sudo -u postgres psql -c "CREATE USER t3claw WITH PASSWORD 'your-password';"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE t3claw TO t3claw;"
 
 # Enable pgvector
-sudo -u postgres psql -d ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+sudo -u postgres psql -d t3claw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
-### IronClaw Configuration
+### T3Claw Configuration
 
 ```bash
 # Select backend (optional — postgres is the default)
@@ -83,12 +83,12 @@ sudo -u postgres psql -d ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 export DATABASE_BACKEND=postgres
 
 # Required for PostgreSQL
-export DATABASE_URL="postgres://ironclaw:***@localhost/ironclaw"
+export DATABASE_URL="postgres://t3claw:***@localhost/t3claw"
 export DATABASE_POOL_SIZE=30  # default; increase for high-throughput workloads
 ```
 
 <Warning>
-`DATABASE_URL` is **required** when using PostgreSQL. If not set, IronClaw will fail to start with the error: `DATABASE_URL is required — Run 'ironclaw onboard' or set DATABASE_URL environment variable`.
+`DATABASE_URL` is **required** when using PostgreSQL. If not set, T3Claw will fail to start with the error: `DATABASE_URL is required — Run 't3claw onboard' or set DATABASE_URL environment variable`.
 </Warning>
 
 Or in the wizard:
@@ -115,16 +115,16 @@ Recommended for personal use, development, and single-user deployments. Zero set
 ### How It Works
 
 libSQL is an embedded SQLite-compatible database:
-- Database is a single file (`~/.ironclaw/ironclaw.db`)
+- Database is a single file (`~/.t3claw/t3claw.db`)
 - No separate server process
 - Auto-created on first connection
 - Full SQLite feature set
 
-### IronClaw Configuration
+### T3Claw Configuration
 
 ```bash
 export DATABASE_BACKEND=libsql
-export LIBSQL_PATH="/home/user/.ironclaw/ironclaw.db"
+export LIBSQL_PATH="/home/user/.t3claw/t3claw.db"
 ```
 
 Or just use the wizard defaults:
@@ -138,13 +138,13 @@ libSQL supports syncing to Turso for cloud backup:
 
 ```bash
 export DATABASE_BACKEND=libsql
-export LIBSQL_PATH="/home/user/.ironclaw/ironclaw.db"
+export LIBSQL_PATH="/home/user/.t3claw/t3claw.db"
 export LIBSQL_URL="libsql://your-db.turso.io"
 export LIBSQL_AUTH_TOKEN="***"
 ```
 
 <Warning>
-`LIBSQL_AUTH_TOKEN` is **required** when `LIBSQL_URL` is set. IronClaw will fail to start without it.
+`LIBSQL_AUTH_TOKEN` is **required** when `LIBSQL_URL` is set. T3Claw will fail to start without it.
 </Warning>
 
 This keeps a local copy with automatic cloud sync.
@@ -189,40 +189,40 @@ SQLite and PostgreSQL have different SQL dialects. A raw `sqlite3 .dump` output 
 
 1. **Using pgloader (recommended):**
    ```bash
-   pgloader ~/.ironclaw/ironclaw.db postgresql://ironclaw:***@localhost/ironclaw
+   pgloader ~/.t3claw/t3claw.db postgresql://t3claw:***@localhost/t3claw
    ```
 
 2. **Manual export (may require editing):**
    ```bash
-   sqlite3 ~/.ironclaw/ironclaw.db ".dump" > ironclaw.sql
-   # Edit ironclaw.sql to remove PRAGMAs and fix type incompatibilities
-   psql -d ironclaw -f ironclaw.sql
+   sqlite3 ~/.t3claw/t3claw.db ".dump" > t3claw.sql
+   # Edit t3claw.sql to remove PRAGMAs and fix type incompatibilities
+   psql -d t3claw -f t3claw.sql
    ```
 
-3. **Update IronClaw config:**
+3. **Update T3Claw config:**
    ```bash
    export DATABASE_BACKEND=postgres
-   export DATABASE_URL="postgres://user:***@localhost/ironclaw"
+   export DATABASE_URL="postgres://user:***@localhost/t3claw"
    ```
 
-4. **Restart IronClaw**
+4. **Restart T3Claw**
 
 ### From PostgreSQL to libSQL
 
 1. **Export:**
    ```bash
-   pg_dump -h localhost -U ironclaw ironclaw > ironclaw.sql
+   pg_dump -h localhost -U t3claw t3claw > t3claw.sql
    ```
 
 2. **Convert and import to SQLite** (requires conversion tools)
 
-3. **Update IronClaw config**
+3. **Update T3Claw config**
 
 ## When to Choose Which
 
 ### Choose libSQL if:
 
-- Running IronClaw on a personal laptop/desktop
+- Running T3Claw on a personal laptop/desktop
 - Single-user deployment
 - Want zero database administration
 - Don't need horizontal scaling
@@ -243,20 +243,20 @@ SQLite and PostgreSQL have different SQL dialects. A raw `sqlite3 .dump` output 
 
 ```bash
 # Backup
-pg_dump -h localhost -U ironclaw ironclaw > backup.sql
+pg_dump -h localhost -U t3claw t3claw > backup.sql
 
 # Restore
-psql -d ironclaw -f backup.sql
+psql -d t3claw -f backup.sql
 ```
 
 ### libSQL
 
 ```bash
 # Backup (simple file copy)
-cp ~/.ironclaw/ironclaw.db ~/.ironclaw/ironclaw.db.backup
+cp ~/.t3claw/t3claw.db ~/.t3claw/t3claw.db.backup
 
 # Restore
-cp ~/.ironclaw/ironclaw.db.backup ~/.ironclaw/ironclaw.db
+cp ~/.t3claw/t3claw.db.backup ~/.t3claw/t3claw.db
 
 # With Turso: automatic cloud backup
 ```
@@ -280,7 +280,7 @@ cp ~/.ironclaw/ironclaw.db.backup ~/.ironclaw/ironclaw.db
   <Accordion title="Database file is locked" icon="lock">
     ```bash
     # Find and kill process
-    lsof ~/.ironclaw/ironclaw.db
+    lsof ~/.t3claw/t3claw.db
     kill -9 <pid>
 
     # Or wait for it to release

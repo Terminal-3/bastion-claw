@@ -56,7 +56,7 @@ expose Bot-API-equivalent handlers under their canonical paths, and
 provide `/__mock/...` test hooks for seeding / draining / resetting.
 
 `run_workflow_canary.py` builds a comma-joined
-`IRONCLAW_TEST_HTTP_REMAP` for the gateway env so outbound HTTP for
+`T3CLAW_TEST_HTTP_REMAP` for the gateway env so outbound HTTP for
 `api.telegram.org`, `sheets.googleapis.com`, `www.googleapis.com`,
 `news.ycombinator.com`, `gmail.googleapis.com`, and
 `api.search.brave.com` lands at the corresponding mock loopback
@@ -137,7 +137,7 @@ dispatcher drives both.
    surface.
 5. For new mocks, add a `<name>_mock.py` in this directory, a
    `_spawn_mock_<name>` helper in the runner, and an entry in the
-   comma-joined `IRONCLAW_TEST_HTTP_REMAP`.
+   comma-joined `T3CLAW_TEST_HTTP_REMAP`.
 
 ## Deferred coverage
 

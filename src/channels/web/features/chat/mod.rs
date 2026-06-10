@@ -3,7 +3,7 @@
 //! Owns the browser-facing chat surface end-to-end: message ingress, gate
 //! resolution, thread management, history playback, SSE event stream, and
 //! the WebSocket upgrade. This is the biggest slice extracted so far
-//! (ironclaw#2599 stage 4c) — prior stages (oauth, pairing, status, logs)
+//! (t3claw#2599 stage 4c) — prior stages (oauth, pairing, status, logs)
 //! left chat in `server.rs` because the gate-flow and SSE/WS reconnect
 //! surfaces needed the widest review window.
 //!
@@ -205,9 +205,9 @@ pub(crate) async fn chat_approval_handler(
     // keys `PendingGateStore`. Mixing them up would miss every gate
     // whose channel scope differs from its engine thread.
     let resolution = if approved {
-        ironclaw_engine::GateResolution::Approved { always }
+        t3claw_engine::GateResolution::Approved { always }
     } else {
-        ironclaw_engine::GateResolution::Denied { reason: None }
+        t3claw_engine::GateResolution::Denied { reason: None }
     };
     // Match the legacy mpsc path's settings precedence (cache → raw DB)
     // so an `action="always"` approval still persists
@@ -331,10 +331,10 @@ pub(crate) async fn chat_gate_resolve_handler(
     let mission_outcome = match req.resolution {
         GateResolutionPayload::Approved { .. }
         | GateResolutionPayload::CredentialProvided { .. } => {
-            Some(ironclaw_engine::GateResolutionOutcome::Approved)
+            Some(t3claw_engine::GateResolutionOutcome::Approved)
         }
-        GateResolutionPayload::Denied => Some(ironclaw_engine::GateResolutionOutcome::Denied),
-        GateResolutionPayload::Cancelled => Some(ironclaw_engine::GateResolutionOutcome::Cancelled),
+        GateResolutionPayload::Denied => Some(t3claw_engine::GateResolutionOutcome::Denied),
+        GateResolutionPayload::Cancelled => Some(t3claw_engine::GateResolutionOutcome::Cancelled),
     };
     let mission_resume = mission_outcome.map(|outcome| (outcome, gate_request_id));
 
@@ -1009,9 +1009,9 @@ pub(crate) async fn pending_gate_extension_name(
     user_id: &str,
     tool_name: &str,
     parameters: &str,
-    resume_kind: &ironclaw_engine::ResumeKind,
-) -> Option<ironclaw_common::ExtensionName> {
-    let ironclaw_engine::ResumeKind::Authentication {
+    resume_kind: &t3claw_engine::ResumeKind,
+) -> Option<t3claw_common::ExtensionName> {
+    let t3claw_engine::ResumeKind::Authentication {
         credential_name, ..
     } = resume_kind
     else {
@@ -1361,7 +1361,7 @@ fn summary_live_state(summary: &crate::history::ConversationSummary) -> Option<S
 // `test_gateway_state_with_store_and_session_manager`,
 // `test_gateway_state_with_dependencies`) now live in
 // `crate::channels::web::test_helpers` as `pub(crate)` functions, so
-// stage 6 of ironclaw#2599 can migrate the caller-level tests into this
+// stage 6 of t3claw#2599 can migrate the caller-level tests into this
 // module alongside the helpers without an API change.
 
 #[cfg(test)]
@@ -2150,16 +2150,16 @@ mod tests {
         let project_id =
             crate::bridge::test_support::install_engine_state_with_threads(Vec::new()).await;
 
-        let mut foreground_thread = ironclaw_engine::Thread::new(
+        let mut foreground_thread = t3claw_engine::Thread::new(
             "assistant hello",
-            ironclaw_engine::ThreadType::Foreground,
+            t3claw_engine::ThreadType::Foreground,
             project_id,
             "alice",
-            ironclaw_engine::ThreadConfig::default(),
+            t3claw_engine::ThreadConfig::default(),
         );
         foreground_thread
             .messages
-            .push(ironclaw_engine::ThreadMessage::user("hello"));
+            .push(t3claw_engine::ThreadMessage::user("hello"));
         let foreground_thread_id = foreground_thread.id.0;
 
         crate::bridge::test_support::install_engine_state_with_threads(vec![foreground_thread])
@@ -2564,19 +2564,19 @@ mod tests {
 
         let project_id =
             crate::bridge::test_support::install_engine_state_with_threads(Vec::new()).await;
-        let mut thread = ironclaw_engine::Thread::new(
+        let mut thread = t3claw_engine::Thread::new(
             "demo goal",
-            ironclaw_engine::ThreadType::Foreground,
+            t3claw_engine::ThreadType::Foreground,
             project_id,
             "alice",
-            ironclaw_engine::ThreadConfig::default(),
+            t3claw_engine::ThreadConfig::default(),
         );
         thread
             .messages
-            .push(ironclaw_engine::ThreadMessage::user("hello engine"));
+            .push(t3claw_engine::ThreadMessage::user("hello engine"));
         thread
             .messages
-            .push(ironclaw_engine::ThreadMessage::assistant("hi back"));
+            .push(t3claw_engine::ThreadMessage::assistant("hi back"));
         let thread_uuid = thread.id.0;
         crate::bridge::test_support::install_engine_state_with_threads(vec![thread]).await;
 
@@ -2612,12 +2612,12 @@ mod tests {
 
         let project_id =
             crate::bridge::test_support::install_engine_state_with_threads(Vec::new()).await;
-        let thread = ironclaw_engine::Thread::new(
+        let thread = t3claw_engine::Thread::new(
             "empty engine thread",
-            ironclaw_engine::ThreadType::Foreground,
+            t3claw_engine::ThreadType::Foreground,
             project_id,
             "alice",
-            ironclaw_engine::ThreadConfig::default(),
+            t3claw_engine::ThreadConfig::default(),
         );
         let thread_uuid = thread.id.0;
         crate::bridge::test_support::install_engine_state_with_threads(vec![thread]).await;
@@ -2646,16 +2646,16 @@ mod tests {
 
         let project_id =
             crate::bridge::test_support::install_engine_state_with_threads(Vec::new()).await;
-        let mut thread = ironclaw_engine::Thread::new(
+        let mut thread = t3claw_engine::Thread::new(
             "bob's secret",
-            ironclaw_engine::ThreadType::Foreground,
+            t3claw_engine::ThreadType::Foreground,
             project_id,
             "bob",
-            ironclaw_engine::ThreadConfig::default(),
+            t3claw_engine::ThreadConfig::default(),
         );
         thread
             .messages
-            .push(ironclaw_engine::ThreadMessage::assistant("private reply"));
+            .push(t3claw_engine::ThreadMessage::assistant("private reply"));
         let thread_uuid = thread.id.0;
         crate::bridge::test_support::install_engine_state_with_threads(vec![thread]).await;
 
@@ -2745,9 +2745,8 @@ mod tests {
             "test-user",
             "tool_install",
             r#"{"name":"telegram"}"#,
-            &ironclaw_engine::ResumeKind::Authentication {
-                credential_name: ironclaw_common::CredentialName::new("telegram_bot_token")
-                    .unwrap(),
+            &t3claw_engine::ResumeKind::Authentication {
+                credential_name: t3claw_common::CredentialName::new("telegram_bot_token").unwrap(),
                 instructions: "paste token".to_string(),
                 auth_url: None,
             },
@@ -2769,8 +2768,8 @@ mod tests {
             "test-user",
             "tool-install",
             r#"{"name":"telegram"}"#,
-            &ironclaw_engine::ResumeKind::Authentication {
-                credential_name: ironclaw_common::CredentialName::from_trusted(
+            &t3claw_engine::ResumeKind::Authentication {
+                credential_name: t3claw_common::CredentialName::from_trusted(
                     "telegram_bot_token".into(),
                 ),
                 instructions: "paste token".to_string(),
@@ -2829,8 +2828,8 @@ mod tests {
             "test-user",
             "notion_search",
             "{}",
-            &ironclaw_engine::ResumeKind::Authentication {
-                credential_name: ironclaw_common::CredentialName::new("notion_token").unwrap(),
+            &t3claw_engine::ResumeKind::Authentication {
+                credential_name: t3claw_common::CredentialName::new("notion_token").unwrap(),
                 instructions: "paste token".to_string(),
                 auth_url: None,
             },
@@ -2914,7 +2913,7 @@ mod tests {
             let thread_id = {
                 let thread = sess.create_thread(Some("gateway"));
                 let thread_id = thread.id;
-                thread.enter_auth_mode(ironclaw_common::ExtensionName::new("telegram").unwrap());
+                thread.enter_auth_mode(t3claw_common::ExtensionName::new("telegram").unwrap());
                 thread_id
             };
             sess.switch_thread(thread_id);
@@ -2971,9 +2970,9 @@ mod tests {
             let target_thread_id = Uuid::new_v4();
             let other_thread_id = Uuid::new_v4();
             sess.create_thread_with_id(target_thread_id, Some("gateway"))
-                .enter_auth_mode(ironclaw_common::ExtensionName::new("telegram").unwrap());
+                .enter_auth_mode(t3claw_common::ExtensionName::new("telegram").unwrap());
             sess.create_thread_with_id(other_thread_id, Some("gateway"))
-                .enter_auth_mode(ironclaw_common::ExtensionName::new("notion").unwrap());
+                .enter_auth_mode(t3claw_common::ExtensionName::new("notion").unwrap());
             sess.switch_thread(other_thread_id);
         }
 
@@ -3123,7 +3122,7 @@ mod tests {
             let thread = sess.create_thread(Some("gateway"));
             let thread_id = thread.id;
             thread.pending_auth = Some(crate::agent::session::PendingAuth {
-                extension_name: ironclaw_common::ExtensionName::new("telegram").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("telegram").unwrap(),
                 created_at: chrono::Utc::now() - chrono::Duration::minutes(16),
             });
             sess.switch_thread(thread_id);

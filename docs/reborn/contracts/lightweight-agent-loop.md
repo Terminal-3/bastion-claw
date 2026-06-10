@@ -1,4 +1,4 @@
-# IronClaw Reborn lightweight agent loop contract
+# T3Claw Reborn lightweight agent loop contract
 
 **Date:** 2026-04-26
 **Status:** Decision guide / reference loop contract
@@ -20,7 +20,7 @@ stream assistant
 -> repeat until reply, blocked, failed, or interrupted
 ```
 
-But it is not a dependency on `pi-mono`, and it does not import `pi-mono` authority semantics. It is a Reborn-native loop that runs inside IronClaw host contracts.
+But it is not a dependency on `pi-mono`, and it does not import `pi-mono` authority semantics. It is a Reborn-native loop that runs inside T3Claw host contracts.
 
 The loop may be packaged as a bundled `agent_loop` extension or implemented in a shipped reference-loop crate. In both cases, it receives only a narrow kernel-mediated host facade, never raw service managers, and never a bypass around `CapabilityHost`/policy checks.
 
@@ -58,7 +58,7 @@ The host-facing parent protocol remains:
 Reply | CapabilityCalls
 ```
 
-Provider-native tool calling can encode `CapabilityCalls`, but the loop must normalize provider tool calls into IronClaw capability calls before execution.
+Provider-native tool calling can encode `CapabilityCalls`, but the loop must normalize provider tool calls into T3Claw capability calls before execution.
 
 The following are not top-level parent protocol branches:
 
@@ -465,7 +465,7 @@ host surface: AgentLoopHost facade only
 
 Generated extensions cannot create new parent-loop authority surfaces. They may provide capabilities that this loop can call, subject to normal capability registration, grants, approvals, and runtime dispatch.
 
-`ironclaw_extensions` may register bundled package metadata if useful, but it must not execute the loop. Loop execution belongs to the configured loop runner/service that owns the `AgentLoopHost` facade and remains subject to kernel-mediated policy.
+`t3claw_extensions` may register bundled package metadata if useful, but it must not execute the loop. Loop execution belongs to the configured loop runner/service that owns the `AgentLoopHost` facade and remains subject to kernel-mediated policy.
 
 ---
 

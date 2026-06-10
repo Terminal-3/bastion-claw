@@ -24,7 +24,7 @@ impl Tool for PairingApproveTool {
     }
 
     fn description(&self) -> &str {
-        "Approve a Slack pairing code to bind the user's Slack account to their IronClaw user. The user receives the code in Slack and provides it here."
+        "Approve a Slack pairing code to bind the user's Slack account to their T3Claw user. The user receives the code in Slack and provides it here."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -57,7 +57,7 @@ impl Tool for PairingApproveTool {
         match self.store.approve(channel, code, &user_id).await {
             Ok(approval) => {
                 let msg = format!(
-                    "Pairing approved! Your {} account (external ID: {}) is now linked to your IronClaw user.",
+                    "Pairing approved! Your {} account (external ID: {}) is now linked to your T3Claw user.",
                     approval.channel, approval.external_id
                 );
                 Ok(ToolOutput::text(&msg, start.elapsed()))

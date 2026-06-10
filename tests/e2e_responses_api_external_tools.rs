@@ -58,8 +58,8 @@ mod tests {
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::LlmTrace;
-    use ironclaw::bridge::ExternalToolCatalog;
-    use ironclaw_engine::{ActionDef, EffectType, ModelToolSurface, ThreadId};
+    use t3claw::bridge::ExternalToolCatalog;
+    use t3claw_engine::{ActionDef, EffectType, ModelToolSurface, ThreadId};
     use tokio::sync::Mutex;
 
     const TIMEOUT: Duration = Duration::from_secs(10);
@@ -120,11 +120,8 @@ mod tests {
     ) -> Option<(uuid::Uuid, String)> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            if let Ok(Some(view)) = ironclaw::bridge::get_engine_pending_gate(user_id, None).await
-                && matches!(
-                    view.resume_kind,
-                    ironclaw_engine::ResumeKind::External { .. }
-                )
+            if let Ok(Some(view)) = t3claw::bridge::get_engine_pending_gate(user_id, None).await
+                && matches!(view.resume_kind, t3claw_engine::ResumeKind::External { .. })
             {
                 let request_id = uuid::Uuid::parse_str(&view.request_id).ok()?;
                 return Some((request_id, view.tool_name.clone()));
@@ -173,7 +170,7 @@ mod tests {
         // ThreadId once `handle_user_message` returns (Bug 1 fix).
         register_under_scope(scope_uuid, "lookup_weather").await;
 
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             "gateway",
             "test-user",
             "Look up the weather in NYC.",
@@ -250,7 +247,7 @@ mod tests {
         let unique_action = format!("cleanup_marker_{}", uuid::Uuid::new_v4().simple());
         register_under_scope(scope_uuid, &unique_action).await;
 
-        let catalog = ironclaw::bridge::engine_external_tool_catalog()
+        let catalog = t3claw::bridge::engine_external_tool_catalog()
             .await
             .expect("catalog");
         assert!(
@@ -258,7 +255,7 @@ mod tests {
             "marker action must be present immediately after registration"
         );
 
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             "gateway",
             "test-user",
             "Hello! Introduce yourself briefly.",
@@ -327,7 +324,7 @@ mod tests {
         register_under_scope(scope_uuid, "lookup_weather").await;
 
         // Send the user message with the matching conversation_scope.
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             "gateway",
             "test-user",
             "Look up the weather in NYC.",
@@ -354,7 +351,7 @@ mod tests {
     async fn register_under_scope(scope_uuid: uuid::Uuid, action_name: &str) {
         let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
         loop {
-            if let Some(catalog) = ironclaw::bridge::engine_external_tool_catalog().await {
+            if let Some(catalog) = t3claw::bridge::engine_external_tool_catalog().await {
                 catalog
                     .register(
                         ThreadId(scope_uuid),
@@ -471,7 +468,7 @@ mod tests {
     /// the wrong UI would render.
     #[tokio::test]
     async fn callback_id_disambiguates_external_from_oauth() {
-        use ironclaw::bridge::{
+        use t3claw::bridge::{
             call_id_from_external_callback, external_tool_callback_id, is_external_tool_callback_id,
         };
         let cb = external_tool_callback_id("call_42");

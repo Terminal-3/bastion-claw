@@ -3,13 +3,13 @@
 **Status:** Implementation-ready
 **Date:** 2026-05-19
 **Parent:** [`README.md`](./README.md) (overarching design)
-**Scope:** `crates/ironclaw_turns`, `crates/ironclaw_agent_loop`, `crates/ironclaw_reborn`
+**Scope:** `crates/t3claw_turns`, `crates/t3claw_agent_loop`, `crates/t3claw_reborn`
 
 This document is the detailed, implementer-facing spec for **Phase 1** of the
 subagent-spawn feature. Phase 1 lands the *contracts and isolated units* that
 Phase 2 (mechanisms) and Phase 3 (integration) build on. It is three
 independently-reviewable PRs, but **P1.B depends on P1.A** if each PR must build
-against the whole workspace: P1.B maps the new `ironclaw_turns` gate kinds in
+against the whole workspace: P1.B maps the new `t3claw_turns` gate kinds in
 the executor. P1.C is independent. See §0 and §4 for the exact ordering.
 
 Every type definition, field name, and signature in this doc was checked against
@@ -34,7 +34,7 @@ they are the seam.
 | New `LoopBlockedKind` variant | `AwaitDependentRun` | P1.A | executor `blocked_kind` (P3) |
 | New `BlockedReason` variant | `DependentRun { gate_ref: GateRef }` | P1.A | coordinator, runner (P2/P3) |
 | New `TurnStatus` variant | `BlockedDependentRun` | P1.A | store, coordinator (P2/P3) |
-| New `GateKind` variant (`ironclaw_agent_loop`) | `AwaitDependentRun` | P1.B | executor `handle_gate` (P3) |
+| New `GateKind` variant (`t3claw_agent_loop`) | `AwaitDependentRun` | P1.B | executor `handle_gate` (P3) |
 | New `LoopFamilyId` value | `"subagent"` (wire string) | P1.B | reborn driver binding (P2.C) |
 | New lineage fields on `TurnRunRecord` | `parent_run_id: Option<TurnRunId>`, `subagent_depth: u32`, `spawn_tree_root_run_id: Option<TurnRunId>` | P1.A | reborn submit path (P2.A), observer (P2.D), reservation table (P1.C/P2) |
 | New lineage fields on `SubmitTurnRequest` | `requested_run_id: Option<TurnRunId>`, `parent_run_id: Option<TurnRunId>`, `subagent_depth: u32`, `spawn_tree_root_run_id: Option<TurnRunId>` | P1.A | P2.A spawn path; mission/cron/trigger submitters (future) |
@@ -45,12 +45,12 @@ they are the seam.
 | New store atomic (companion) | `release_tree_descendants(scope: &TurnScope, root: TurnRunId, delta: u32) -> Result<(), TurnError>` | P1.A | P2.A partial-spawn rollback; scoped to the exact reservation key |
 | New turn error category | `TurnError::CapacityExceeded { resource: &'static str, cap: u64 }` or the equivalent existing capacity/admission variant if present at implementation time | P1.A | `reserve_tree_descendants` rejects over-cap without mutation; P2.A maps only this typed error to `tree_descendant_cap_exceeded` |
 | New coordinator hook | `DefaultTurnCoordinator::with_event_sink(Arc<dyn TurnEventSink>)` | P1.A | live `SubagentCompletionObserver` notification (P2.D/P3) |
-| New spawn-result payload struct | `SpawnedChildRunPayload { child_run_id, child_thread_id, flavor, mode, status, output_available, final_text, failure_summary }` | P1.C (`ironclaw_reborn::subagent`) | P2.A `result_ref` content; parent's model receives it as tool result |
-| New tombstone struct | `SubagentResultTombstone { child_run_id, terminal_status, disposition: SubagentResultDisposition }` + enum `SubagentResultDisposition::DiscardedByParentCancel` | P1.C (`ironclaw_reborn::subagent`) | P2.D writes on mid-cancel terminal completes; reconciler reads |
+| New spawn-result payload struct | `SpawnedChildRunPayload { child_run_id, child_thread_id, flavor, mode, status, output_available, final_text, failure_summary }` | P1.C (`t3claw_reborn::subagent`) | P2.A `result_ref` content; parent's model receives it as tool result |
+| New tombstone struct | `SubagentResultTombstone { child_run_id, terminal_status, disposition: SubagentResultDisposition }` + enum `SubagentResultDisposition::DiscardedByParentCancel` | P1.C (`t3claw_reborn::subagent`) | P2.D writes on mid-cancel terminal completes; reconciler reads |
 
 ### 0.2 Wire-string contract for the new enum variants
 
-Five wire-stable `ironclaw_turns` enums and the one `ironclaw_agent_loop` enum
+Five wire-stable `t3claw_turns` enums and the one `t3claw_agent_loop` enum
 gain the additive variants below. `CapabilityOutcome` gains two variants; every
 other enum gains one. The serialized wire strings are frozen here:
 
@@ -91,7 +91,7 @@ production.** Can be built in parallel with Phase 1 (no shared files).
 
 ### P0.1 — The gap this closes
 
-`block_run()` (`crates/ironclaw_turns/src/memory.rs:688-705`) only:
+`block_run()` (`crates/t3claw_turns/src/memory.rs:688-705`) only:
 1. Updates the run's `TurnStatus` to `BlockedApproval` / `BlockedAuth` / `BlockedResource`.
 2. Pushes a `TurnLifecycleEvent { kind: Blocked, … }` to the turn event buffer
    scoped to `TurnScope`.
@@ -123,11 +123,11 @@ restart-safe; idempotent. No `block_run()` hook required.
 ### P0.3 — Contracts to add
 
 - **Neutral read-model sink** — define a Reborn-neutral projection target in
-  `crates/ironclaw_event_projections/` (for example
+  `crates/t3claw_event_projections/` (for example
   `PendingGateProjectionSink`) with `upsert_pending_gate` /
   `remove_pending_gate` methods over neutral DTOs. The existing root
   `src/gate/pending.rs` store is adapted to that sink only from the
-  product/composition layer. `ironclaw_event_projections` must not import root
+  product/composition layer. `t3claw_event_projections` must not import root
   `src/` or engine pending-gate types.
 - **Blocked-event metadata** — extend the turn blocked lifecycle event payload
   with redacted actor/gate metadata needed by the projection:
@@ -135,7 +135,7 @@ restart-safe; idempotent. No `block_run()` hook required.
   are metadata only; no raw prompts, tool input, secret material, host paths, or
   backend errors may enter the event. If a block event lacks this metadata, the
   projection fails closed for that row and emits a redacted projection error.
-- **Projection consumer** — lives in `crates/ironclaw_event_projections/`
+- **Projection consumer** — lives in `crates/t3claw_event_projections/`
   (the Reborn read-model boundary). Consumes `TurnLifecycleEvent`. Per event:
   - `kind = Blocked` with `status` ∈ {`BlockedApproval`, `BlockedAuth`,
     `BlockedResource`, `BlockedDependentRun` (new — from P1.A)} →
@@ -157,7 +157,7 @@ restart-safe; idempotent. No `block_run()` hook required.
 Pseudo code (Rust-shaped):
 
 ```rust
-// crates/ironclaw_event_projections/src/pending_gate_projection.rs
+// crates/t3claw_event_projections/src/pending_gate_projection.rs
 #[async_trait]
 pub trait PendingGateProjectionSink: Send + Sync {
     async fn upsert_pending_gate(&self, row: PendingGateProjectionRow) -> Result<(), ProjectionError>;
@@ -230,12 +230,12 @@ Land P0 with the writer surface narrowed to the projection consumer only.
 
 ### P0.7 — Owner
 
-Lives in `crates/ironclaw_event_projections/` (new module
+Lives in `crates/t3claw_event_projections/` (new module
 `pending_gate_projection.rs`). Reader surface remains in `/src/gate/pending.rs`.
 
 ---
 
-## 1. P1.A — `ironclaw_turns` contract additions
+## 1. P1.A — `t3claw_turns` contract additions
 
 **Goal:** add the coordination-layer types the spawn mechanism needs: a new
 capability outcome, the `AwaitDependentRun` blocked surface across five enums,
@@ -245,16 +245,16 @@ durable lineage fields on `TurnRunRecord`, and a `children_of` store query.
 
 | File | Change |
 |---|---|
-| `crates/ironclaw_turns/src/run_profile/host.rs` | + `CapabilityOutcome::{SpawnedChildRun, AwaitDependentRun}`; + `LoopGateKind::AwaitDependentRun`; update `CapabilityOutcome::is_suspension` |
-| `crates/ironclaw_turns/src/status.rs` | + `TurnStatus::BlockedDependentRun`; + `BlockedReason::DependentRun`; update `is_terminal`, `keeps_active_lock` (no behavior change, but re-verify); update `BlockedReason::status` / `gate_ref` |
-| `crates/ironclaw_turns/src/loop_exit.rs` | + `LoopBlockedKind::AwaitDependentRun`; update `LoopBlockedKind::to_blocked_reason` |
-| `crates/ironclaw_turns/src/request.rs` | + `requested_run_id`, `parent_run_id`, `subagent_depth`, `spawn_tree_root_run_id` on `SubmitTurnRequest` (all `#[serde(default)]`) |
-| `crates/ironclaw_turns/src/store.rs` | + `parent_run_id`, `subagent_depth`, `spawn_tree_root_run_id` on `TurnRunRecord`; + scoped `children_of`, scoped `get_run_record`, `reserve_tree_descendants`, `release_tree_descendants` on `TurnStateStore` trait |
-| `crates/ironclaw_turns/src/coordinator.rs` | + `prepare_turn(scope) -> TurnRunId` on `TurnCoordinator` trait + `DefaultTurnCoordinator` impl; + optional `TurnEventSink` on `DefaultTurnCoordinator`; publish submit/resume/cancel lifecycle events best-effort; `submit_turn` must honour `requested_run_id` (bind instead of mint) |
-| `crates/ironclaw_turns/src/memory.rs` | + `parent_run_id`/`subagent_depth`/`spawn_tree_root_run_id` on `RunRecord`; thread through `persistence_record`; impl scoped `children_of`, scoped `get_run_record`, `reserve_tree_descendants`, `release_tree_descendants`; honour `requested_run_id` in `submit_turn`; update blocked-status `match` arms (resume + cancel) |
-| `crates/ironclaw_turns/src/run_profile/milestones.rs` | no code change — `LoopHostMilestoneKind::GateBlocked` carries `LoopGateKind` opaquely; verify it still compiles |
-| `crates/ironclaw_turns/src/db.rs` | no schema change — `TurnRunRecord` is stored as a JSON payload; verify the round-trip test still passes |
-| `crates/ironclaw_turns/tests/…` | new unit + contract tests (§1.9) |
+| `crates/t3claw_turns/src/run_profile/host.rs` | + `CapabilityOutcome::{SpawnedChildRun, AwaitDependentRun}`; + `LoopGateKind::AwaitDependentRun`; update `CapabilityOutcome::is_suspension` |
+| `crates/t3claw_turns/src/status.rs` | + `TurnStatus::BlockedDependentRun`; + `BlockedReason::DependentRun`; update `is_terminal`, `keeps_active_lock` (no behavior change, but re-verify); update `BlockedReason::status` / `gate_ref` |
+| `crates/t3claw_turns/src/loop_exit.rs` | + `LoopBlockedKind::AwaitDependentRun`; update `LoopBlockedKind::to_blocked_reason` |
+| `crates/t3claw_turns/src/request.rs` | + `requested_run_id`, `parent_run_id`, `subagent_depth`, `spawn_tree_root_run_id` on `SubmitTurnRequest` (all `#[serde(default)]`) |
+| `crates/t3claw_turns/src/store.rs` | + `parent_run_id`, `subagent_depth`, `spawn_tree_root_run_id` on `TurnRunRecord`; + scoped `children_of`, scoped `get_run_record`, `reserve_tree_descendants`, `release_tree_descendants` on `TurnStateStore` trait |
+| `crates/t3claw_turns/src/coordinator.rs` | + `prepare_turn(scope) -> TurnRunId` on `TurnCoordinator` trait + `DefaultTurnCoordinator` impl; + optional `TurnEventSink` on `DefaultTurnCoordinator`; publish submit/resume/cancel lifecycle events best-effort; `submit_turn` must honour `requested_run_id` (bind instead of mint) |
+| `crates/t3claw_turns/src/memory.rs` | + `parent_run_id`/`subagent_depth`/`spawn_tree_root_run_id` on `RunRecord`; thread through `persistence_record`; impl scoped `children_of`, scoped `get_run_record`, `reserve_tree_descendants`, `release_tree_descendants`; honour `requested_run_id` in `submit_turn`; update blocked-status `match` arms (resume + cancel) |
+| `crates/t3claw_turns/src/run_profile/milestones.rs` | no code change — `LoopHostMilestoneKind::GateBlocked` carries `LoopGateKind` opaquely; verify it still compiles |
+| `crates/t3claw_turns/src/db.rs` | no schema change — `TurnRunRecord` is stored as a JSON payload; verify the round-trip test still passes |
+| `crates/t3claw_turns/tests/…` | new unit + contract tests (§1.9) |
 
 `request.rs` (`SubmitTurnRequest`) **is** modified in Phase 1. Without request
 fields, P2.A has no caller-level way to carry lineage into the store, so
@@ -406,9 +406,9 @@ Add `#[non_exhaustive]` (it is a wire/observability enum that will keep growing
 as mission/cron/trigger families land). Wire string: `"await_dependent_run"`.
 
 **Exhaustive `match` sites** (grep `LoopGateKind`): the only `match` is
-`executor.rs::loop_gate_kind` in `ironclaw_agent_loop` — updated in **Phase 3**,
+`executor.rs::loop_gate_kind` in `t3claw_agent_loop` — updated in **Phase 3**,
 not here. `milestones.rs` only *carries* `LoopGateKind` in
-`LoopHostMilestoneKind::GateBlocked` and never matches it. No `ironclaw_turns`
+`LoopHostMilestoneKind::GateBlocked` and never matches it. No `t3claw_turns`
 match arms change.
 
 ### 1.4 `TurnStatus::BlockedDependentRun` + `BlockedReason::DependentRun`
@@ -534,7 +534,7 @@ impl BlockedReason {
 `TurnStatus` is `Copy`; `BlockedDependentRun` is a unit variant so `Copy` holds.
 
 **Exhaustive `match` sites on `TurnStatus` to update** — grep
-`TurnStatus::Blocked` in `crates/ironclaw_turns/src`:
+`TurnStatus::Blocked` in `crates/t3claw_turns/src`:
 
 1. **`memory.rs` `resume_turn_once`** (lines 1215–1218) — the resume-eligibility
    guard. **Must add `BlockedDependentRun`:**
@@ -656,7 +656,7 @@ Per `.claude/rules/types.md` and the design's "wire-stable enum" requirement:
 |---|---|---|
 | `LoopGateKind` | **add it** | observability/wire enum; mission/cron/trigger families will add more gate kinds; external (reborn) test code constructs it but never exhaustively matches it |
 | `LoopBlockedKind` | **add it** | same; the only exhaustive match (`to_blocked_reason`) is in-crate and updated atomically |
-| `CapabilityOutcome` | **do NOT add it** | the executor in `ironclaw_agent_loop` *must* exhaustively match every outcome — a non-exhaustive `CapabilityOutcome` would force a `_ =>` arm that silently drops a future spawn-like outcome. Keeping it exhaustive means adding a variant is a compile error at every host, which is the desired fail-loud behavior. The P1.B/companion agent-loop change updates the executor match. |
+| `CapabilityOutcome` | **do NOT add it** | the executor in `t3claw_agent_loop` *must* exhaustively match every outcome — a non-exhaustive `CapabilityOutcome` would force a `_ =>` arm that silently drops a future spawn-like outcome. Keeping it exhaustive means adding a variant is a compile error at every host, which is the desired fail-loud behavior. The P1.B/companion agent-loop change updates the executor match. |
 | `TurnStatus` | **do NOT add it** | status drives exhaustive lifecycle matches in `memory.rs`; a `_ =>` arm would silently mishandle a new status (e.g. treat it as terminal). Adding a variant *should* break every match so each is reviewed. The two match sites in §1.4 are updated atomically in this PR. |
 | `BlockedReason` | **do NOT add it** | `status()` / `gate_ref()` are exhaustive by design; a new reason must be mapped to a `TurnStatus`, never defaulted. |
 | `GateKind` (`agent_loop`) | already `#[non_exhaustive]` | unchanged; see §2.4 |
@@ -1206,7 +1206,7 @@ async fn submit_turn_rejects_requested_run_id_collision() {
 
 ### 1.9 `DefaultTurnCoordinator` event sink
 
-`TurnEventSink` already exists in `ironclaw_turns::events`, and the stores
+`TurnEventSink` already exists in `t3claw_turns::events`, and the stores
 already persist `TurnLifecycleEvent`s. The missing live seam is that
 `DefaultTurnCoordinator` does not publish those events to an injected sink, so a
 `SubagentCompletionObserver` would otherwise have no reliable notification path.
@@ -1241,7 +1241,7 @@ coordinator operation; the store remains the durable source of truth.
 
 ### 1.9 Unit tests to add (P1.A)
 
-Place in the existing `crates/ironclaw_turns/tests/` integration tests and/or
+Place in the existing `crates/t3claw_turns/tests/` integration tests and/or
 `#[cfg(test)] mod tests` blocks. Required:
 
 1. **`CapabilityOutcome::SpawnedChildRun` serde round-trip** — serialize and
@@ -1310,7 +1310,7 @@ Place in the existing `crates/ironclaw_turns/tests/` integration tests and/or
 
 ---
 
-## 2. P1.B — `ironclaw_agent_loop`: `subagent` family + `GateKind::AwaitDependentRun`
+## 2. P1.B — `t3claw_agent_loop`: `subagent` family + `GateKind::AwaitDependentRun`
 
 **Goal:** add the static `subagent` `LoopFamily` factory and the
 `GateKind::AwaitDependentRun` strategy-side variant plus the mechanical executor
@@ -1320,11 +1320,11 @@ maps for the new gate/result outcomes.
 
 | File | Change |
 |---|---|
-| `crates/ironclaw_agent_loop/src/families/subagent.rs` | **new** — `subagent` family factory, fingerprint, digest |
-| `crates/ironclaw_agent_loop/src/families/mod.rs` | declare `subagent` module + re-export `subagent::subagent()` and `SUBAGENT_FAMILY_DIGEST` |
-| `crates/ironclaw_agent_loop/src/family.rs` | + `LoopFamilyId::SUBAGENT` associated const |
-| `crates/ironclaw_agent_loop/src/strategies/gate.rs` | + `GateKind::AwaitDependentRun` |
-| `crates/ironclaw_agent_loop/src/strategies/mod.rs` | no change — `GateKind` already re-exported |
+| `crates/t3claw_agent_loop/src/families/subagent.rs` | **new** — `subagent` family factory, fingerprint, digest |
+| `crates/t3claw_agent_loop/src/families/mod.rs` | declare `subagent` module + re-export `subagent::subagent()` and `SUBAGENT_FAMILY_DIGEST` |
+| `crates/t3claw_agent_loop/src/family.rs` | + `LoopFamilyId::SUBAGENT` associated const |
+| `crates/t3claw_agent_loop/src/strategies/gate.rs` | + `GateKind::AwaitDependentRun` |
+| `crates/t3claw_agent_loop/src/strategies/mod.rs` | no change — `GateKind` already re-exported |
 
 > **[CORRECTION]** `families/mod.rs` today is *not* a module-directory hub — it
 > contains the `default()` family inline (the directory only holds `mod.rs` +
@@ -1392,7 +1392,7 @@ use crate::strategies::DefaultBudgetStrategy;
 
 /// Iteration ceiling for the subagent family. Lower than the default 32:
 /// subagents are scoped, single-purpose runs. The per-flavor iteration budget
-/// in `ironclaw_reborn` is resolved into the run profile (P1.C / P2.C); this
+/// in `t3claw_reborn` is resolved into the run profile (P1.C / P2.C); this
 /// is the family-level hard safety net.
 const SUBAGENT_ITERATION_LIMIT: u32 = 16;
 
@@ -1402,7 +1402,7 @@ const SUBAGENT_WALL_CLOCK_LIMIT: Option<Duration> = None;
 
 #[cfg(test)]
 const SUBAGENT_FAMILY_FINGERPRINT: &[u8] = concat!(
-    "ironclaw_agent_loop.subagent_family.v1:",
+    "t3claw_agent_loop.subagent_family.v1:",
     "family_id=subagent;",
     "identity=component_identity_v1;",
     "planner=DefaultPlanner;",
@@ -1549,13 +1549,13 @@ tightening is a defense-in-depth guard against a future custom gate strategy.
 (produces `GateKind`), `blocked_kind(GateKind) -> LoopBlockedKind` (lines
 1404–1409), `loop_gate_kind(GateKind) -> LoopGateKind` (lines 1412–1417). Adding
 `GateKind::AwaitDependentRun` makes `blocked_kind` and `loop_gate_kind`
-non-exhaustive → **`ironclaw_agent_loop` will not compile** until those arms are
+non-exhaustive → **`t3claw_agent_loop` will not compile** until those arms are
 added.
 
 **Phase 1 ordering decision:** the minimal arm additions to `blocked_kind` and
 `loop_gate_kind` are part of **P1.B** (they are pure, mechanical 1:1 maps in the
 same crate as `GateKind`), even though the *capability path that emits* an
-`AwaitDependentRun` gate is Phase 2/3. Land them now so `ironclaw_agent_loop`
+`AwaitDependentRun` gate is Phase 2/3. Land them now so `t3claw_agent_loop`
 stays green:
 
 ```rust
@@ -1642,9 +1642,9 @@ In `strategies/gate.rs` `#[cfg(test)] mod tests`:
 
 ---
 
-## 3. P1.C — `ironclaw_reborn` data: directions, goal stores, flavor table
+## 3. P1.C — `t3claw_reborn` data: directions, goal stores, flavor table
 
-**Goal:** land the *pure data* the subagent feature needs in `ironclaw_reborn` —
+**Goal:** land the *pure data* the subagent feature needs in `t3claw_reborn` —
 direction prompt `.md` files, the goal-store contract plus production/test
 implementations, and the static built-in flavor table. No driver, no observer,
 no runtime wiring (those are Phase 2/3).
@@ -1653,15 +1653,15 @@ no runtime wiring (those are Phase 2/3).
 
 | File | Purpose |
 |---|---|
-| `crates/ironclaw_reborn/src/directions/mod.rs` | `DirectionId` newtype + static `direction_prompt(DirectionId) -> &'static str` |
-| `crates/ironclaw_reborn/src/directions/general.md` | direction prompt for the `general` flavor |
-| `crates/ironclaw_reborn/src/directions/researcher.md` | direction prompt for the `researcher` flavor |
-| `crates/ironclaw_reborn/src/subagent/mod.rs` | module hub: re-exports flavor table + goal store |
-| `crates/ironclaw_reborn/src/subagent/flavors.rs` | static built-in subagent flavor table |
-| `crates/ironclaw_reborn/src/subagent/goal_store.rs` | `SubagentGoalStore` trait, DB-backed production implementation, bounded in-memory test implementation |
-| `crates/ironclaw_reborn/src/lib.rs` | + `pub mod directions;` + `pub mod subagent;` |
+| `crates/t3claw_reborn/src/directions/mod.rs` | `DirectionId` newtype + static `direction_prompt(DirectionId) -> &'static str` |
+| `crates/t3claw_reborn/src/directions/general.md` | direction prompt for the `general` flavor |
+| `crates/t3claw_reborn/src/directions/researcher.md` | direction prompt for the `researcher` flavor |
+| `crates/t3claw_reborn/src/subagent/mod.rs` | module hub: re-exports flavor table + goal store |
+| `crates/t3claw_reborn/src/subagent/flavors.rs` | static built-in subagent flavor table |
+| `crates/t3claw_reborn/src/subagent/goal_store.rs` | `SubagentGoalStore` trait, DB-backed production implementation, bounded in-memory test implementation |
+| `crates/t3claw_reborn/src/lib.rs` | + `pub mod directions;` + `pub mod subagent;` |
 
-> **[NOTE]** `ironclaw_reborn/src` is currently a *flat* directory of modules
+> **[NOTE]** `t3claw_reborn/src` is currently a *flat* directory of modules
 > plus two subdirectories (`loop_exit_applier/`, `turn_runner/`). `directions/`
 > and `subagent/` follow that same module-directory pattern. The crate
 > `CLAUDE.md` says "Add a new file when adding a new … concern" and "The public
@@ -1899,7 +1899,7 @@ the final child `TurnRunId` before the goal row is written.
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
-use ironclaw_turns::TurnRunId;
+use t3claw_turns::TurnRunId;
 
 /// Hard cap on stored goals. Eviction is oldest-first when the cap is reached.
 /// Sized well above any plausible concurrent in-flight subagent count; an
@@ -2118,12 +2118,12 @@ pub mod subagent;
 
 No `pub use` flattening — consistent with the `lib.rs` doc comment ("a directory
 of modules, not a shopping list of types"). Downstream Phase 2 code reaches in
-by path: `ironclaw_reborn::subagent::flavors::lookup_flavor`,
-`ironclaw_reborn::subagent::goal_store::SubagentGoalStore`,
-`ironclaw_reborn::directions::direction_prompt`.
+by path: `t3claw_reborn::subagent::flavors::lookup_flavor`,
+`t3claw_reborn::subagent::goal_store::SubagentGoalStore`,
+`t3claw_reborn::directions::direction_prompt`.
 
-`thiserror` must be available to `ironclaw_reborn` for `SubagentGoalStoreError`.
-Check `crates/ironclaw_reborn/Cargo.toml` `[dependencies]` — it is **not**
+`thiserror` must be available to `t3claw_reborn` for `SubagentGoalStoreError`.
+Check `crates/t3claw_reborn/Cargo.toml` `[dependencies]` — it is **not**
 currently listed (the crate uses `serde`, `tracing`, etc.). **Add
 `thiserror = "1"`** to `[dependencies]` as part of P1.C (every other crate in
 the workspace pins `thiserror = "1"` per `error.rs` convention).
@@ -2177,9 +2177,9 @@ The shared contract covers:
 Backend parity commands:
 
 ```bash
-cargo test -p ironclaw_reborn subagent_goal_store_contract
-cargo test -p ironclaw_reborn subagent_goal_store_contract --features libsql
-cargo test -p ironclaw_reborn subagent_goal_store_contract --features postgres
+cargo test -p t3claw_reborn subagent_goal_store_contract
+cargo test -p t3claw_reborn subagent_goal_store_contract --features libsql
+cargo test -p t3claw_reborn subagent_goal_store_contract --features postgres
 ```
 - restart/reopen: write a goal through the DB-backed store, drop/recreate the
   store over the same backend, then `get_goal` returns the same value
@@ -2228,7 +2228,7 @@ compile-time edge introduced by §2.5:
 
 Two ways to keep all three PRs independently green:
 
-- **Option A (recommended): land P1.A first.** P1.A touches only `ironclaw_turns`
+- **Option A (recommended): land P1.A first.** P1.A touches only `t3claw_turns`
   and is fully self-contained. Once merged, P1.B and P1.C rebase onto it and are
   trivially green. P1.C has *zero* dependency on P1.A or P1.B and can land in any
   order. Net order: **P1.A → (P1.B ∥ P1.C)**.
@@ -2242,7 +2242,7 @@ with whichever of A/B is chosen.
 ### 4.2 The "variant added, downstream crate breaks" hazard
 
 - Adding `CapabilityOutcome::{SpawnedChildRun, AwaitDependentRun}` (P1.A) makes
-  `ironclaw_agent_loop::executor::handle_capability_outcome` non-exhaustive.
+  `t3claw_agent_loop::executor::handle_capability_outcome` non-exhaustive.
   This is *intended* (we deliberately keep `CapabilityOutcome` exhaustive —
   §1.6), but a workspace-green branch must include the two executor arms from
   §1.2 / §2.5 in the same stack. **Do not** add a catch-all `_` arm or a stub
@@ -2250,7 +2250,7 @@ with whichever of A/B is chosen.
 - Adding `GateKind::AwaitDependentRun` (P1.B) — `GateKind` is already
   `#[non_exhaustive]`, but the *in-crate* `blocked_kind` / `loop_gate_kind`
   matches are exhaustive and **must** be updated in the same P1.B PR (§2.5).
-  That keeps `ironclaw_agent_loop` self-consistently green.
+  That keeps `t3claw_agent_loop` self-consistently green.
 
 ### 4.3 Wire-stability risks
 
@@ -2277,20 +2277,20 @@ with whichever of A/B is chosen.
   evicts a live in-flight subagent's goal, which P2.B then turns into a loud
   child-run failure (acceptable fail-loud behavior, but undesirable under normal
   load — hence the `debug!` log on eviction as an early-warning signal).
-- `thiserror` must be added to `ironclaw_reborn/Cargo.toml` (§3.5) or
+- `thiserror` must be added to `t3claw_reborn/Cargo.toml` (§3.5) or
   `SubagentGoalStoreError` will not compile.
 
 ### 4.5 Phase 1 exit criteria
 
 Phase 1 is done when, per workstream:
 
-- **P1.A** — `ironclaw_turns` compiles; `cargo test -p ironclaw_turns` green
+- **P1.A** — `t3claw_turns` compiles; `cargo test -p t3claw_turns` green
   (incl. `--features integration` for the libSQL/Postgres `children_of` and the
   `TurnRunRecord` round-trip); all §1.9 tests present and passing.
-- **P1.B** — `ironclaw_agent_loop` compiles **against the Phase-1 `ironclaw_turns`**
-  and `cargo test -p ironclaw_agent_loop` green; `SUBAGENT_FAMILY_DIGEST`
+- **P1.B** — `t3claw_agent_loop` compiles **against the Phase-1 `t3claw_turns`**
+  and `cargo test -p t3claw_agent_loop` green; `SUBAGENT_FAMILY_DIGEST`
   filled in with the real hash; all §2.6 tests passing.
-- **P1.C** — `ironclaw_reborn` compiles; `cargo test -p ironclaw_reborn` green;
+- **P1.C** — `t3claw_reborn` compiles; `cargo test -p t3claw_reborn` green;
   all §3.6 tests passing across bounded, libSQL, and PostgreSQL backends;
   `thiserror` added to `Cargo.toml`.
 - Workspace-wide `cargo fmt` clean and `cargo clippy --all --benches --tests

@@ -1,7 +1,7 @@
 # Auth Canary Runner
 
 This runner bootstraps the auth E2E environment on a fresh machine and executes
-focused end-to-end auth checks against an isolated local IronClaw instance.
+focused end-to-end auth checks against an isolated local T3Claw instance.
 
 Use [scripts/live-canary/run.sh](../live-canary/run.sh)
 as the top-level entrypoint for scheduled and manual lane dispatch. This file

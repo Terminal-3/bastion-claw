@@ -218,7 +218,7 @@ fn setup_tunnel_ngrok() -> Result<TunnelSettings, ChannelSetupError> {
 
 async fn setup_tunnel_cloudflare() -> Result<TunnelSettings, ChannelSetupError> {
     // Check if cloudflared binary is on PATH
-    let cloudflared_found = ironclaw_skills::gating::binary_exists("cloudflared");
+    let cloudflared_found = t3claw_skills::gating::binary_exists("cloudflared");
 
     if !cloudflared_found {
         print_error("cloudflared not found in PATH.");
@@ -310,7 +310,7 @@ async fn setup_tunnel_cloudflare() -> Result<TunnelSettings, ChannelSetupError> 
 }
 
 /// Detect running cloudflared processes or managed services that could conflict
-/// with IronClaw's tunnel management.
+/// with T3Claw's tunnel management.
 fn detect_existing_cloudflared() -> Option<String> {
     #[allow(unused_mut)]
     let mut conflicts: Vec<String> = Vec::new();
@@ -858,7 +858,7 @@ fn setup_mode_note(channel_name: &str) -> Option<&'static str> {
             "Telegram pairing is recommended if you want browser history continuity. \
              Open mode keeps chats working in Telegram, but it can leave the web UI \
              thread list looking empty because the exchange is not bound to the same \
-             IronClaw identity.",
+             T3Claw identity.",
         )
     } else {
         None
@@ -1534,7 +1534,7 @@ mod tests {
         // otherwise stall the whole test suite.
         let probe = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            tokio::net::lookup_host(("ironclaw-dns-hijack-probe.invalid", 443u16)),
+            tokio::net::lookup_host(("t3claw-dns-hijack-probe.invalid", 443u16)),
         )
         .await;
         let hijacked = matches!(probe, Ok(Ok(_)));
@@ -1557,6 +1557,6 @@ mod tests {
         let hint = http_webhook_secret_hint();
         assert!(hint.contains("encrypted secrets database"));
         assert!(hint.contains("loaded automatically on startup"));
-        assert!(!hint.contains("ironclaw secret get"));
+        assert!(!hint.contains("t3claw secret get"));
     }
 }

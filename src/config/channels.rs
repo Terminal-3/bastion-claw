@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 use crate::channels::web::sse::{DEFAULT_BROADCAST_BUFFER, DEFAULT_MAX_CONNECTIONS};
 use crate::config::helpers::{
     db_first_bool, db_first_optional_string, db_first_or_default, optional_env, parse_bool_env,
@@ -19,7 +19,7 @@ pub struct ChannelsConfig {
     pub gateway: Option<GatewayConfig>,
     pub signal: Option<SignalConfig>,
     pub tui: Option<TuiChannelConfig>,
-    /// Directory containing WASM channel modules (default: ~/.ironclaw/channels/).
+    /// Directory containing WASM channel modules (default: ~/.t3claw/channels/).
     pub wasm_channels_dir: std::path::PathBuf,
     /// Whether WASM channels are enabled.
     pub wasm_channels_enabled: bool,
@@ -507,7 +507,7 @@ pub fn validate_telegram_v1_v2_exclusivity(
     // activation time, letting v1 and v2 stand up for the same
     // installation (Copilot review on PR #3356).
     fn is_telegram_after_canonicalize(name: &str) -> bool {
-        ironclaw_common::ExtensionName::new(name)
+        t3claw_common::ExtensionName::new(name)
             .map(|n| n.as_str() == "telegram")
             .unwrap_or(false)
     }
@@ -739,9 +739,9 @@ mod telegram_v2_tests {
 /// other modules that need to construct a gateway URL.
 pub const DEFAULT_GATEWAY_PORT: u16 = 3000;
 
-/// Get the default channels directory (~/.ironclaw/channels/).
+/// Get the default channels directory (~/.t3claw/channels/).
 fn default_channels_dir() -> PathBuf {
-    ironclaw_base_dir().join("channels")
+    t3claw_base_dir().join("channels")
 }
 
 #[cfg(test)]

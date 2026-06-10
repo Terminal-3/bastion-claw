@@ -1,12 +1,12 @@
-//! Skills system for IronClaw.
+//! Skills system for T3Claw.
 //!
 //! This module contains main-crate skill logic that depends on types from the
-//! extracted `ironclaw_llm` crate (e.g. `ironclaw_llm::ToolDefinition`) and
+//! extracted `t3claw_llm` crate (e.g. `t3claw_llm::ToolDefinition`) and
 //! other `src/` modules (e.g. `crate::secrets`). For core skill types,
-//! parsing, and registry, import from `ironclaw_skills` directly.
+//! parsing, and registry, import from `t3claw_skills` directly.
 //!
 //! The `attenuation` submodule lives here because it operates on
-//! `ironclaw_llm::ToolDefinition` together with main-crate trust state, so it
+//! `t3claw_llm::ToolDefinition` together with main-crate trust state, so it
 //! sits at the seam between the two.
 //!
 //! # V1 migration notes
@@ -25,13 +25,13 @@
 //! - **This entire module** — Once v1 is gone, the remaining local items
 //!   can be deleted and this file removed.
 //!
-//! The `ironclaw_skills` crate itself remains (types, parser, validation, v2 types).
+//! The `t3claw_skills` crate itself remains (types, parser, validation, v2 types).
 
 pub mod attenuation;
 pub mod bundled;
 
-// Items from `ironclaw_skills` are no longer glob-re-exported.
-// Callers should import from `ironclaw_skills` directly.
+// Items from `t3claw_skills` are no longer glob-re-exported.
+// Callers should import from `t3claw_skills` directly.
 
 // Re-export attenuation at the same path as before.
 pub use attenuation::{AttenuationResult, attenuate_tools};
@@ -42,7 +42,7 @@ use crate::{
     auth::{AuthDescriptor, AuthDescriptorKind, OAuthFlowDescriptor, upsert_auth_descriptor},
     db::SettingsStore,
 };
-use ironclaw_skills::{LoadedSkill, SkillCredentialLocation, SkillCredentialSpec};
+use t3claw_skills::{LoadedSkill, SkillCredentialLocation, SkillCredentialSpec};
 
 /// Convert a skill credential location to the main crate's [`CredentialLocation`].
 fn convert_credential_location(loc: &SkillCredentialLocation) -> CredentialLocation {
@@ -78,9 +78,9 @@ pub fn credential_spec_to_mapping(spec: &SkillCredentialSpec) -> CredentialMappi
 fn credential_spec_to_oauth_refresh(spec: &SkillCredentialSpec) -> Option<OAuthRefreshConfig> {
     let oauth = spec.oauth.as_ref()?;
     match &oauth.refresh {
-        ironclaw_skills::ProviderRefreshStrategy::ReauthorizeOnly => return None,
-        ironclaw_skills::ProviderRefreshStrategy::Standard => {}
-        ironclaw_skills::ProviderRefreshStrategy::Custom {
+        t3claw_skills::ProviderRefreshStrategy::ReauthorizeOnly => return None,
+        t3claw_skills::ProviderRefreshStrategy::Standard => {}
+        t3claw_skills::ProviderRefreshStrategy::Custom {
             refresh_url,
             extra_params,
         } => {
@@ -202,7 +202,7 @@ pub fn register_skill_credentials(
     let mut count = 0usize;
     for skill in skills {
         for spec in &skill.manifest.credentials {
-            let errors = ironclaw_skills::validation::validate_credential_spec(spec);
+            let errors = t3claw_skills::validation::validate_credential_spec(spec);
             if !errors.is_empty() {
                 tracing::warn!(
                     skill = %skill.name(),
@@ -239,7 +239,7 @@ pub async fn persist_skill_auth_descriptors(
 ) {
     for skill in skills {
         for spec in &skill.manifest.credentials {
-            let errors = ironclaw_skills::validation::validate_credential_spec(spec);
+            let errors = t3claw_skills::validation::validate_credential_spec(spec);
             if !errors.is_empty() {
                 continue;
             }
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_convert_bearer_location() {
-        let loc = ironclaw_skills::SkillCredentialLocation::Bearer;
+        let loc = t3claw_skills::SkillCredentialLocation::Bearer;
         let converted = convert_credential_location(&loc);
         assert!(matches!(
             converted,
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_convert_basic_auth_location() {
-        let loc = ironclaw_skills::SkillCredentialLocation::BasicAuth {
+        let loc = t3claw_skills::SkillCredentialLocation::BasicAuth {
             username: "admin".to_string(),
         };
         let converted = convert_credential_location(&loc);
@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn test_convert_header_location() {
-        let loc = ironclaw_skills::SkillCredentialLocation::Header {
+        let loc = t3claw_skills::SkillCredentialLocation::Header {
             name: "X-API-Key".to_string(),
             prefix: Some("Token".to_string()),
         };
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn test_convert_query_param_location() {
-        let loc = ironclaw_skills::SkillCredentialLocation::QueryParam {
+        let loc = t3claw_skills::SkillCredentialLocation::QueryParam {
             name: "key".to_string(),
         };
         let converted = convert_credential_location(&loc);
@@ -310,10 +310,10 @@ mod tests {
 
     #[test]
     fn test_credential_spec_to_mapping() {
-        let spec = ironclaw_skills::SkillCredentialSpec {
+        let spec = t3claw_skills::SkillCredentialSpec {
             name: "github_token".to_string(),
             provider: "github".to_string(),
-            location: ironclaw_skills::SkillCredentialLocation::Bearer,
+            location: t3claw_skills::SkillCredentialLocation::Bearer,
             hosts: vec!["api.github.com".to_string(), "*.github.com".to_string()],
             path_patterns: Vec::new(),
             oauth: None,
@@ -331,10 +331,10 @@ mod tests {
 
     #[test]
     fn test_register_skill_credentials_valid() {
-        use ironclaw_skills::types::*;
         use std::path::PathBuf;
+        use t3claw_skills::types::*;
 
-        let skill = ironclaw_skills::LoadedSkill {
+        let skill = t3claw_skills::LoadedSkill {
             manifest: SkillManifest {
                 name: "test-api".to_string(),
                 version: "1.0.0".to_string(),
@@ -370,10 +370,10 @@ mod tests {
 
     #[test]
     fn test_register_skill_credentials_registers_oauth_refresh_config() {
-        use ironclaw_skills::types::*;
         use std::path::PathBuf;
+        use t3claw_skills::types::*;
 
-        let skill = ironclaw_skills::LoadedSkill {
+        let skill = t3claw_skills::LoadedSkill {
             manifest: SkillManifest {
                 name: "gmail".to_string(),
                 version: "1.0.0".to_string(),
@@ -427,10 +427,10 @@ mod tests {
 
     #[test]
     fn test_register_skill_credentials_invalid_skipped() {
-        use ironclaw_skills::types::*;
         use std::path::PathBuf;
+        use t3claw_skills::types::*;
 
-        let skill = ironclaw_skills::LoadedSkill {
+        let skill = t3claw_skills::LoadedSkill {
             manifest: SkillManifest {
                 name: "bad-skill".to_string(),
                 version: "1.0.0".to_string(),

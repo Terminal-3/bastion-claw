@@ -24,7 +24,7 @@ It does **not** own canonical transcript/message storage. Transcript and thread-
 
 ## 2. Logical records
 
-The `ironclaw_turns` contract models persistence with these record families:
+The `t3claw_turns` contract models persistence with these record families:
 
 | Record | Ownership |
 | --- | --- |

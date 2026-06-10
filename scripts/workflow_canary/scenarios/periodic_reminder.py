@@ -8,7 +8,7 @@ End-to-end coverage:
    ``http`` POST to ``api.telegram.org/.../sendMessage`` (matched on
    the per-scenario ``[CANARY-WORKFLOW-periodic_reminder]`` sentinel
    in ``tests/e2e/mock_llm.py``).
-4. ``IRONCLAW_TEST_HTTP_REMAP`` rewrites the Telegram host to the
+4. ``T3CLAW_TEST_HTTP_REMAP`` rewrites the Telegram host to the
    loopback ``telegram_mock`` server, which records the message.
 5. Probe asserts both (a) ``routine_runs`` reaches a terminal status,
    and (b) ``telegram_mock`` captured a ``sendMessage`` whose text
@@ -58,7 +58,7 @@ async def run(
         # Phase 1B: with the routine engine's http_interceptor
         # propagation fix in place, the http tool dispatch from
         # the Lightweight action now reaches the mock Telegram
-        # bot via IRONCLAW_TEST_HTTP_REMAP. Verify the bot
+        # bot via T3CLAW_TEST_HTTP_REMAP. Verify the bot
         # captured a sendMessage with the expected ack text.
         verify_telegram=True,
     )

@@ -1,15 +1,15 @@
 ---
-description: Trace a data flow or bug through the IronClaw codebase end-to-end
+description: Trace a data flow or bug through the T3Claw codebase end-to-end
 allowed-tools: Read, Glob, Grep, Bash(cargo test:*)
 argument-hint: <symptom or feature name>
 model: sonnet
 ---
 
-Trace the flow of `$ARGUMENTS` through the IronClaw codebase. Your job is to map every file and function involved, identify where data transforms or could break, and report the full chain.
+Trace the flow of `$ARGUMENTS` through the T3Claw codebase. Your job is to map every file and function involved, identify where data transforms or could break, and report the full chain.
 
 ## Architecture Reference
 
-IronClaw has three main data flow paths. Identify which one(s) are relevant and trace through them:
+T3Claw has three main data flow paths. Identify which one(s) are relevant and trace through them:
 
 ### Message Flow (user input to LLM response)
 ```
@@ -72,7 +72,7 @@ Tool trait impl (tools/builtin/*.rs or tools/mcp/client.rs or tools/wasm/wrapper
 | Channel trait | `src/channels/channel.rs` | `Channel`, `StatusUpdate`, `IncomingMessage` |
 | Web gateway | `src/channels/web/mod.rs` | `send_status`, `send_response` |
 | Web server | `src/channels/web/server.rs` | Route handlers, SSE endpoints |
-| Web frontend | `crates/ironclaw_gateway/static/js/` (core/ + surfaces/) | SSE listeners in `core/sse.js`; DOM builders per surface |
+| Web frontend | `crates/t3claw_gateway/static/js/` (core/ + surfaces/) | SSE listeners in `core/sse.js`; DOM builders per surface |
 | Tool registry | `src/tools/registry.rs` | `tool_definitions`, `get`, `register` |
 | MCP tools | `src/tools/mcp/client.rs` | `McpToolWrapper`, `list_tools`, `call_tool` |
 | MCP protocol | `src/tools/mcp/protocol.rs` | `McpTool`, `inputSchema` |

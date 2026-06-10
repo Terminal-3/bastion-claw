@@ -14,7 +14,7 @@ Coverage delivered:
 - Mock LLM tool dispatch (`TOOL_CALL_PATTERNS` in tests/e2e/mock_llm.py)
 - http tool execution from a routine action (with the
   ``http_interceptor`` propagation fix in routine_engine.rs that
-  carries the ``IRONCLAW_TEST_HTTP_REMAP`` interceptor through
+  carries the ``T3CLAW_TEST_HTTP_REMAP`` interceptor through
   the routine's ``JobContext``)
 - Mock Telegram capture of the per-scenario ack text via
   ``/__mock/sent_messages``
@@ -117,7 +117,7 @@ async def run_routine_probe(
         # Verify the mock Telegram bot received our ack message. The
         # routine fires the lightweight action, mock LLM emits an http
         # tool call to api.telegram.org/.../sendMessage with the
-        # expected text, IRONCLAW_TEST_HTTP_REMAP routes it to
+        # expected text, T3CLAW_TEST_HTTP_REMAP routes it to
         # mock_telegram, which records it.
         telegram_match: dict[str, Any] | None = None
         if verify_telegram and run_terminal and mock_telegram_url:

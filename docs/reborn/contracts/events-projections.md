@@ -1,4 +1,4 @@
-# IronClaw Reborn events and projections contract
+# T3Claw Reborn events and projections contract
 
 **Date:** 2026-04-25
 **Status:** Draft contract
@@ -40,8 +40,8 @@ The durable append log plus scoped replay cursor envelope is the substrate. It m
 
 Reborn runtime events and audit records have two owning crates:
 
-- `ironclaw_events` owns the redacted record vocabulary, cursor types, sink traits, and durable log traits.
-- `ironclaw_reborn_event_store` owns standalone Reborn backend selection and storage adapters for those traits.
+- `t3claw_events` owns the redacted record vocabulary, cursor types, sink traits, and durable log traits.
+- `t3claw_reborn_event_store` owns standalone Reborn backend selection and storage adapters for those traits.
 
 ---
 
@@ -124,7 +124,7 @@ Reducer rules:
 
 Projection crates may consume typed domain-event contracts from the owning
 domain crate when the read model is explicitly about that domain. For example,
-`ironclaw_event_projections` may consume `ironclaw_turns::TurnLifecycleEvent`
+`t3claw_event_projections` may consume `t3claw_turns::TurnLifecycleEvent`
 to derive pending-gate rows from blocked/resumed/terminal turn facts. That does
 not make projections the source of truth for turn state, and it does not permit
 imports from product composition, root `src/`, or legacy engine pending-gate
@@ -149,7 +149,7 @@ client reconnects with last_event_id
 -> transport resumes live tail
 ```
 
-`ironclaw_event_projections::EventStreamManager` is the lower-level
+`t3claw_event_projections::EventStreamManager` is the lower-level
 transport-agnostic facade over domain projection services. It routes scoped
 runtime and audit replay requests through their owning projection services and
 preserves their domain-specific DTOs/cursors. Resume helpers return
@@ -158,12 +158,12 @@ response when retention has made replay impossible. A cursor minted under a
 different scope remains an authority failure and must not be silently converted
 into a snapshot.
 
-`ironclaw_event_streams::EventStreamManager` is the product-facing stream
+`t3claw_event_streams::EventStreamManager` is the product-facing stream
 manager slice. It composes projection snapshots/replay with actor+scope access
 policy, stream admission, bounded live update buffering, stream-boundary
 redaction validation, transport-neutral stream items (`Snapshot`, `Update`,
 `RebaseRequired`, `Lagged`, `KeepAlive`), and separate outbound push-candidate
-selection through `ironclaw_outbound`. It consumes projection DTOs and outbound
+selection through `t3claw_outbound`. It consumes projection DTOs and outbound
 policy ports only; it must not read durable event/audit stores directly, own
 reducers, render transport frames, or infer external push permission from
 subscription visibility.
@@ -187,8 +187,8 @@ The outbound path is:
 
 ```text
 durable event or projection fact
-  -> outbound candidate selection through ironclaw_outbound::OutboundPolicyService
-  -> ironclaw_outbound::OutboundPolicyService validation and delivery-attempt record
+  -> outbound candidate selection through t3claw_outbound::OutboundPolicyService
+  -> t3claw_outbound::OutboundPolicyService validation and delivery-attempt record
   -> product adapter render and host transport send
 ```
 
@@ -305,7 +305,7 @@ The current standalone durable backends are JSONL, PostgreSQL, and libSQL. Each 
 - `LocalDev` and `Test` may explicitly use in-memory stores.
 - `Production` rejects in-memory stores before returning a service graph.
 - `Production` may use JSONL only when the config explicitly accepts single-node durable storage.
-- PostgreSQL and libSQL adapters are available behind the crate's `postgres` and `libsql` features. Their schema files live in `crates/ironclaw_reborn_event_store/migrations/`, and the factory runs those migrations before returning the service graph.
+- PostgreSQL and libSQL adapters are available behind the crate's `postgres` and `libsql` features. Their schema files live in `crates/t3claw_reborn_event_store/migrations/`, and the factory runs those migrations before returning the service graph.
 - If the crate is compiled without a requested SQL backend feature, the factory fails closed with a redacted backend-unavailable error.
 
 ### Replay semantics
@@ -332,7 +332,7 @@ Run status projections are projection-local read models. Model/reply milestone e
 
 ### Outbound egress and subscription state
 
-`ironclaw_outbound` owns the metadata-only state and policy seams needed around projection delivery:
+`t3claw_outbound` owns the metadata-only state and policy seams needed around projection delivery:
 
 - per-thread notification policy for explicit external fanout and progress opt-in;
 - durable projection subscription cursor checkpoints scoped to actor, thread, and `ProjectionScope`;

@@ -43,10 +43,10 @@ Plain-language layers:
 | Channel / UI | Where the user starts and receives the result. | Web, CLI, Slack, Telegram, etc. adapters. |
 | Product workflow | The sequence of decisions, retries, states, and UX messages. | Userland product code or reference loop, not kernel. |
 | Agent loop | How the assistant reasons, selects tools, asks follow-ups, and summarizes. | Replaceable userland loop on the kernel surface. |
-| Kernel | The safety perimeter: authorization, approvals, leases, mounts, secrets, network, resources, redaction, durable audit/events. | Kernel-facing crates such as `ironclaw_host_api`, `ironclaw_capabilities`, `ironclaw_authorization`, `ironclaw_host_runtime`, etc. |
-| Extensions/capabilities | What actions the assistant can request. | `ironclaw_extensions`, runtime lanes, capability descriptors. |
-| Memory/workspace | What the assistant can remember, search, and use as context. | `ironclaw_memory`, filesystem/repository backends, prompt-safety policy. |
-| Events/audit | What support, QA, agents, and users can replay or inspect. | `ironclaw_events`, projections, SSE/WebSocket later. |
+| Kernel | The safety perimeter: authorization, approvals, leases, mounts, secrets, network, resources, redaction, durable audit/events. | Kernel-facing crates such as `t3claw_host_api`, `t3claw_capabilities`, `t3claw_authorization`, `t3claw_host_runtime`, etc. |
+| Extensions/capabilities | What actions the assistant can request. | `t3claw_extensions`, runtime lanes, capability descriptors. |
+| Memory/workspace | What the assistant can remember, search, and use as context. | `t3claw_memory`, filesystem/repository backends, prompt-safety policy. |
+| Events/audit | What support, QA, agents, and users can replay or inspect. | `t3claw_events`, projections, SSE/WebSocket later. |
 
 The kernel is not the product brain. It makes product workflows safe.
 
@@ -193,7 +193,7 @@ CapabilityHost
 ProcessHost
 ScopedFilesystem / memory services
 Secret lease / credential account metadata
-ironclaw_network provider client
+t3claw_network provider client
 event/audit append log
 resource governor
 approval resolver / exact invocation lease
@@ -215,7 +215,7 @@ If no mediated surface exists, that is an architecture contract request, not jus
 | “Install this extension” | Extension lifecycle workflow | extension registry, trust policy, grants, settings, secrets | Install does not equal authority. Grants/trust still matter. |
 | “Approve this risky action” | Approval UX + control plane | approval request store, exact invocation lease, audit | Approval should be replay-safe and specific to the invocation. |
 | “Search/use my memory” | Memory search/profile workflow | memory repository/search services, scope policy, events | Identity/system-prompt docs are primary-scope only. |
-| “Call an external API/provider” | Capability/provider workflow | `ironclaw_network`, secrets/credentials, resources, audit | All host/provider HTTP goes through network boundary. |
+| “Call an external API/provider” | Capability/provider workflow | `t3claw_network`, secrets/credentials, resources, audit | All host/provider HTTP goes through network boundary. |
 | “Customize the agent loop” | Loop/userland package | trust policy, grants, kernel facade | Custom loops are allowed, but they do not bypass kernel guarantees. |
 
 ---
@@ -243,8 +243,8 @@ This matters because fixes go to different places. Kernel bugs require contract/
 | New user-facing workflow | Product workflow / turn coordination / channel UI | New kernel authority model, unless new privileged operation is needed. |
 | New tool integration | Extension package, capability descriptor, runtime adapter config | Direct dispatcher calls or bespoke auth path. |
 | New agent behavior | Reference loop or loop package | Kernel changes, unless a new safety invariant is needed. |
-| New memory behavior | `ironclaw_memory` service facade or product workflow using memory | Filesystem owning semantic memory/search rules. |
-| New external provider | Provider adapter through `ironclaw_network` + secrets/resources | Raw HTTP from product code. |
+| New memory behavior | `t3claw_memory` service facade or product workflow using memory | Filesystem owning semantic memory/search rules. |
+| New external provider | Provider adapter through `t3claw_network` + secrets/resources | Raw HTTP from product code. |
 | New approval UX | Product/channel UX + approval resolver | Reusable broad approvals in V1. |
 | New observability surface | Event projection / product read model | Raw unredacted runtime logs. |
 | New secret/account UX | Credential account metadata + secret lease flow | Credential account records containing raw tokens. |

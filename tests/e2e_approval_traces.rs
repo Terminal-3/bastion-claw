@@ -25,9 +25,9 @@ mod approval_trace_tests {
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::LlmTrace;
-    use ironclaw::channels::StatusUpdate;
-    use ironclaw::context::JobContext;
-    use ironclaw::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput};
+    use t3claw::channels::StatusUpdate;
+    use t3claw::context::JobContext;
+    use t3claw::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput};
 
     const TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -424,7 +424,7 @@ mod approval_trace_tests {
         );
         let last_user_yes = captured.iter().any(|msgs| {
             msgs.iter().any(|m| {
-                matches!(m.role, ironclaw_llm::Role::User)
+                matches!(m.role, t3claw_llm::Role::User)
                     && m.content.trim().eq_ignore_ascii_case("yes")
             })
         });

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::tools::ApprovalContext;
-use ironclaw_llm::recording::HttpInterceptor;
+use t3claw_llm::recording::HttpInterceptor;
 
 /// Error returned when a job exceeds its token budget.
 #[derive(Debug, thiserror::Error)]

@@ -22,7 +22,7 @@ def _find_free_port() -> int:
     """Ask the OS for an available loopback port.
 
     The returned port is only a startup hint; the gateway fixture retries with a
-    fresh port pair if another process wins the bind race before ironclaw starts.
+    fresh port pair if another process wins the bind race before t3claw starts.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -63,11 +63,11 @@ async def _stop_process(proc, *, sig=signal.SIGINT, timeout: float = 10) -> None
 
 
 @pytest.fixture(scope="module")
-async def reborn_gateway_server(ironclaw_binary, mock_llm_server, tmp_path_factory):
+async def reborn_gateway_server(t3claw_binary, mock_llm_server, tmp_path_factory):
     """Start an isolated gateway configured for the Reborn/V2 product shell."""
-    home_dir = tmp_path_factory.mktemp("ironclaw-reborn-gateway-home")
-    db_dir = tmp_path_factory.mktemp("ironclaw-reborn-gateway-db")
-    base_dir = home_dir / ".ironclaw"
+    home_dir = tmp_path_factory.mktemp("t3claw-reborn-gateway-home")
+    db_dir = tmp_path_factory.mktemp("t3claw-reborn-gateway-db")
+    base_dir = home_dir / ".t3claw"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     proc = None
@@ -85,8 +85,8 @@ async def reborn_gateway_server(ironclaw_binary, mock_llm_server, tmp_path_facto
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(home_dir),
-            "IRONCLAW_BASE_DIR": str(base_dir),
-            "RUST_LOG": "ironclaw=info",
+            "T3CLAW_BASE_DIR": str(base_dir),
+            "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
             "ENGINE_V2": "true",
             "AGENT_AUTO_APPROVE_TOOLS": "true",
@@ -116,7 +116,7 @@ async def reborn_gateway_server(ironclaw_binary, mock_llm_server, tmp_path_facto
 
         with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_file:
             proc = await asyncio.create_subprocess_exec(
-                ironclaw_binary,
+                t3claw_binary,
                 "--no-onboard",
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=stdout_file,

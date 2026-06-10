@@ -64,22 +64,22 @@ use std::sync::Arc;
 use clap::{ColorChoice, Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "ironclaw")]
+#[command(name = "t3claw")]
 #[command(
     about = "Secure personal AI assistant that protects your data and expands its capabilities"
 )]
-#[command(long_about = "IronClaw is a secure AI assistant.\n\n\
+#[command(long_about = "T3Claw is a secure AI assistant.\n\n\
      Getting started:\n  \
-       ironclaw onboard              # Interactive setup wizard (recommended for first run)\n  \
-       ironclaw onboard --quick      # Quick setup: just pick a provider and model\n  \
-       ironclaw models set-provider openai  # Switch to a specific provider\n  \
-       ironclaw doctor               # Check your configuration\n\n\
+       t3claw onboard              # Interactive setup wizard (recommended for first run)\n  \
+       t3claw onboard --quick      # Quick setup: just pick a provider and model\n  \
+       t3claw models set-provider openai  # Switch to a specific provider\n  \
+       t3claw doctor               # Check your configuration\n\n\
      Common commands:\n  \
-       ironclaw run                  # Start the agent\n  \
-       ironclaw config list          # View all settings\n  \
-       ironclaw models status        # Show current provider and model\n  \
-       ironclaw models list          # List available providers\n\n\
-     Use 'ironclaw <subcommand> --help' for details on any command.")]
+       t3claw run                  # Start the agent\n  \
+       t3claw config list          # View all settings\n  \
+       t3claw models status        # Show current provider and model\n  \
+       t3claw models list          # List available providers\n\n\
+     Use 't3claw <subcommand> --help' for details on any command.")]
 #[command(version)]
 #[command(color = ColorChoice::Auto)] // Enable auto-color for help (if the terminal supports it)
 pub struct Cli {
@@ -114,30 +114,30 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub auto_approve: bool,
 
-    /// Deployment mode: where IronClaw is running and who owns the machine
+    /// Deployment mode: where T3Claw is running and who owns the machine
     /// boundary.
     ///
     /// Wire names: `local_single_user`, `hosted_multi_tenant`,
-    /// `enterprise_dedicated`. Falls back to `IRONCLAW_DEPLOYMENT_MODE`,
+    /// `enterprise_dedicated`. Falls back to `T3CLAW_DEPLOYMENT_MODE`,
     /// then to `local_single_user`.
     #[arg(long = "deployment-mode", global = true, value_name = "MODE")]
-    pub deployment_mode: Option<ironclaw_host_api::runtime_policy::DeploymentMode>,
+    pub deployment_mode: Option<t3claw_host_api::runtime_policy::DeploymentMode>,
 
     /// Requested runtime profile (#3045).
     ///
     /// Wire names: `secure_default`, `local_safe`, `local_dev`, `local_yolo`,
     /// `hosted_safe`, `hosted_dev`, `hosted_yolo_tenant_scoped`,
     /// `enterprise_safe`, `enterprise_dev`, `enterprise_yolo_dedicated`,
-    /// `sandboxed`, `experiment`. Falls back to `IRONCLAW_RUNTIME_PROFILE`,
+    /// `sandboxed`, `experiment`. Falls back to `T3CLAW_RUNTIME_PROFILE`,
     /// then to `secure_default`.
     #[arg(long = "runtime-profile", global = true, value_name = "PROFILE")]
-    pub runtime_profile: Option<ironclaw_host_api::runtime_policy::RuntimeProfile>,
+    pub runtime_profile: Option<t3claw_host_api::runtime_policy::RuntimeProfile>,
 
     /// Acknowledge the disclosure required by `*_yolo*` profiles.
     ///
     /// Yolo profiles intentionally reduce approvals inside their authority
     /// boundary. The CLI must capture explicit operator confirmation —
-    /// without this flag (or `IRONCLAW_YOLO_DISCLOSURE=true`), any yolo
+    /// without this flag (or `T3CLAW_YOLO_DISCLOSURE=true`), any yolo
     /// profile selection fails closed.
     #[arg(long = "yolo-disclosure", global = true)]
     pub yolo_disclosure: bool,
@@ -148,22 +148,22 @@ pub enum Command {
     /// Run the agent (default if no subcommand given)
     #[command(
         about = "Run the AI agent",
-        long_about = "Starts the IronClaw agent in default mode.\nExample: ironclaw run"
+        long_about = "Starts the T3Claw agent in default mode.\nExample: t3claw run"
     )]
     Run,
 
     /// Interactive onboarding wizard
     #[command(
-        about = "Run interactive setup wizard (start here if new to IronClaw)",
-        long_about = "Guides you through configuring IronClaw step by step.\n\n\
+        about = "Run interactive setup wizard (start here if new to T3Claw)",
+        long_about = "Guides you through configuring T3Claw step by step.\n\n\
          This is the recommended way to set up your LLM provider, API keys,\n\
          database, and channels. Run it again any time to change settings.\n\n\
          Examples:\n  \
-           ironclaw onboard                    # Full setup wizard\n  \
-           ironclaw onboard --quick            # Quick: just provider + model\n  \
-           ironclaw onboard --step provider    # Change only the LLM provider\n  \
-           ironclaw onboard --step channels    # Reconfigure messaging channels\n  \
-           ironclaw onboard --step provider,model  # Change provider and model"
+           t3claw onboard                    # Full setup wizard\n  \
+           t3claw onboard --quick            # Quick: just provider + model\n  \
+           t3claw onboard --step provider    # Change only the LLM provider\n  \
+           t3claw onboard --step channels    # Reconfigure messaging channels\n  \
+           t3claw onboard --step provider,model  # Change provider and model"
     )]
     Onboard {
         /// Skip authentication (use existing session)
@@ -191,15 +191,15 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage app configuration settings",
-        long_about = "View and modify IronClaw settings (stored in database and config.toml).\n\n\
-         For LLM provider/model changes, use `ironclaw models` instead.\n\n\
+        long_about = "View and modify T3Claw settings (stored in database and config.toml).\n\n\
+         For LLM provider/model changes, use `t3claw models` instead.\n\n\
          Examples:\n  \
-           ironclaw config list              # List all settings\n  \
-           ironclaw config list -f agent     # Filter by prefix\n  \
-           ironclaw config get agent.name    # Get a specific value\n  \
-           ironclaw config set agent.name my-bot  # Change a value\n  \
-           ironclaw config init              # Generate config.toml\n  \
-           ironclaw config path              # Show where settings are stored"
+           t3claw config list              # List all settings\n  \
+           t3claw config list -f agent     # Filter by prefix\n  \
+           t3claw config get agent.name    # Get a specific value\n  \
+           t3claw config set agent.name my-bot  # Change a value\n  \
+           t3claw config init              # Generate config.toml\n  \
+           t3claw config path              # Show where settings are stored"
     )]
     Config(ConfigCommand),
 
@@ -207,7 +207,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage WASM tools",
-        long_about = "Install, list, or remove WASM-based tools.\nExample: ironclaw tool install mytool.wasm"
+        long_about = "Install, list, or remove WASM-based tools.\nExample: t3claw tool install mytool.wasm"
     )]
     Tool(ToolCommand),
 
@@ -215,7 +215,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Browse/install extensions",
-        long_about = "Interact with extension registry.\nExample: ironclaw registry list"
+        long_about = "Interact with extension registry.\nExample: t3claw registry list"
     )]
     Registry(RegistryCommand),
 
@@ -223,7 +223,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage channels",
-        long_about = "List configured messaging channels.\nExamples:\n  ironclaw channels list\n  ironclaw channels list --verbose\n  ironclaw channels list --json"
+        long_about = "List configured messaging channels.\nExamples:\n  t3claw channels list\n  t3claw channels list --verbose\n  t3claw channels list --json"
     )]
     Channels(ChannelsCommand),
 
@@ -232,7 +232,7 @@ pub enum Command {
         subcommand,
         alias = "cron",
         about = "Manage routines",
-        long_about = "List, create, edit, enable/disable, delete, and view history of routines.\nExamples:\n  ironclaw routines list\n  ironclaw routines create --name daily-digest --schedule '0 0 9 * * *' --prompt 'Summarize today'"
+        long_about = "List, create, edit, enable/disable, delete, and view history of routines.\nExamples:\n  t3claw routines list\n  t3claw routines create --name daily-digest --schedule '0 0 9 * * *' --prompt 'Summarize today'"
     )]
     Routines(RoutinesCommand),
 
@@ -240,7 +240,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage MCP servers",
-        long_about = "Add, auth, list, or test MCP servers.\nExample: ironclaw mcp add notion https://mcp.notion.com"
+        long_about = "Add, auth, list, or test MCP servers.\nExample: t3claw mcp add notion https://mcp.notion.com"
     )]
     Mcp(Box<McpCommand>),
 
@@ -248,7 +248,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage workspace memory",
-        long_about = "Search, read, or write to memory.\nExample: ironclaw memory search 'query'"
+        long_about = "Search, read, or write to memory.\nExample: t3claw memory search 'query'"
     )]
     Memory(MemoryCommand),
 
@@ -256,7 +256,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage DM pairing",
-        long_about = "Approve or manage pairing requests.\nExamples:\n  ironclaw pairing list telegram\n  ironclaw pairing approve telegram ABC12345"
+        long_about = "Approve or manage pairing requests.\nExamples:\n  t3claw pairing list telegram\n  t3claw pairing approve telegram ABC12345"
     )]
     Pairing(PairingCommand),
 
@@ -264,7 +264,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage deployment profiles",
-        long_about = "List available deployment profiles and see which is active.\nExamples:\n  ironclaw profile list\n  ironclaw profile list --json"
+        long_about = "List available deployment profiles and see which is active.\nExamples:\n  t3claw profile list\n  t3claw profile list --json"
     )]
     Profile(ProfileCommand),
 
@@ -272,7 +272,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage OS service",
-        long_about = "Install, start, or stop service.\nExample: ironclaw service install"
+        long_about = "Install, start, or stop service.\nExample: t3claw service install"
     )]
     Service(ServiceCommand),
 
@@ -280,7 +280,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage skills",
-        long_about = "List, search, and inspect SKILL.md-based skills.\nExamples:\n  ironclaw skills list\n  ironclaw skills search 'writing'\n  ironclaw skills info my-skill"
+        long_about = "List, search, and inspect SKILL.md-based skills.\nExamples:\n  t3claw skills list\n  t3claw skills search 'writing'\n  t3claw skills info my-skill"
     )]
     Skills(SkillsCommand),
 
@@ -288,7 +288,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage lifecycle hooks",
-        long_about = "List and inspect lifecycle hooks (bundled, plugin, workspace).\nExamples:\n  ironclaw hooks list\n  ironclaw hooks list --verbose\n  ironclaw hooks list --json"
+        long_about = "List and inspect lifecycle hooks (bundled, plugin, workspace).\nExamples:\n  t3claw hooks list\n  t3claw hooks list --verbose\n  t3claw hooks list --json"
     )]
     Hooks(HooksCommand),
 
@@ -299,12 +299,12 @@ pub enum Command {
         long_about = "List providers, view current configuration, and set active provider/model.\n\n\
          Use this to switch between AI providers without re-running the full setup wizard.\n\n\
          Examples:\n  \
-           ironclaw models list                          # List all providers\n  \
-           ironclaw models list openai --verbose         # Show details for OpenAI\n  \
-           ironclaw models status                        # Show current provider/model\n  \
-           ironclaw models set gpt-4o                    # Change model\n  \
-           ironclaw models set-provider anthropic        # Switch to Anthropic\n  \
-           ironclaw models set-provider ollama --model llama3  # Switch to local Ollama"
+           t3claw models list                          # List all providers\n  \
+           t3claw models list openai --verbose         # Show details for OpenAI\n  \
+           t3claw models status                        # Show current provider/model\n  \
+           t3claw models set gpt-4o                    # Change model\n  \
+           t3claw models set-provider anthropic        # Switch to Anthropic\n  \
+           t3claw models set-provider ollama --model llama3  # Switch to local Ollama"
     )]
     Models(ModelsCommand),
 
@@ -314,28 +314,28 @@ pub enum Command {
         long_about = "Probes LLM provider, database, channels, and external dependencies.\n\
          Surfaces misconfiguration before it causes problems at runtime.\n\n\
          Run this if something is not working — it will tell you what to fix.\n\n\
-         Example:\n  ironclaw doctor"
+         Example:\n  t3claw doctor"
     )]
     Doctor,
 
     /// View and manage gateway logs
     #[command(
         about = "View and manage gateway logs",
-        long_about = "Tail gateway logs, stream live output, or adjust log level.\nExamples:\n  ironclaw logs                 # Show last 200 lines from gateway.log\n  ironclaw logs --follow        # Stream live logs via SSE\n  ironclaw logs --level         # Show current log level\n  ironclaw logs --level debug   # Set log level to debug"
+        long_about = "Tail gateway logs, stream live output, or adjust log level.\nExamples:\n  t3claw logs                 # Show last 200 lines from gateway.log\n  t3claw logs --follow        # Stream live logs via SSE\n  t3claw logs --level         # Show current log level\n  t3claw logs --level debug   # Set log level to debug"
     )]
     Logs(LogsCommand),
 
     /// Show system health and diagnostics
     #[command(
         about = "Show system status",
-        long_about = "Displays health and diagnostics info.\nExample: ironclaw status"
+        long_about = "Displays health and diagnostics info.\nExample: t3claw status"
     )]
     Status,
 
     /// Generate shell completion scripts
     #[command(
         about = "Generate completions",
-        long_about = "Generates shell completion scripts.\nExample: ironclaw completion --shell bash > ironclaw.bash"
+        long_about = "Generates shell completion scripts.\nExample: t3claw completion --shell bash > t3claw.bash"
     )]
     Completion(Completion),
 
@@ -344,7 +344,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Import from other AI systems",
-        long_about = "Migrate data from other AI assistants like OpenClaw.\nExample: ironclaw import openclaw"
+        long_about = "Migrate data from other AI assistants like OpenClaw.\nExample: t3claw import openclaw"
     )]
     Import(ImportCommand),
 
@@ -353,8 +353,8 @@ pub enum Command {
         about = "Authenticate with a provider (re-login)",
         long_about = "Re-authenticate with an LLM provider.\n\n\
          For most providers, set the API key environment variable instead.\n\
-         For interactive setup: `ironclaw onboard --step provider`\n\n\
-         Example:\n  ironclaw login --openai-codex"
+         For interactive setup: `t3claw onboard --step provider`\n\n\
+         Example:\n  t3claw login --openai-codex"
     )]
     Login {
         /// Authenticate with OpenAI Codex (ChatGPT subscription)
@@ -375,7 +375,7 @@ pub enum Command {
         orchestrator_url: String,
 
         /// Maximum iterations before stopping.
-        #[arg(long, env = "IRONCLAW_MAX_ITERATIONS", default_value = "50")]
+        #[arg(long, env = "T3CLAW_MAX_ITERATIONS", default_value = "50")]
         max_iterations: u32,
     },
 
@@ -383,7 +383,7 @@ pub enum Command {
     #[command(
         subcommand,
         about = "Manage ACP agents",
-        long_about = "Add, list, remove, or test ACP-compliant coding agents.\nExample: ironclaw acp add goose --command goose --arg \"--stdio\""
+        long_about = "Add, list, remove, or test ACP-compliant coding agents.\nExample: t3claw acp add goose --command goose --arg \"--stdio\""
     )]
     Acp(AcpCommand),
 
@@ -437,9 +437,7 @@ pub async fn init_secrets_store()
 -> anyhow::Result<Arc<dyn crate::secrets::SecretsStore + Send + Sync>> {
     let config = crate::config::Config::from_env().await?;
     let master_key = config.secrets.master_key().ok_or_else(|| {
-        anyhow::anyhow!(
-            "SECRETS_MASTER_KEY not set. Run 'ironclaw onboard' first or set it in .env"
-        )
+        anyhow::anyhow!("SECRETS_MASTER_KEY not set. Run 't3claw onboard' first or set it in .env")
     })?;
 
     let crypto = Arc::new(crate::secrets::SecretsCrypto::new(master_key.clone())?);
@@ -470,20 +468,20 @@ pub async fn run_memory_command(mem_cmd: &MemoryCommand) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    let session = ironclaw_llm::create_session_manager(config.llm.session.clone()).await;
+    let session = t3claw_llm::create_session_manager(config.llm.session.clone()).await;
 
     let bedrock_setup =
         config
             .llm
             .bedrock
             .as_ref()
-            .map(|b| ironclaw_embeddings::BedrockEmbeddingSetup {
+            .map(|b| t3claw_embeddings::BedrockEmbeddingSetup {
                 region: b.region.clone(),
                 profile: b.profile.clone(),
             });
-    let embeddings = ironclaw_embeddings::create_provider(
+    let embeddings = t3claw_embeddings::create_provider(
         &config.embeddings,
-        ironclaw_embeddings::ProviderDeps {
+        t3claw_embeddings::ProviderDeps {
             session,
             bedrock_setup,
         },
@@ -494,7 +492,7 @@ pub async fn run_memory_command(mem_cmd: &MemoryCommand) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-    let cache_config = ironclaw_embeddings::EmbeddingCacheConfig {
+    let cache_config = t3claw_embeddings::EmbeddingCacheConfig {
         max_entries: config.embeddings.cache_size,
     };
     run_memory_command_with_db(mem_cmd.clone(), db, embeddings, cache_config).await

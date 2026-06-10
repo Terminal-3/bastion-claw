@@ -24,8 +24,8 @@ use crate::secrets::SecretsStore;
 use crate::tools::ToolRegistry;
 use crate::tools::builtin::{extract_host_from_params, extract_path_from_params};
 use crate::tools::wasm::SharedCredentialRegistry;
-use ironclaw_common::{CredentialName, ExtensionName as CommonExtensionName};
-use ironclaw_skills::{SkillCredentialSpec, SkillRegistry};
+use t3claw_common::{CredentialName, ExtensionName as CommonExtensionName};
+use t3claw_skills::{SkillCredentialSpec, SkillRegistry};
 
 /// Result of checking whether a tool call has the credentials it needs.
 #[derive(Debug)]
@@ -822,9 +822,7 @@ impl AuthManager {
                 });
 
         let launch = build_pending_oauth_launch(PendingOAuthLaunchParams {
-            extension_name: ironclaw_common::ExtensionName::from_trusted(
-                credential_name.to_string(),
-            ),
+            extension_name: t3claw_common::ExtensionName::from_trusted(credential_name.to_string()),
             display_name: spec.provider.clone(),
             authorization_url: oauth.authorization_url.clone(),
             token_url: oauth.token_url.clone(),
@@ -1057,7 +1055,7 @@ mod tests {
 
     async fn make_skill_registry_with_google_oauth(
         dir: &Path,
-    ) -> Arc<std::sync::RwLock<ironclaw_skills::SkillRegistry>> {
+    ) -> Arc<std::sync::RwLock<t3claw_skills::SkillRegistry>> {
         std::fs::create_dir_all(dir.join("gmail-skill")).expect("create skill dir");
         std::fs::write(
             dir.join("gmail-skill").join("SKILL.md"),
@@ -1085,14 +1083,14 @@ Test skill
         )
         .expect("write skill");
 
-        let mut registry = ironclaw_skills::SkillRegistry::new(dir.to_path_buf());
+        let mut registry = t3claw_skills::SkillRegistry::new(dir.to_path_buf());
         registry.discover_all().await;
         Arc::new(std::sync::RwLock::new(registry))
     }
 
     async fn make_skill_registry_with_custom_oauth(
         dir: &Path,
-    ) -> Arc<std::sync::RwLock<ironclaw_skills::SkillRegistry>> {
+    ) -> Arc<std::sync::RwLock<t3claw_skills::SkillRegistry>> {
         std::fs::create_dir_all(dir.join("custom-skill")).expect("create skill dir");
         std::fs::write(
             dir.join("custom-skill").join("SKILL.md"),
@@ -1121,14 +1119,14 @@ Test skill
         )
         .expect("write skill");
 
-        let mut registry = ironclaw_skills::SkillRegistry::new(dir.to_path_buf());
+        let mut registry = t3claw_skills::SkillRegistry::new(dir.to_path_buf());
         registry.discover_all().await;
         Arc::new(std::sync::RwLock::new(registry))
     }
 
     async fn make_skill_registry_with_insecure_oauth(
         dir: &Path,
-    ) -> Arc<std::sync::RwLock<ironclaw_skills::SkillRegistry>> {
+    ) -> Arc<std::sync::RwLock<t3claw_skills::SkillRegistry>> {
         std::fs::create_dir_all(dir.join("insecure-skill")).expect("create skill dir");
         std::fs::write(
             dir.join("insecure-skill").join("SKILL.md"),
@@ -1157,7 +1155,7 @@ Test skill
         )
         .expect("write skill");
 
-        let mut registry = ironclaw_skills::SkillRegistry::new(dir.to_path_buf());
+        let mut registry = t3claw_skills::SkillRegistry::new(dir.to_path_buf());
         registry.discover_all().await;
         Arc::new(std::sync::RwLock::new(registry))
     }
@@ -1290,7 +1288,7 @@ Test skill
     async fn check_http_missing_credential_starts_skill_oauth_flow() {
         let _env_guard = crate::config::helpers::lock_env();
         let _callback_guard = set_test_env_var(
-            "IRONCLAW_OAUTH_CALLBACK_URL",
+            "T3CLAW_OAUTH_CALLBACK_URL",
             Some("https://example.com/oauth/callback"),
         );
 
@@ -1452,7 +1450,7 @@ Test skill
     async fn check_http_missing_credential_starts_skill_oauth_flow_with_custom_client_config() {
         let _env_guard = crate::config::helpers::lock_env();
         let _callback_guard = set_test_env_var(
-            "IRONCLAW_OAUTH_CALLBACK_URL",
+            "T3CLAW_OAUTH_CALLBACK_URL",
             Some("https://example.com/oauth/callback"),
         );
 
@@ -1495,7 +1493,7 @@ Test skill
     async fn check_http_missing_credential_strips_non_https_skill_auth_url() {
         let _env_guard = crate::config::helpers::lock_env();
         let _callback_guard = set_test_env_var(
-            "IRONCLAW_OAUTH_CALLBACK_URL",
+            "T3CLAW_OAUTH_CALLBACK_URL",
             Some("https://example.com/oauth/callback"),
         );
 
@@ -1538,7 +1536,7 @@ Test skill
     async fn check_wasm_channel_readiness_uses_secret_oauth_metadata() {
         let _env_guard = crate::config::helpers::lock_env();
         let _callback_guard = set_test_env_var(
-            "IRONCLAW_OAUTH_CALLBACK_URL",
+            "T3CLAW_OAUTH_CALLBACK_URL",
             Some("https://example.com/oauth/callback"),
         );
 
@@ -1638,7 +1636,7 @@ Test skill
 
         let _env_guard = crate::config::helpers::lock_env();
         let _callback_guard = set_test_env_var(
-            "IRONCLAW_OAUTH_CALLBACK_URL",
+            "T3CLAW_OAUTH_CALLBACK_URL",
             Some("https://example.com/oauth/callback"),
         );
 

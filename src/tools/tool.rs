@@ -317,7 +317,7 @@ pub struct ToolDiscoverySummary {
 }
 
 /// What runtime authority a tool needs to be exposed under a given
-/// [`ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy`].
+/// [`t3claw_host_api::runtime_policy::EffectiveRuntimePolicy`].
 ///
 /// This is the **visibility** filter — it only governs whether a tool
 /// shows up in the model-facing tool list. Action-time authorization
@@ -330,7 +330,7 @@ pub struct ToolDiscoverySummary {
 /// direct (non-brokered) network egress must declare it so they're
 /// hidden when the resolved policy can't grant the underlying authority.
 ///
-/// See `ironclaw_runtime_policy::EffectiveRuntimePolicy` and
+/// See `t3claw_runtime_policy::EffectiveRuntimePolicy` and
 /// `crate::tools::runtime_filter::is_visible_under` for the matching
 /// filter logic.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -444,7 +444,7 @@ pub trait Tool: Send + Sync {
     }
 
     /// What runtime authority this tool needs to be visible under a given
-    /// [`ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy`].
+    /// [`t3claw_host_api::runtime_policy::EffectiveRuntimePolicy`].
     ///
     /// Defaults to [`ToolRuntimeAffordance::None`] — visible under every
     /// policy. Tools that depend on provider-host shell, host workspace
@@ -609,8 +609,8 @@ pub fn require_param<'a>(
 /// # Example
 ///
 /// ```rust,ignore
-/// # use ironclaw::context::JobContext;
-/// # use ironclaw::tools::{Tool, ToolError, ToolOutput, check_approval_in_context};
+/// # use t3claw::context::JobContext;
+/// # use t3claw::tools::{Tool, ToolError, ToolOutput, check_approval_in_context};
 /// # use serde_json::Value;
 /// async fn execute(&self, params: Value, ctx: &JobContext) -> Result<ToolOutput, ToolError> {
 ///     // If this tool executes sub-tools, check their approval first

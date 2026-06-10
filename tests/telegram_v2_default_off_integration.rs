@@ -1,6 +1,6 @@
 //! Caller-level test for issue #3285's default-off wiring.
 //!
-//! This test drives [`ironclaw::config::validate_telegram_v1_v2_exclusivity`]
+//! This test drives [`t3claw::config::validate_telegram_v1_v2_exclusivity`]
 //! against constructed [`ChannelsConfig`] values — the same input type the
 //! host now hands to the validator after [`ChannelsConfig::resolve`]
 //! invokes it. A unit test inside `channels.rs` covers the resolve path
@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-use ironclaw::config::{ChannelsConfig, CliConfig, validate_telegram_v1_v2_exclusivity};
-use ironclaw::error::ConfigError;
+use t3claw::config::{ChannelsConfig, CliConfig, validate_telegram_v1_v2_exclusivity};
+use t3claw::error::ConfigError;
 
 fn channels_cfg(v1_enabled: bool, v1_telegram_listed: bool, v2_enabled: bool) -> ChannelsConfig {
     ChannelsConfig {
@@ -40,7 +40,7 @@ fn persisted(names: &[&str]) -> HashSet<String> {
 
 #[test]
 fn default_off_keeps_v1_only() {
-    // The default IronClaw config has REBORN_TELEGRAM_V2_ENABLED = false.
+    // The default T3Claw config has REBORN_TELEGRAM_V2_ENABLED = false.
     // Even if v1 telegram is configured, the validator must allow startup.
     validate_telegram_v1_v2_exclusivity(&channels_cfg(true, true, false), None)
         .expect("default off is valid");
@@ -139,7 +139,7 @@ fn config_for_testing_has_v2_disabled() {
     let libsql = temp.path().join("test.db");
     let skills = temp.path().join("skills");
     let installed = temp.path().join("installed_skills");
-    let config = ironclaw::config::Config::for_testing(libsql, skills, installed);
+    let config = t3claw::config::Config::for_testing(libsql, skills, installed);
     assert!(
         !config.channels.reborn_telegram_v2_enabled,
         "test config must default Reborn Telegram v2 to off"

@@ -193,7 +193,7 @@ mod workspace_pool {
     use super::*;
     use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
     use crate::workspace::layer::{LayerSensitivity, MemoryLayer};
-    use ironclaw_embeddings::EmbeddingCacheConfig;
+    use t3claw_embeddings::EmbeddingCacheConfig;
 
     #[tokio::test]
     async fn test_workspace_pool_applies_search_config() {
@@ -2646,7 +2646,7 @@ mod admin_tool_policy {
         let pool = WorkspacePool::new(
             Arc::clone(&db),
             None,
-            ironclaw_embeddings::EmbeddingCacheConfig::default(),
+            t3claw_embeddings::EmbeddingCacheConfig::default(),
             crate::config::WorkspaceSearchConfig::default(),
             crate::config::WorkspaceConfig::default(),
         );

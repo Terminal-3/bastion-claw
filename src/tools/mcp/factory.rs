@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use ironclaw_common::McpServerName;
+use t3claw_common::McpServerName;
 
 use crate::secrets::SecretsStore;
 use crate::tools::mcp::config::{EffectiveTransport, McpServerConfig};

@@ -2,7 +2,7 @@
 //!
 //! ## Architecture
 //!
-//! IronClaw runs inside a Docker container with an entrypoint loop that monitors exit codes:
+//! T3Claw runs inside a Docker container with an entrypoint loop that monitors exit codes:
 //! - **Exit code 0** (clean): Reset failure counter, wait `IRONCLAW_RESTART_DELAY` (default 5s), restart
 //! - **Exit code ≠ 0** (failure): Increment failure counter, exit after `IRONCLAW_MAX_FAILURES` (default 10)
 //!
@@ -45,7 +45,7 @@ impl Tool for RestartTool {
     }
 
     fn description(&self) -> &str {
-        "Restart the IronClaw agent process. The process exits cleanly (code 0) and the \
+        "Restart the T3Claw agent process. The process exits cleanly (code 0) and the \
          container entrypoint loop restarts it automatically within a few seconds."
     }
 
@@ -73,7 +73,7 @@ impl Tool for RestartTool {
 
         // Check if running inside a Docker container via IRONCLAW_IN_DOCKER env var.
         // The Docker entrypoint sets this to "true". For local development, it's unset or "false".
-        // The entrypoint restart loop only works inside a Docker container (ironclaw-worker).
+        // The entrypoint restart loop only works inside a Docker container (t3claw-worker).
         let in_docker = std::env::var("IRONCLAW_IN_DOCKER")
             .map(|v| v.to_lowercase() == "true")
             .unwrap_or(false);
@@ -84,7 +84,7 @@ impl Tool for RestartTool {
             tracing::error!("[RestartTool::execute] Not in Docker, rejecting restart");
             return Err(ToolError::ExecutionFailed(
                 "Restart is only available when running inside the Docker container. \
-                 For local development, please restart IronClaw manually."
+                 For local development, please restart T3Claw manually."
                     .to_string(),
             ));
         }
@@ -101,8 +101,8 @@ impl Tool for RestartTool {
         // Spawn a background task so the response is flushed before exit.
         // We use std::process::exit(0) to trigger a Docker container restart:
         //
-        // - The ironclaw-worker Docker container runs an entrypoint loop that monitors
-        //   the exit code of the `ironclaw run` process:
+        // - The t3claw-worker Docker container runs an entrypoint loop that monitors
+        //   the exit code of the `t3claw run` process:
         //   * Exit code 0 = clean restart: reset failure counter, wait IRONCLAW_RESTART_DELAY
         //     (default 5s), then restart the process
         //   * Exit code ≠ 0 = failure: increment counter, exit after IRONCLAW_MAX_FAILURES
@@ -146,7 +146,7 @@ impl Tool for RestartTool {
 
         let msg = format!(
             "Restarting in {delay} second(s). The process will exit cleanly and the \
-             entrypoint restart loop will bring IronClaw back online."
+             entrypoint restart loop will bring T3Claw back online."
         );
         tracing::info!("[RestartTool::execute] Returning success response: {}", msg);
         Ok(ToolOutput::text(msg, start.elapsed()))
@@ -312,7 +312,7 @@ mod tests {
         let tool = RestartTool;
         let desc = tool.description();
         assert!(desc.contains("Restart"));
-        assert!(desc.contains("IronClaw"));
+        assert!(desc.contains("T3Claw"));
         assert!(desc.contains("exits cleanly"));
         assert!(desc.contains("code 0"));
     }

@@ -3,16 +3,16 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_host_api::CapabilityId;
-use ironclaw_host_runtime::{READ_FILE_CAPABILITY_ID, WRITE_FILE_CAPABILITY_ID};
-use ironclaw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
-use ironclaw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
 use reborn_support::{
     harness::{RebornBinaryE2EHarness, assert_milestone_order},
     model_replay::{
         RebornModelReplayStep, RebornScriptedProviderToolCall, RebornTraceReplayModelGateway,
     },
 };
+use t3claw_host_api::CapabilityId;
+use t3claw_host_runtime::{READ_FILE_CAPABILITY_ID, WRITE_FILE_CAPABILITY_ID};
+use t3claw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
+use t3claw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
 
 const EXPECTED_CONTENT: &str = "Hello, E2E test!";
 

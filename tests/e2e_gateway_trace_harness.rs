@@ -13,9 +13,9 @@ mod support {
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ironclaw::db::Database;
-use ironclaw::db::libsql::LibSqlBackend;
-use ironclaw::tools::ToolRegistry;
+use t3claw::db::Database;
+use t3claw::db::libsql::LibSqlBackend;
+use t3claw::tools::ToolRegistry;
 
 use support::trace_runner::{Trace, TraceResult, TraceRunner};
 

@@ -10,7 +10,7 @@ use rust_decimal::Decimal;
 
 use crate::error::LlmError;
 use crate::worker::api::WorkerHttpClient;
-use ironclaw_llm::{
+use t3claw_llm::{
     CompletionRequest, CompletionResponse, LlmProvider, ToolCompletionRequest,
     ToolCompletionResponse,
 };

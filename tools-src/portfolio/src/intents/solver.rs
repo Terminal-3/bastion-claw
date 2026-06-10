@@ -192,7 +192,7 @@ pub fn fetch_quote(plan: &MovementPlan, slippage_bps: u16) -> Result<SolverQuote
     let headers = serde_json::json!({
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "IronClaw-Portfolio-Tool/0.1"
+        "User-Agent": "T3Claw-Portfolio-Tool/0.1"
     });
 
     let response = crate::near::agent::host::http_request(

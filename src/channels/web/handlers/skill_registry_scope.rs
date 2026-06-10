@@ -10,8 +10,8 @@ use crate::channels::web::platform::state::GatewayState;
 use axum::http::StatusCode;
 
 type HandlerResult<T> = Result<T, (StatusCode, String)>;
-type RegistryResult<T> = Result<T, ironclaw_skills::SkillRegistryError>;
-type SharedSkillRegistry = Arc<RwLock<ironclaw_skills::SkillRegistry>>;
+type RegistryResult<T> = Result<T, t3claw_skills::SkillRegistryError>;
+type SharedSkillRegistry = Arc<RwLock<t3claw_skills::SkillRegistry>>;
 type ScopedRegistryBuildLock = Arc<tokio::sync::Mutex<()>>;
 
 const SCOPED_REGISTRY_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -66,7 +66,7 @@ async fn cached_scoped_registry(
     user: &UserIdentity,
 ) -> HandlerResult<SharedSkillRegistry> {
     let user_segment =
-        ironclaw_skills::SkillRegistry::tenant_user_scope_segment(tenant_segment, &user.user_id);
+        t3claw_skills::SkillRegistry::tenant_user_scope_segment(tenant_segment, &user.user_id);
     let key = ScopedSkillRegistryCacheKey {
         template_ptr: Arc::as_ptr(template) as usize,
         tenant_segment: tenant_segment.to_string(),
@@ -174,9 +174,7 @@ fn scoped_registry_build_lock(
 }
 
 impl ScopedSkillRegistry {
-    pub(super) fn skills_snapshot(
-        &self,
-    ) -> HandlerResult<Vec<ironclaw_skills::types::LoadedSkill>> {
+    pub(super) fn skills_snapshot(&self) -> HandlerResult<Vec<t3claw_skills::types::LoadedSkill>> {
         self.read(|registry| registry.skills().to_vec())
     }
 
@@ -198,8 +196,8 @@ impl ScopedSkillRegistry {
     ) -> HandlerResult<
         RegistryResult<(
             PathBuf,
-            ironclaw_skills::SkillTrust,
-            ironclaw_skills::types::SkillSource,
+            t3claw_skills::SkillTrust,
+            t3claw_skills::types::SkillSource,
         )>,
     > {
         self.try_read(|registry| registry.validate_update(name))
@@ -208,7 +206,7 @@ impl ScopedSkillRegistry {
     pub(super) fn commit_install(
         &mut self,
         name: &str,
-        skill: ironclaw_skills::types::LoadedSkill,
+        skill: t3claw_skills::types::LoadedSkill,
     ) -> HandlerResult<RegistryResult<()>> {
         self.try_write(|registry| registry.commit_install(name, skill))
     }
@@ -220,14 +218,14 @@ impl ScopedSkillRegistry {
     pub(super) fn commit_update(
         &mut self,
         name: &str,
-        skill: ironclaw_skills::types::LoadedSkill,
+        skill: t3claw_skills::types::LoadedSkill,
     ) -> HandlerResult<RegistryResult<()>> {
         self.try_write(|registry| registry.commit_update(name, skill))
     }
 
     fn read<T>(
         &self,
-        operation: impl FnOnce(&ironclaw_skills::SkillRegistry) -> T,
+        operation: impl FnOnce(&t3claw_skills::SkillRegistry) -> T,
     ) -> HandlerResult<T> {
         match self {
             Self::Shared(registry) => {
@@ -243,7 +241,7 @@ impl ScopedSkillRegistry {
 
     fn try_read<T>(
         &self,
-        operation: impl FnOnce(&ironclaw_skills::SkillRegistry) -> RegistryResult<T>,
+        operation: impl FnOnce(&t3claw_skills::SkillRegistry) -> RegistryResult<T>,
     ) -> HandlerResult<RegistryResult<T>> {
         match self {
             Self::Shared(registry) => {
@@ -259,7 +257,7 @@ impl ScopedSkillRegistry {
 
     fn try_write<T>(
         &mut self,
-        operation: impl FnOnce(&mut ironclaw_skills::SkillRegistry) -> RegistryResult<T>,
+        operation: impl FnOnce(&mut t3claw_skills::SkillRegistry) -> RegistryResult<T>,
     ) -> HandlerResult<RegistryResult<T>> {
         match self {
             Self::Shared(registry) => {
@@ -275,10 +273,10 @@ impl ScopedSkillRegistry {
 }
 
 fn scoped_registry_from_template(
-    template: &ironclaw_skills::SkillRegistry,
+    template: &t3claw_skills::SkillRegistry,
     tenant_id: &str,
     user_id: &str,
-) -> ironclaw_skills::SkillRegistry {
+) -> t3claw_skills::SkillRegistry {
     template.clone_config_for_tenant_user_scope(tenant_id, user_id)
 }
 

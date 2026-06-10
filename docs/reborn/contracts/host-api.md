@@ -1,8 +1,8 @@
-# Reborn Contract — `ironclaw_host_api`
+# Reborn Contract — `t3claw_host_api`
 
 **Status:** Draft v0 contract
 **Date:** 2026-04-24
-**Target crate:** `crates/ironclaw_host_api`
+**Target crate:** `crates/t3claw_host_api`
 **Source architecture docs:**
 
 - `docs/reborn/2026-04-24-host-api-invariants-and-authorization.md`
@@ -14,7 +14,7 @@
 
 ## 1. Purpose
 
-`ironclaw_host_api` defines the shared vocabulary for Reborn authority boundaries.
+`t3claw_host_api` defines the shared vocabulary for Reborn authority boundaries.
 
 It is not a runtime, policy engine, filesystem, budget ledger, or extension manager. It is the contract crate that gives all those crates the same names for:
 
@@ -28,7 +28,7 @@ It is not a runtime, policy engine, filesystem, budget ledger, or extension mana
 - host-owned HTTP ingress descriptors
 - audit/event envelopes
 
-The first implementation PR should create this crate before implementing `ironclaw_filesystem`, `ironclaw_resources`, `ironclaw_extensions`, `ironclaw_wasm`, or `ironclaw_dispatcher`.
+The first implementation PR should create this crate before implementing `t3claw_filesystem`, `t3claw_resources`, `t3claw_extensions`, `t3claw_wasm`, or `t3claw_dispatcher`.
 
 ---
 
@@ -46,22 +46,22 @@ The first implementation PR should create this crate before implementing `ironcl
 
 ### Must not depend on
 
-- `ironclaw_dispatcher`
-- `ironclaw_filesystem`
-- `ironclaw_resources`
-- `ironclaw_extensions`
-- `ironclaw_wasm`
-- `ironclaw_mcp`
-- `ironclaw_scripts`
-- `ironclaw_auth`
-- `ironclaw_network`
+- `t3claw_dispatcher`
+- `t3claw_filesystem`
+- `t3claw_resources`
+- `t3claw_extensions`
+- `t3claw_wasm`
+- `t3claw_mcp`
+- `t3claw_scripts`
+- `t3claw_auth`
+- `t3claw_network`
 - current `src/tools/*`
 - current `src/agent/*`
 
 Hard invariant:
 
 ```text
-ironclaw_host_api -> no system-service or runtime crates
+t3claw_host_api -> no system-service or runtime crates
 ```
 
 ---
@@ -69,7 +69,7 @@ ironclaw_host_api -> no system-service or runtime crates
 ## 3. Proposed module layout
 
 ```text
-crates/ironclaw_host_api/src/
+crates/t3claw_host_api/src/
   lib.rs
   ids.rs
   path.rs
@@ -122,7 +122,7 @@ Time should use an explicit wrapper/type alias consistently:
 pub type Timestamp = chrono::DateTime<chrono::Utc>;
 ```
 
-If the implementation prefers `time::OffsetDateTime`, choose it once in PR 1 and use it everywhere in `ironclaw_host_api`.
+If the implementation prefers `time::OffsetDateTime`, choose it once in PR 1 and use it everywhere in `t3claw_host_api`.
 
 ---
 
@@ -620,7 +620,7 @@ Rules:
 
 `CapabilityProfileId` names a host-defined portability contract such as `memory.context_retrieval.v1`. It is distinct from `RuntimeProfile`, which is deployment/runtime policy vocabulary. `CapabilityProfileContract` lists the required operation contracts and schema refs that an extension must satisfy before claiming that profile.
 
-`HostPortId` names a mediated host API surface such as `host.storage.sql_transaction.first_party` or `host.events.audit`. `HostPortCatalog` is the host-defined catalog of known host-port contract names used by manifest and claim validators. `HostPortView` is the scoped set of host ports prepared for one invocation after authorization and obligation handling. Concrete host-port implementations belong in host/runtime service crates; `ironclaw_host_api` only owns the serializable vocabulary and validation.
+`HostPortId` names a mediated host API surface such as `host.storage.sql_transaction.first_party` or `host.events.audit`. `HostPortCatalog` is the host-defined catalog of known host-port contract names used by manifest and claim validators. `HostPortView` is the scoped set of host ports prepared for one invocation after authorization and obligation handling. Concrete host-port implementations belong in host/runtime service crates; `t3claw_host_api` only owns the serializable vocabulary and validation.
 
 Rules:
 
@@ -688,13 +688,13 @@ pub struct SandboxQuota {
 }
 ```
 
-`ironclaw_host_api` defines these shapes. `ironclaw_resources`, `ironclaw_scripts`, `ironclaw_wasm`, and sandbox backends enforce them.
+`t3claw_host_api` defines these shapes. `t3claw_resources`, `t3claw_scripts`, `t3claw_wasm`, and sandbox backends enforce them.
 
 ---
 
 ## 11a. Dispatch port contracts
 
-`ironclaw_host_api` owns the neutral already-authorized dispatch port so caller-facing workflow crates can avoid depending on the concrete dispatcher implementation:
+`t3claw_host_api` owns the neutral already-authorized dispatch port so caller-facing workflow crates can avoid depending on the concrete dispatcher implementation:
 
 ```rust
 pub struct CapabilityDispatchRequest {
@@ -721,7 +721,7 @@ Rules:
 - `RuntimeDispatchErrorKind::OperationFailed` is for model-visible capability-domain failures after a valid invocation reaches the capability implementation; runtime-lane execution failures such as guest traps remain runtime failures, not operation failures.
 - Runtime output contract failures such as `OutputDecode` and `InvalidResult` must not be conflated with malformed caller input.
 - Runtime/backend detail strings, stderr, host paths, and secret-bearing messages must not cross this port.
-- `ironclaw_dispatcher` implements the port; it does not own the port vocabulary.
+- `t3claw_dispatcher` implements the port; it does not own the port vocabulary.
 
 ---
 
@@ -851,7 +851,7 @@ Rules:
 
 - default `NetworkPolicy` denies outbound network
 - private IP / localhost / metadata endpoints are denied unless explicitly allowed
-- runtime lanes do not create raw network clients that bypass `ironclaw_network`
+- runtime lanes do not create raw network clients that bypass `t3claw_network`
 
 ---
 
@@ -1047,7 +1047,7 @@ Service crates should wrap this in their own error types when needed.
 
 ## 19. Minimum implementation tests
 
-The first `ironclaw_host_api` implementation is not accepted without tests for:
+The first `t3claw_host_api` implementation is not accepted without tests for:
 
 ### IDs and names
 
@@ -1090,7 +1090,7 @@ The first `ironclaw_host_api` implementation is not accepted without tests for:
 
 ## 20. Host-owned HTTP ingress contracts
 
-`ironclaw_host_api::ingress` defines route and policy vocabulary for Reborn
+`t3claw_host_api::ingress` defines route and policy vocabulary for Reborn
 product/API HTTP surfaces. It is a declaration contract, not a server.
 
 Product/API crates may expose:
@@ -1134,7 +1134,7 @@ Each `IngressRouteDescriptor` must carry a fully resolved `IngressPolicy`:
 - audit/trace class;
 - allowed host-mediated effect path (`ProductWorkflow`, `TurnCoordinator`, `HostPort`, `CapabilityHost`, projection/no-effect).
 
-Actual enforcement lives in host composition. `ironclaw_host_api` must not import
+Actual enforcement lives in host composition. `t3claw_host_api` must not import
 Axum, own route mounting, implement bearer/session/OIDC checks, apply policy
 engines, dispatch product workflow, or execute runtime effects.
 
@@ -1142,7 +1142,7 @@ engines, dispatch product workflow, or execute runtime effects.
 
 ## 21. Explicit non-goals for PR 1
 
-Do not implement in `ironclaw_host_api`:
+Do not implement in `t3claw_host_api`:
 
 - real filesystem backend
 - database schema
@@ -1166,12 +1166,12 @@ If an implementation detail requires one of those, stop and move it to the ownin
 
 The host API contract is ready when:
 
-- `crates/ironclaw_host_api` builds as a standalone workspace crate
+- `crates/t3claw_host_api` builds as a standalone workspace crate
 - no runtime/system-service crate dependency is introduced
 - public types in this document exist or have a documented v0 substitute
 - validation constructors exist for authority-bearing strings
 - test coverage proves the minimum tests in this document
-- architecture docs still name `ironclaw_host_api` as the first implementation crate
+- architecture docs still name `t3claw_host_api` as the first implementation crate
 
 ---
 

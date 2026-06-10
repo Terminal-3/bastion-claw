@@ -2,14 +2,14 @@
 //!
 //! Provides subcommands for listing providers, viewing current model
 //! configuration, and setting the active provider/model. Settings are
-//! persisted to both `config.toml` and `~/.ironclaw/.env` so changes
+//! persisted to both `config.toml` and `~/.t3claw/.env` so changes
 //! take effect immediately (no DB connection required).
 
 use clap::Subcommand;
 use std::path::Path;
 
 use crate::settings::Settings;
-use ironclaw_llm::registry::ProviderRegistry;
+use t3claw_llm::registry::ProviderRegistry;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum ModelsCommand {
@@ -147,7 +147,7 @@ fn save_settings(settings: &Settings, config_path: Option<&Path>) -> anyhow::Res
 }
 
 fn config_toml_path() -> std::path::PathBuf {
-    crate::bootstrap::ironclaw_base_dir().join("config.toml")
+    crate::bootstrap::t3claw_base_dir().join("config.toml")
 }
 
 /// Try to fetch the live model list from a provider.
@@ -189,7 +189,7 @@ async fn try_fetch_models(provider_id: &str, config_path: Option<&Path>) -> Opti
             return None;
         }
         let base_url = def.default_base_url.clone().unwrap_or_default();
-        llm_config.provider = Some(ironclaw_llm::RegistryProviderConfig {
+        llm_config.provider = Some(t3claw_llm::RegistryProviderConfig {
             protocol: def.protocol,
             provider_id: def.id.clone(),
             model: def.default_model.clone(),
@@ -205,8 +205,8 @@ async fn try_fetch_models(provider_id: &str, config_path: Option<&Path>) -> Opti
         });
     }
 
-    let session = ironclaw_llm::create_session_manager(config.llm.session.clone()).await;
-    let provider = ironclaw_llm::create_llm_provider(&llm_config, session)
+    let session = t3claw_llm::create_session_manager(config.llm.session.clone()).await;
+    let provider = t3claw_llm::create_llm_provider(&llm_config, session)
         .await
         .ok()?;
     provider.list_models().await.ok().filter(|m| !m.is_empty())
@@ -228,13 +228,13 @@ fn print_model_list(models: &Option<Vec<String>>, active_model: Option<&String>)
         None => {
             println!(
                 "\n  Could not fetch model list (missing credentials or provider unavailable).\
-                 \n  Tip: Run `ironclaw doctor` to check your configuration."
+                 \n  Tip: Run `t3claw doctor` to check your configuration."
             );
         }
     }
 }
 
-/// Also update `~/.ironclaw/.env` so changes take effect immediately.
+/// Also update `~/.t3claw/.env` so changes take effect immediately.
 ///
 /// Skipped when `config_path` is `Some` (custom `--config`), because the user
 /// is explicitly targeting a different config file and we must not pollute the
@@ -371,8 +371,8 @@ fn cmd_set_provider(
                 .collect();
             anyhow::anyhow!(
                 "Unknown provider '{}'.\n\nAvailable providers: {}\n\n\
-                 Tip: Run `ironclaw models list` to see all providers with descriptions,\n\
-                 or `ironclaw onboard --step provider` for interactive setup.",
+                 Tip: Run `t3claw models list` to see all providers with descriptions,\n\
+                 or `t3claw onboard --step provider` for interactive setup.",
                 provider,
                 known.join(", ")
             )
@@ -434,7 +434,7 @@ fn cmd_set_provider(
         if !has_key {
             println!();
             println!(
-                "Note: {} requires an API key. Set {} or run `ironclaw onboard --step provider` to configure.",
+                "Note: {} requires an API key. Set {} or run `t3claw onboard --step provider` to configure.",
                 canonical_id, env_var
             );
         }
@@ -578,8 +578,8 @@ async fn cmd_list_providers(
         println!();
         println!("* = active provider. Use --verbose for details.");
         println!();
-        println!("To switch provider: ironclaw models set-provider <name>");
-        println!("For guided setup:   ironclaw onboard --step provider");
+        println!("To switch provider: t3claw models set-provider <name>");
+        println!("For guided setup:   t3claw onboard --step provider");
     }
 
     Ok(())
@@ -649,7 +649,7 @@ async fn cmd_show_provider(
             .collect();
         anyhow::anyhow!(
             "Unknown provider '{}'.\n\nAvailable providers: {}\n\n\
-             Tip: Run `ironclaw models list` to see all providers with descriptions.",
+             Tip: Run `t3claw models list` to see all providers with descriptions.",
             id,
             known.join(", ")
         )
@@ -848,7 +848,7 @@ mod tests {
         // With a custom config path, sync_to_dotenv should be a no-op
         // (it returns early when config_path is Some).
         // We verify by checking that cmd_set_provider succeeds without
-        // trying to write to the default ~/.ironclaw/.env.
+        // trying to write to the default ~/.t3claw/.env.
         cmd_set_provider("groq", None, Some(&toml_path)).expect("set provider with custom config");
 
         let settings = Settings::load_toml(&toml_path)

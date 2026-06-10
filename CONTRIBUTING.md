@@ -3,8 +3,8 @@
 ## Getting Started
 
 ```bash
-git clone https://github.com/nearai/ironclaw.git
-cd ironclaw
+git clone https://github.com/Terminal-3/t3-claw.git
+cd t3claw
 ./scripts/dev-setup.sh
 ```
 
@@ -128,7 +128,7 @@ Select the appropriate track in the PR template based on what your changes touch
 
 ## Database Changes
 
-IronClaw uses dual-backend persistence (PostgreSQL + libSQL). All new persistence features must support both backends. See `src/db/CLAUDE.md`.
+T3Claw uses dual-backend persistence (PostgreSQL + libSQL). All new persistence features must support both backends. See `src/db/CLAUDE.md`.
 
 ## Adding Dependencies
 

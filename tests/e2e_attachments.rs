@@ -16,8 +16,8 @@ mod attachment_tests {
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::LlmTrace;
 
-    use ironclaw::channels::{AttachmentKind, IncomingAttachment, IncomingMessage};
-    use ironclaw_llm::ContentPart;
+    use t3claw::channels::{AttachmentKind, IncomingAttachment, IncomingMessage};
+    use t3claw_llm::ContentPart;
 
     const FIXTURES: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -87,7 +87,7 @@ mod attachment_tests {
         let last_user_msg = last_request
             .iter()
             .rev()
-            .find(|m| matches!(m.role, ironclaw_llm::Role::User))
+            .find(|m| matches!(m.role, t3claw_llm::Role::User))
             .expect("should have a user message");
 
         // The augmented text should contain the attachment tags and transcript
@@ -153,7 +153,7 @@ mod attachment_tests {
         let last_user_msg = last_request
             .iter()
             .rev()
-            .find(|m| matches!(m.role, ironclaw_llm::Role::User))
+            .find(|m| matches!(m.role, t3claw_llm::Role::User))
             .expect("should have a user message");
 
         // Should have image content parts
@@ -204,7 +204,7 @@ mod attachment_tests {
         let last_user_msg = last_request
             .iter()
             .rev()
-            .find(|m| matches!(m.role, ironclaw_llm::Role::User))
+            .find(|m| matches!(m.role, t3claw_llm::Role::User))
             .expect("should have a user message");
 
         // No attachments → no augmentation tags, no content parts
@@ -227,8 +227,8 @@ mod attachment_tests {
 
         // Each iteration gets its own tempdir so attachment writes stay
         // fully off the host HOME directory. The previous version of this
-        // test derived `project_root` from `bootstrap::ironclaw_base_dir()`
-        // and would actually write real files into `~/.ironclaw/attachments`
+        // test derived `project_root` from `bootstrap::t3claw_base_dir()`
+        // and would actually write real files into `~/.t3claw/attachments`
         // on a dev machine / CI runner.
         let project_root_tmp = tempfile::tempdir().expect("create attachment project_root tempdir");
         let project_root = project_root_tmp.path().to_path_buf();
@@ -238,11 +238,11 @@ mod attachment_tests {
             // Redirect the engine's project_root to our tempdir so the
             // assertion on saved_path below sees the real write. Without
             // this override the engine joins paths against the cached
-            // `ironclaw_base_dir()` (first-caller-wins LazyLock), which
-            // resolves to `$HOME/.ironclaw` and is unrelated to the
+            // `t3claw_base_dir()` (first-caller-wins LazyLock), which
+            // resolves to `$HOME/.t3claw` and is unrelated to the
             // per-test tempdir here.
             assert!(
-                ironclaw::bridge::override_engine_project_root_for_test(project_root.clone()).await,
+                t3claw::bridge::override_engine_project_root_for_test(project_root.clone()).await,
                 "engine state should be installed after build()"
             );
 
@@ -279,7 +279,7 @@ mod attachment_tests {
             let last_user_msg = last_request
                 .iter()
                 .rev()
-                .find(|m| matches!(m.role, ironclaw_llm::Role::User))
+                .find(|m| matches!(m.role, t3claw_llm::Role::User))
                 .expect("user message");
 
             let expected_suffix = format!("{channel}-notes.txt");
@@ -290,7 +290,7 @@ mod attachment_tests {
                 .and_then(|rest| rest.split('"').next())
                 .expect("project_path attribute");
             assert!(
-                project_path.contains(".ironclaw/attachments/"),
+                project_path.contains(".t3claw/attachments/"),
                 "missing persisted attachment path for {channel}: {}",
                 last_user_msg.content
             );

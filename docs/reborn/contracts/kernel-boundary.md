@@ -14,10 +14,10 @@ Terminology:
 
 ```text
 kernel                 architectural security boundary
-ironclaw_host_runtime  current concrete composition crate for kernel-facing services/adapters
+t3claw_host_runtime  current concrete composition crate for kernel-facing services/adapters
 ```
 
-There is no requirement to create an `ironclaw_kernel` crate. The contract is about the boundary: privileged operations must cross kernel-mediated ports, regardless of which concrete crate wires them.
+There is no requirement to create an `t3claw_kernel` crate. The contract is about the boundary: privileged operations must cross kernel-mediated ports, regardless of which concrete crate wires them.
 
 ---
 

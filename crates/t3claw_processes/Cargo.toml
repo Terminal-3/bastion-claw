@@ -1,0 +1,23 @@
+[package]
+name = "t3claw_processes"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+t3claw_events = { path = "../t3claw_events" }
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_resources = { path = "../t3claw_resources" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+t3claw_event_projections = { path = "../t3claw_event_projections" }
+t3claw_reborn_event_store = { path = "../t3claw_reborn_event_store" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "time"] }

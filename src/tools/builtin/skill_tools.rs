@@ -16,10 +16,10 @@ use crate::context::JobContext;
 use crate::tools::tool::{
     ApprovalRequirement, EngineCompatibility, Tool, ToolError, ToolOutput, require_str,
 };
-use ironclaw_skills::catalog::{
+use t3claw_skills::catalog::{
     SkillCatalog, catalog_entry_is_installed, resolve_catalog_slug_for_name,
 };
-use ironclaw_skills::registry::SkillRegistry;
+use t3claw_skills::registry::SkillRegistry;
 
 const MAX_CHAIN_DEPS: usize = 10;
 const MAX_DOWNLOAD_BYTES: usize = 10 * 1024 * 1024;
@@ -33,7 +33,7 @@ const SKILL_SCOPE_OWNER_METADATA_KEY: &str = "skill_scope_owner_id";
 /// case a future refactor (parallel fetching, retries) changes that
 /// invariant.
 const MAX_CHAIN_QUEUE: usize = MAX_CHAIN_DEPS * 10;
-const INSTALL_METADATA_FILE_NAME: &str = ".ironclaw-install.json";
+const INSTALL_METADATA_FILE_NAME: &str = ".t3claw-install.json";
 
 #[derive(Debug, Clone, Error)]
 #[error("{message}")]
@@ -71,14 +71,14 @@ impl From<SkillFetchError> for ToolError {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SkillInstallPayload {
     pub(crate) skill_md: String,
-    pub(crate) extra_files: Vec<ironclaw_skills::registry::InstallFile>,
-    pub(crate) install_metadata: Option<ironclaw_skills::registry::InstalledSkillMetadata>,
+    pub(crate) extra_files: Vec<t3claw_skills::registry::InstallFile>,
+    pub(crate) install_metadata: Option<t3claw_skills::registry::InstalledSkillMetadata>,
 }
 
 #[derive(Debug)]
 struct ZipSkillBundle {
     skill_md: String,
-    extra_files: Vec<ironclaw_skills::registry::InstallFile>,
+    extra_files: Vec<t3claw_skills::registry::InstallFile>,
     bundle_subdir: Option<String>,
 }
 
@@ -138,11 +138,11 @@ fn validate_derived_fetch_url(url: &str) -> Result<reqwest::Url, SkillFetchError
 fn validate_payload_skill_size(
     payload: SkillInstallPayload,
 ) -> Result<SkillInstallPayload, SkillFetchError> {
-    if payload.skill_md.len() as u64 > ironclaw_skills::MAX_PROMPT_FILE_SIZE {
+    if payload.skill_md.len() as u64 > t3claw_skills::MAX_PROMPT_FILE_SIZE {
         return Err(SkillFetchError::from_message(format!(
             "Skill content too large: {} bytes (max {} bytes)",
             payload.skill_md.len(),
-            ironclaw_skills::MAX_PROMPT_FILE_SIZE
+            t3claw_skills::MAX_PROMPT_FILE_SIZE
         )));
     }
     Ok(payload)
@@ -247,7 +247,7 @@ where
     let mut attempted = 0usize;
 
     while let Some(dep_name) = queue.pop_front() {
-        if !ironclaw_skills::validate_skill_name(&dep_name) {
+        if !t3claw_skills::validate_skill_name(&dep_name) {
             report
                 .failed
                 .push(format!("{}: invalid skill dependency name", dep_name));
@@ -271,11 +271,11 @@ where
 
         attempted += 1;
 
-        let download_url = ironclaw_skills::catalog::skill_download_url(registry_url, &dep_name);
+        let download_url = t3claw_skills::catalog::skill_download_url(registry_url, &dep_name);
         match fetcher(download_url).await {
             Ok(dep_bundle) => {
-                let normalized = ironclaw_skills::normalize_line_endings(&dep_bundle.skill_md);
-                match ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+                let normalized = t3claw_skills::normalize_line_endings(&dep_bundle.skill_md);
+                match t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
                     &user_dir,
                     &dep_name,
                     &normalized,
@@ -505,7 +505,7 @@ fn loaded_skill_name_for_source_url(
         .iter()
         .find_map(|skill| {
             let skill_dir = match &skill.source {
-                ironclaw_skills::SkillSource::Installed(path) => path,
+                t3claw_skills::SkillSource::Installed(path) => path,
                 _ => return None,
             };
             installed_source_url_matches(skill_dir, &requested_url)
@@ -517,7 +517,7 @@ fn loaded_skill_name_for_source_url(
 fn installed_source_url_matches(skill_dir: &Path, requested_url: &str) -> bool {
     let metadata_path = skill_dir.join(INSTALL_METADATA_FILE_NAME);
     let Some(metadata) = std::fs::read(metadata_path).ok().and_then(|bytes| {
-        serde_json::from_slice::<ironclaw_skills::registry::InstalledSkillMetadata>(&bytes).ok()
+        serde_json::from_slice::<t3claw_skills::registry::InstalledSkillMetadata>(&bytes).ok()
     }) else {
         return false;
     };
@@ -972,7 +972,7 @@ impl Tool for SkillInstallTool {
             )
             .await?;
             requested_identifier = Some(download_key.clone());
-            let download_url = ironclaw_skills::catalog::skill_download_url(
+            let download_url = t3claw_skills::catalog::skill_download_url(
                 self.catalog.registry_url(),
                 &download_key,
             );
@@ -981,7 +981,7 @@ impl Tool for SkillInstallTool {
                 .map_err(ToolError::from)?
         };
 
-        let normalized = ironclaw_skills::normalize_line_endings(&install_payload.skill_md);
+        let normalized = t3claw_skills::normalize_line_endings(&install_payload.skill_md);
 
         // Check for duplicates and get install_dir under a brief read lock.
         let (user_dir, skill_name_from_parse, install_content) = {
@@ -990,7 +990,7 @@ impl Tool for SkillInstallTool {
                 .map_err(|e| ToolError::ExecutionFailed(format!("Lock poisoned: {}", e)))?;
 
             let (skill_name, install_content) =
-                ironclaw_skills::registry::SkillRegistry::resolve_install_content(
+                t3claw_skills::registry::SkillRegistry::resolve_install_content(
                     &normalized,
                     requested_identifier.as_deref(),
                 )
@@ -1014,7 +1014,7 @@ impl Tool for SkillInstallTool {
 
         // Perform async I/O (write to disk, validate round-trip) with no lock held.
         let (skill_name, loaded_skill) =
-            ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+            t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
                 &user_dir,
                 &skill_name_from_parse,
                 &install_content,
@@ -1255,7 +1255,7 @@ fn validate_resolved_addrs(host: &str, addrs: &[std::net::SocketAddr]) -> Result
 fn build_fetch_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("ironclaw/0.1")
+        .user_agent("t3claw/0.1")
         .redirect(reqwest::redirect::Policy::none())
 }
 
@@ -1831,11 +1831,11 @@ fn extract_skill_bundle_from_zip(
             continue;
         }
         if relative == Path::new("SKILL.md") {
-            if contents.len() as u64 > ironclaw_skills::MAX_PROMPT_FILE_SIZE {
+            if contents.len() as u64 > t3claw_skills::MAX_PROMPT_FILE_SIZE {
                 return Err(ToolError::ExecutionFailed(format!(
                     "SKILL.md in archive is too large: {} bytes (max {} bytes)",
                     contents.len(),
-                    ironclaw_skills::MAX_PROMPT_FILE_SIZE
+                    t3claw_skills::MAX_PROMPT_FILE_SIZE
                 )));
             }
             skill_md = Some(String::from_utf8(contents).map_err(|e| {
@@ -1843,7 +1843,7 @@ fn extract_skill_bundle_from_zip(
             })?);
             continue;
         }
-        extra_files.push(ironclaw_skills::registry::InstallFile {
+        extra_files.push(t3claw_skills::registry::InstallFile {
             relative_path: relative.to_path_buf(),
             contents,
         });
@@ -1880,7 +1880,7 @@ async fn fetch_github_repo_payload(
     validate_payload_skill_size(SkillInstallPayload {
         skill_md: bundle.skill_md,
         extra_files: bundle.extra_files,
-        install_metadata: Some(ironclaw_skills::registry::InstalledSkillMetadata {
+        install_metadata: Some(t3claw_skills::registry::InstalledSkillMetadata {
             source_url: Some(source_url.to_string()),
             source_subdir: bundle.bundle_subdir.or(repo.subdir),
             ..Default::default()
@@ -1900,7 +1900,7 @@ pub(crate) async fn fetch_skill_payload(url: &str) -> Result<SkillInstallPayload
         })?;
         return validate_payload_skill_size(SkillInstallPayload {
             skill_md,
-            install_metadata: Some(ironclaw_skills::registry::InstalledSkillMetadata {
+            install_metadata: Some(t3claw_skills::registry::InstalledSkillMetadata {
                 source_url: Some(url.to_string()),
                 source_subdir: None,
                 ..Default::default()
@@ -2002,7 +2002,7 @@ impl Tool for SkillRemoveTool {
         };
 
         // Delete files from disk (async I/O, no lock held).
-        ironclaw_skills::registry::SkillRegistry::delete_skill_files(&skill_path)
+        t3claw_skills::registry::SkillRegistry::delete_skill_files(&skill_path)
             .await
             .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 
@@ -2174,7 +2174,7 @@ mod tests {
                 "pikastream-video-meeting",
                 &skill_content("pikastream-video-meeting", &[]),
                 &[],
-                Some(&ironclaw_skills::registry::InstalledSkillMetadata {
+                Some(&t3claw_skills::registry::InstalledSkillMetadata {
                     source_url: Some(source_url.to_string()),
                     source_subdir: None,
                     ..Default::default()
@@ -2223,7 +2223,7 @@ mod tests {
                 "pikastream-video-meeting",
                 &skill_content("pikastream-video-meeting", &[]),
                 &[],
-                Some(&ironclaw_skills::registry::InstalledSkillMetadata {
+                Some(&t3claw_skills::registry::InstalledSkillMetadata {
                     source_url: Some(source_url.to_string()),
                     source_subdir: None,
                     ..Default::default()
@@ -2340,7 +2340,7 @@ mod tests {
 
     #[test]
     fn test_find_catalog_slug_for_display_name() {
-        let entries = vec![ironclaw_skills::catalog::CatalogEntry {
+        let entries = vec![t3claw_skills::catalog::CatalogEntry {
             slug: "finance/mortgage-calculator".to_string(),
             name: "Mortgage Calculator".to_string(),
             description: String::new(),
@@ -2370,7 +2370,7 @@ mod tests {
     #[test]
     fn test_resolve_catalog_slug_for_display_name_is_ambiguous() {
         let entries = vec![
-            ironclaw_skills::catalog::CatalogEntry {
+            t3claw_skills::catalog::CatalogEntry {
                 slug: "alice/mortgage-calculator".to_string(),
                 name: "Mortgage Calculator".to_string(),
                 description: String::new(),
@@ -2382,7 +2382,7 @@ mod tests {
                 installs_current: None,
                 owner: None,
             },
-            ironclaw_skills::catalog::CatalogEntry {
+            t3claw_skills::catalog::CatalogEntry {
                 slug: "bob/mortgage-calculator".to_string(),
                 name: "Mortgage Calculator".to_string(),
                 description: String::new(),
@@ -2517,7 +2517,7 @@ mod tests {
 
         let blob = super::parse_github_blob_ref(&parsed).expect("blob ref");
         assert_eq!(blob.owner, "nearai");
-        assert_eq!(blob.repo, "ironclaw");
+        assert_eq!(blob.repo, "t3claw");
         assert_eq!(
             blob.blob_segments,
             vec!["feature", "foo", "skills", "demo", "SKILL.md"]
@@ -2532,7 +2532,7 @@ mod tests {
 
         let repo = super::parse_github_repo_ref(&parsed).expect("repo ref");
         assert_eq!(repo.owner, "nearai");
-        assert_eq!(repo.repo, "ironclaw");
+        assert_eq!(repo.repo, "t3claw");
         assert_eq!(
             repo.tree_segments,
             Some(vec![
@@ -2546,7 +2546,7 @@ mod tests {
 
     #[test]
     fn test_validate_github_repo_components_rejects_unsafe_segments() {
-        let err = super::validate_github_repo_components("nearai", "../ironclaw").unwrap_err();
+        let err = super::validate_github_repo_components("nearai", "../t3claw").unwrap_err();
         assert!(err.to_string().contains("Invalid GitHub repository"));
     }
 
@@ -2709,7 +2709,7 @@ mod tests {
         writer
             .write_all(&vec![
                 b'a';
-                (ironclaw_skills::MAX_PROMPT_FILE_SIZE as usize) + 1
+                (t3claw_skills::MAX_PROMPT_FILE_SIZE as usize) + 1
             ])
             .unwrap();
         let zip = writer.finish().unwrap().into_inner();
@@ -2726,8 +2726,8 @@ mod tests {
         let registry = test_registry();
         let registry_url = "https://clawhub.example";
 
-        let dep_a_url = ironclaw_skills::catalog::skill_download_url(registry_url, "dep-a");
-        let dep_b_url = ironclaw_skills::catalog::skill_download_url(registry_url, "dep-b");
+        let dep_a_url = t3claw_skills::catalog::skill_download_url(registry_url, "dep-a");
+        let dep_b_url = t3claw_skills::catalog::skill_download_url(registry_url, "dep-b");
 
         let responses = Arc::new(HashMap::from([
             (dep_a_url, skill_content("dep-a", &["dep-b"])),
@@ -2811,8 +2811,8 @@ mod tests {
 
         // Second "install": re-drive with the pending list via the helper
         // that `SkillInstallTool::execute` uses when `install_dependencies=true`.
-        let dep_a_url = ironclaw_skills::catalog::skill_download_url(registry_url, "dep-a");
-        let dep_b_url = ironclaw_skills::catalog::skill_download_url(registry_url, "dep-b");
+        let dep_a_url = t3claw_skills::catalog::skill_download_url(registry_url, "dep-a");
+        let dep_b_url = t3claw_skills::catalog::skill_download_url(registry_url, "dep-b");
         let responses = Arc::new(HashMap::from([
             (dep_a_url, skill_content("dep-a", &[])),
             (dep_b_url, skill_content("dep-b", &[])),

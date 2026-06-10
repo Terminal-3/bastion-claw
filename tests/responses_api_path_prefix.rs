@@ -1,5 +1,5 @@
 //! Regression tests for the OpenAI Responses API route prefix
-//! (see ironclaw#2201).
+//! (see t3claw#2201).
 //!
 //! The canonical path is `/api/v1/responses`; the legacy `/v1/responses`
 //! path is retained as an alias for backward compatibility. Both must
@@ -16,10 +16,10 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ironclaw::channels::web::auth::MultiAuthState;
-use ironclaw::channels::web::platform::router::start_server;
-use ironclaw::channels::web::platform::state::GatewayState;
-use ironclaw::channels::web::test_helpers::TestGatewayBuilder;
+use t3claw::channels::web::auth::MultiAuthState;
+use t3claw::channels::web::platform::router::start_server;
+use t3claw::channels::web::platform::state::GatewayState;
+use t3claw::channels::web::test_helpers::TestGatewayBuilder;
 use tokio::sync::oneshot;
 
 const AUTH_TOKEN: &str = "test-responses-api-token";
@@ -401,8 +401,8 @@ async fn external_tool_name_shadowing_registered_action_is_rejected() {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use ironclaw::context::JobContext;
-    use ironclaw::tools::{Tool, ToolError, ToolOutput, ToolRegistry};
+    use t3claw::context::JobContext;
+    use t3claw::tools::{Tool, ToolError, ToolOutput, ToolRegistry};
 
     /// Stand-in for a registered built-in. Production tools have
     /// the same name shape (`shell`, `memory_write`, etc.); this
@@ -438,11 +438,11 @@ async fn external_tool_name_shadowing_registered_action_is_rejected() {
     let registry = Arc::new(ToolRegistry::new());
     registry.register(Arc::new(StandInTool)).await;
 
-    let state = ironclaw::channels::web::test_helpers::TestGatewayBuilder::new()
+    let state = t3claw::channels::web::test_helpers::TestGatewayBuilder::new()
         .user_id("test-user")
         .tool_registry(registry)
         .build();
-    let auth = ironclaw::channels::web::auth::MultiAuthState::single(
+    let auth = t3claw::channels::web::auth::MultiAuthState::single(
         AUTH_TOKEN.to_string(),
         "test-user".to_string(),
     );
@@ -450,7 +450,7 @@ async fn external_tool_name_shadowing_registered_action_is_rejected() {
         .parse()
         .expect("hard-coded address must parse");
     let bound =
-        ironclaw::channels::web::platform::router::start_server(addr, state.clone(), auth.into())
+        t3claw::channels::web::platform::router::start_server(addr, state.clone(), auth.into())
             .await
             .expect("start gateway test server");
     let shutdown = state.shutdown_tx.write().await.take();

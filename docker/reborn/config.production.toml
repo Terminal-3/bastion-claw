@@ -1,4 +1,4 @@
-api_version = "ironclaw.runtime/v1"
+api_version = "t3claw.runtime/v1"
 
 [boot]
 profile = "production"
@@ -21,12 +21,12 @@ regex_activation_enabled = true
 
 [storage]
 backend = "postgres"
-url_env = "IRONCLAW_REBORN_POSTGRES_URL"
-secret_master_key_env = "IRONCLAW_REBORN_SECRET_MASTER_KEY"
+url_env = "T3CLAW_REBORN_POSTGRES_URL"
+secret_master_key_env = "T3CLAW_REBORN_SECRET_MASTER_KEY"
 
 [webui]
-env_token_var = "IRONCLAW_REBORN_WEBUI_TOKEN"
-env_user_id_var = "IRONCLAW_REBORN_WEBUI_USER_ID"
+env_token_var = "T3CLAW_REBORN_WEBUI_TOKEN"
+env_user_id_var = "T3CLAW_REBORN_WEBUI_USER_ID"
 
 [llm.default]
 provider_id = "nearai"
@@ -35,5 +35,5 @@ api_key_env = "NEARAI_API_KEY"
 
 [slack]
 enabled = false
-signing_secret_env = "IRONCLAW_REBORN_SLACK_SIGNING_SECRET"
-bot_token_env = "IRONCLAW_REBORN_SLACK_BOT_TOKEN"
+signing_secret_env = "T3CLAW_REBORN_SLACK_SIGNING_SECRET"
+bot_token_env = "T3CLAW_REBORN_SLACK_BOT_TOKEN"

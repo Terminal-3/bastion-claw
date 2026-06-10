@@ -38,8 +38,8 @@ from helpers import api_get, api_post, AUTH_TOKEN, wait_for_ready
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_GOOGLE_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-google-e2e-")
-_GOOGLE_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-google-e2e-home-")
+_GOOGLE_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-google-e2e-")
+_GOOGLE_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-google-e2e-home-")
 
 # Single source of truth for the OAuth client id advertised by this fixture.
 # The mock LLM's /oauth/refresh handler keys refresh behavior off this value
@@ -351,8 +351,8 @@ async def mock_google_api():
 
 
 @pytest.fixture(scope="module")
-async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
-    """Start ironclaw with ENGINE_V2=true and a google_drive skill pointing to mock Google API."""
+async def v2_google_server(t3claw_binary, mock_llm_server, mock_google_api):
+    """Start t3claw with ENGINE_V2=true and a google_drive skill pointing to mock Google API."""
     mock_api_url = mock_google_api["url"]
     mock_api_host = mock_api_url.replace("http://", "")
 
@@ -365,12 +365,12 @@ async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
         assert r.status_code == 200
 
     home_dir = _GOOGLE_HOME_TMPDIR.name
-    skills_dir = os.path.join(home_dir, ".ironclaw", "skills")
+    skills_dir = os.path.join(home_dir, ".t3claw", "skills")
     os.makedirs(skills_dir, exist_ok=True)
     _write_google_skill(skills_dir, mock_api_host)
 
     # Install real google-drive WASM tool for OAuth redirect test
-    wasm_tools_dir = os.path.join(home_dir, ".ironclaw", "wasm_tools")
+    wasm_tools_dir = os.path.join(home_dir, ".t3claw", "wasm_tools")
     os.makedirs(wasm_tools_dir, exist_ok=True)
     _install_google_drive_wasm(wasm_tools_dir)
 
@@ -390,8 +390,8 @@ async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=debug",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
         "HTTP_ALLOW_LOCALHOST": "true",
@@ -418,7 +418,7 @@ async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
         "EMBEDDING_ENABLED": "false",
         "WASM_ENABLED": "true",
         "WASM_TOOLS_DIR": wasm_tools_dir,
-        "WASM_CHANNELS_DIR": os.path.join(home_dir, ".ironclaw", "wasm_channels"),
+        "WASM_CHANNELS_DIR": os.path.join(home_dir, ".t3claw", "wasm_channels"),
         "ONBOARD_COMPLETED": "true",
         # Match the `hosted-google-client-id` value the mock LLM's
         # /oauth/refresh handler expects so `refresh_token_via_proxy`
@@ -429,15 +429,15 @@ async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
         # production SSRF guard blocks loopback by default. Mock-based
         # E2E tests opt in to the loopback path via this env var
         # (cf. src/auth/mod.rs::validate_oauth_proxy_url).
-        "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
-        "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
-        "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+        "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+        "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+        "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
         "SECRETS_MASTER_KEY": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     }
     _forward_coverage_env(env)
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -463,7 +463,7 @@ async def v2_google_server(ironclaw_binary, mock_llm_server, mock_google_api):
             except asyncio.TimeoutError:
                 pass
         pytest.fail(
-            f"v2 google ironclaw server failed to start on port {gateway_port}.\n"
+            f"v2 google t3claw server failed to start on port {gateway_port}.\n"
             f"stderr: {stderr_bytes.decode('utf-8', errors='replace')}"
         )
     finally:

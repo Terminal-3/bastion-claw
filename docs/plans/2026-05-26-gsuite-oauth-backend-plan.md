@@ -8,7 +8,7 @@
 
 ## Key Changes
 
-### `ironclaw_auth`
+### `t3claw_auth`
 
 - Add a Google provider implementation behind the existing auth ports.
 - Support Google OAuth client metadata through the existing built-in/override conventions unless the implementation explicitly adds a settings-backed source and updates the relevant configuration docs in the same branch. Required fields are client id, optional client secret, redirect URI/base URL, and hosted-domain hint if already supported by existing config conventions.
@@ -65,7 +65,7 @@
 
 ## Test Plan
 
-### `ironclaw_auth` Contract Tests
+### `t3claw_auth` Contract Tests
 
 - Google OAuth start creates an `OAuthUrl` challenge with correct provider, scopes, state hash, PKCE hash, expiry, and continuation.
 - OAuth start binds the target account create/update through a pre-authorized `CredentialAccountUpdateBinding`.
@@ -100,7 +100,7 @@
 
 ## Assumptions
 
-- OAuth ownership stays in `ironclaw_auth`; no new product-facing `ironclaw_oauth` crate.
-- GSuite stays in `ironclaw_first_party_extensions`; no resurrection of the older `ironclaw_native_extensions` plan.
+- OAuth ownership stays in `t3claw_auth`; no new product-facing `t3claw_oauth` crate.
+- GSuite stays in `t3claw_first_party_extensions`; no resurrection of the older `t3claw_native_extensions` plan.
 - This slice is backend/service-level only. WebUI and browser E2E are explicit follow-ups.
 - Runtime env vars alone should not silently create credentials; they only configure the OAuth client used when a real auth flow is started.

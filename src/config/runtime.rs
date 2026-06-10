@@ -7,15 +7,15 @@
 //!
 //! Selection precedence (highest wins):
 //! 1. CLI flags (`--deployment-mode`, `--runtime-profile`, `--yolo-disclosure`)
-//! 2. Environment variables (`IRONCLAW_DEPLOYMENT_MODE`,
-//!    `IRONCLAW_RUNTIME_PROFILE`, `IRONCLAW_YOLO_DISCLOSURE`)
+//! 2. Environment variables (`T3CLAW_DEPLOYMENT_MODE`,
+//!    `T3CLAW_RUNTIME_PROFILE`, `T3CLAW_YOLO_DISCLOSURE`)
 //! 3. *(future)* DB-backed `Settings` — reserved for a follow-up; not wired
 //!    in this PR so we don't conflate runtime-policy selection with
 //!    settings-store migration.
 //! 4. Defaults: `LocalSingleUser` + `SecureDefault`. Both are the safest
 //!    choices and never grant provider-host authority.
 //!
-//! The resolver in `ironclaw_runtime_policy` is the only sanctioned producer
+//! The resolver in `t3claw_runtime_policy` is the only sanctioned producer
 //! of [`EffectiveRuntimePolicy`]. This module's only job is to gather the
 //! inputs from the configuration surface and call `resolve` once at startup.
 //!
@@ -25,8 +25,8 @@
 //! and the planner integration in PR 5 is the right place to reconcile them
 //! against the resolved policy.
 
-use ironclaw_host_api::runtime_policy::{DeploymentMode, RuntimeProfile};
-use ironclaw_runtime_policy::{
+use t3claw_host_api::runtime_policy::{DeploymentMode, RuntimeProfile};
+use t3claw_runtime_policy::{
     EffectiveRuntimePolicy, OrgPolicyConstraints, ResolveError, ResolveRequest, resolve,
 };
 
@@ -60,22 +60,22 @@ impl RuntimeConfig {
     ///
     /// Returns `ConfigError` when the resolver rejects the requested
     /// `(deployment, profile)` pair, when a yolo profile was requested
-    /// without `IRONCLAW_YOLO_DISCLOSURE=true` / `--yolo-disclosure`, or
+    /// without `T3CLAW_YOLO_DISCLOSURE=true` / `--yolo-disclosure`, or
     /// when an env var fails to parse.
     pub fn resolve_from(overrides: &RuntimeConfigOverrides) -> Result<Self, ConfigError> {
         let deployment = match overrides.deployment {
             Some(value) => value,
-            None => parse_optional_env::<DeploymentMode>("IRONCLAW_DEPLOYMENT_MODE")?
+            None => parse_optional_env::<DeploymentMode>("T3CLAW_DEPLOYMENT_MODE")?
                 .unwrap_or(DeploymentMode::LocalSingleUser),
         };
         let requested_profile = match overrides.profile {
             Some(value) => value,
-            None => parse_optional_env::<RuntimeProfile>("IRONCLAW_RUNTIME_PROFILE")?
+            None => parse_optional_env::<RuntimeProfile>("T3CLAW_RUNTIME_PROFILE")?
                 .unwrap_or(RuntimeProfile::SecureDefault),
         };
         let yolo_disclosure_acknowledged = match overrides.yolo_disclosure_acknowledged {
             Some(value) => value,
-            None => parse_bool_env_or_default("IRONCLAW_YOLO_DISCLOSURE", false)?,
+            None => parse_bool_env_or_default("T3CLAW_YOLO_DISCLOSURE", false)?,
         };
 
         let request = ResolveRequest {
@@ -109,7 +109,7 @@ impl RuntimeConfig {
         // deployment-agnostic in `is_compatible`, isn't yolo, and the empty
         // `OrgPolicyConstraints` never narrows. Locked in by
         // `every_valid_deployment_profile_pair_resolves` in
-        // `ironclaw_runtime_policy::resolver::tests`.
+        // `t3claw_runtime_policy::resolver::tests`.
         let effective_policy = resolve(ResolveRequest::new(deployment, requested_profile))
             .expect("LocalSingleUser + SecureDefault always resolves"); // safety: deployment-agnostic profile + empty policy is total
         Self {
@@ -172,7 +172,7 @@ fn resolver_error(error: ResolveError) -> ConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_host_api::runtime_policy::{FilesystemBackendKind, ProcessBackendKind};
+    use t3claw_host_api::runtime_policy::{FilesystemBackendKind, ProcessBackendKind};
 
     /// Lock that serializes env-var-mutating tests in this module so they
     /// don't race when cargo runs them in parallel.
@@ -180,9 +180,9 @@ mod tests {
 
     fn clear_env() {
         for var in [
-            "IRONCLAW_DEPLOYMENT_MODE",
-            "IRONCLAW_RUNTIME_PROFILE",
-            "IRONCLAW_YOLO_DISCLOSURE",
+            "T3CLAW_DEPLOYMENT_MODE",
+            "T3CLAW_RUNTIME_PROFILE",
+            "T3CLAW_YOLO_DISCLOSURE",
         ] {
             unsafe { std::env::remove_var(var) };
         }
@@ -208,8 +208,8 @@ mod tests {
         let _g = ENV_LOCK.lock().unwrap();
         clear_env();
         unsafe {
-            std::env::set_var("IRONCLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
-            std::env::set_var("IRONCLAW_RUNTIME_PROFILE", "hosted_safe");
+            std::env::set_var("T3CLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
+            std::env::set_var("T3CLAW_RUNTIME_PROFILE", "hosted_safe");
         }
         let cfg = RuntimeConfig::resolve_from(&RuntimeConfigOverrides {
             deployment: Some(DeploymentMode::LocalSingleUser),
@@ -227,8 +227,8 @@ mod tests {
         let _g = ENV_LOCK.lock().unwrap();
         clear_env();
         unsafe {
-            std::env::set_var("IRONCLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
-            std::env::set_var("IRONCLAW_RUNTIME_PROFILE", "hosted_dev");
+            std::env::set_var("T3CLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
+            std::env::set_var("T3CLAW_RUNTIME_PROFILE", "hosted_dev");
         }
         let cfg = RuntimeConfig::resolve_from(&RuntimeConfigOverrides::default()).unwrap();
         clear_env();
@@ -259,9 +259,9 @@ mod tests {
         clear_env();
         unsafe {
             // CLI says LocalSingleUser; env tries to override it — CLI must win.
-            std::env::set_var("IRONCLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
+            std::env::set_var("T3CLAW_DEPLOYMENT_MODE", "hosted_multi_tenant");
             // No CLI for profile — env must win over the SecureDefault default.
-            std::env::set_var("IRONCLAW_RUNTIME_PROFILE", "local_dev");
+            std::env::set_var("T3CLAW_RUNTIME_PROFILE", "local_dev");
             // No CLI / no env for yolo_disclosure — must fall through to false.
         }
         let cfg = RuntimeConfig::resolve_from(&RuntimeConfigOverrides {
@@ -336,7 +336,7 @@ mod tests {
     fn invalid_env_value_is_a_typed_config_error() {
         let _g = ENV_LOCK.lock().unwrap();
         clear_env();
-        unsafe { std::env::set_var("IRONCLAW_RUNTIME_PROFILE", "not_a_profile") };
+        unsafe { std::env::set_var("T3CLAW_RUNTIME_PROFILE", "not_a_profile") };
         let result = RuntimeConfig::resolve_from(&RuntimeConfigOverrides::default());
         clear_env();
         assert!(matches!(result, Err(ConfigError::InvalidValue { .. })));

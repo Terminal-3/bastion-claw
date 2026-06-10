@@ -26,14 +26,14 @@ use crate::context::JobContext;
 use crate::error::Error;
 use crate::generated_images::{GeneratedImageSentinel, stage_generated_image_data_url};
 use crate::tools::redact_params;
-use ironclaw_common::truncate_preview;
-use ironclaw_llm::{ChatMessage, ToolCall};
-use ironclaw_safety::{PolicyAction, SafetyLayer, ValidationResult};
+use t3claw_common::truncate_preview;
+use t3claw_llm::{ChatMessage, ToolCall};
+use t3claw_safety::{PolicyAction, SafetyLayer, ValidationResult};
 
 const FORGED_THREAD_ID_ERROR: &str = "Invalid or unauthorized thread ID.";
 const LIVE_STATE_METADATA_KEY: &str = "live_state";
 const INVALID_AUTH_TOKEN_MESSAGE: &str = "Invalid token. Please try again.";
-const TRACE_TURN_OUTCOME_SCHEMA_VERSION: &str = "ironclaw.turn_outcome.v1";
+const TRACE_TURN_OUTCOME_SCHEMA_VERSION: &str = "t3claw.turn_outcome.v1";
 
 pub(super) struct PersistToolCallsInput<'a> {
     pub thread_id: Uuid,
@@ -2030,10 +2030,10 @@ impl Agent {
             // === Phase 1: Preflight (sequential) ===
             // Walk deferred tools checking approval. Collect runnable
             // tools; stop at the first that needs approval.
-            let mut runnable: Vec<ironclaw_llm::ToolCall> = Vec::new();
+            let mut runnable: Vec<t3claw_llm::ToolCall> = Vec::new();
             let mut approval_needed: Option<(
                 usize,
-                ironclaw_llm::ToolCall,
+                t3claw_llm::ToolCall,
                 Arc<dyn crate::tools::Tool>,
                 bool, // allow_always
             )> = None;
@@ -2068,8 +2068,7 @@ impl Agent {
             }
 
             // === Phase 2: Parallel execution ===
-            let exec_results: Vec<(ironclaw_llm::ToolCall, Result<String, Error>)> = if runnable
-                .len()
+            let exec_results: Vec<(t3claw_llm::ToolCall, Result<String, Error>)> = if runnable.len()
                 <= 1
             {
                 // Single tool (or none): execute inline
@@ -2173,7 +2172,7 @@ impl Agent {
                 }
 
                 // Collect and reorder by original index
-                let mut ordered: Vec<Option<(ironclaw_llm::ToolCall, Result<String, Error>)>> =
+                let mut ordered: Vec<Option<(t3claw_llm::ToolCall, Result<String, Error>)>> =
                     (0..runnable_count).map(|_| None).collect();
                 while let Some(join_result) = join_set.join_next().await {
                     match join_result {
@@ -2632,7 +2631,7 @@ impl Agent {
         session: &Arc<Mutex<Session>>,
         thread_id: Uuid,
         message: &IncomingMessage,
-        ext_name: ironclaw_common::ExtensionName,
+        ext_name: t3claw_common::ExtensionName,
         instructions: String,
         auth_data: &ParsedAuthData,
     ) {
@@ -3122,10 +3121,10 @@ mod tests {
     use crate::tools::ToolRegistry;
     use chrono::TimeZone;
     use futures::stream;
-    use ironclaw_safety::SafetyLayer;
     use rust_decimal::Decimal;
     use std::sync::Arc;
     use std::time::Duration;
+    use t3claw_safety::SafetyLayer;
     use tokio::sync::Mutex as TokioMutex;
 
     #[derive(Clone)]
@@ -3176,7 +3175,7 @@ mod tests {
         struct StaticLlmProvider;
 
         #[async_trait::async_trait]
-        impl ironclaw_llm::LlmProvider for StaticLlmProvider {
+        impl t3claw_llm::LlmProvider for StaticLlmProvider {
             fn model_name(&self) -> &str {
                 "static-mock"
             }
@@ -3187,13 +3186,13 @@ mod tests {
 
             async fn complete(
                 &self,
-                _request: ironclaw_llm::CompletionRequest,
-            ) -> Result<ironclaw_llm::CompletionResponse, crate::error::LlmError> {
-                Ok(ironclaw_llm::CompletionResponse {
+                _request: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, crate::error::LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".to_string(),
                     input_tokens: 0,
                     output_tokens: 0,
-                    finish_reason: ironclaw_llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
@@ -3202,14 +3201,14 @@ mod tests {
 
             async fn complete_with_tools(
                 &self,
-                _request: ironclaw_llm::ToolCompletionRequest,
-            ) -> Result<ironclaw_llm::ToolCompletionResponse, crate::error::LlmError> {
-                Ok(ironclaw_llm::ToolCompletionResponse {
+                _request: t3claw_llm::ToolCompletionRequest,
+            ) -> Result<t3claw_llm::ToolCompletionResponse, crate::error::LlmError> {
+                Ok(t3claw_llm::ToolCompletionResponse {
                     content: Some("ok".to_string()),
                     tool_calls: Vec::new(),
                     input_tokens: 0,
                     output_tokens: 0,
-                    finish_reason: ironclaw_llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                     reasoning: None,
@@ -3217,12 +3216,12 @@ mod tests {
             }
         }
 
-        let llm: Arc<dyn ironclaw_llm::LlmProvider> = Arc::new(StaticLlmProvider);
+        let llm: Arc<dyn t3claw_llm::LlmProvider> = Arc::new(StaticLlmProvider);
         make_thread_ops_test_agent_with(llm, Arc::new(crate::tools::ToolRegistry::new())).await
     }
 
     async fn make_thread_ops_test_agent_with(
-        llm: Arc<dyn ironclaw_llm::LlmProvider>,
+        llm: Arc<dyn t3claw_llm::LlmProvider>,
         tools: Arc<crate::tools::ToolRegistry>,
     ) -> (Agent, Arc<TokioMutex<Vec<StatusUpdate>>>) {
         let statuses = Arc::new(TokioMutex::new(Vec::new()));
@@ -3240,8 +3239,8 @@ mod tests {
             settings_store: None,
             llm,
             cheap_llm: None,
-            safety: Arc::new(ironclaw_safety::SafetyLayer::new(
-                &ironclaw_safety::SafetyConfig {
+            safety: Arc::new(t3claw_safety::SafetyLayer::new(
+                &t3claw_safety::SafetyConfig {
                     max_output_length: 100_000,
                     injection_check_enabled: true,
                 },
@@ -3319,7 +3318,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ironclaw_llm::LlmProvider for SequencedImageLlm {
+    impl t3claw_llm::LlmProvider for SequencedImageLlm {
         fn model_name(&self) -> &str {
             "sequenced-image-mock"
         }
@@ -3330,13 +3329,13 @@ mod tests {
 
         async fn complete(
             &self,
-            _request: ironclaw_llm::CompletionRequest,
-        ) -> Result<ironclaw_llm::CompletionResponse, crate::error::LlmError> {
-            Ok(ironclaw_llm::CompletionResponse {
+            _request: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, crate::error::LlmError> {
+            Ok(t3claw_llm::CompletionResponse {
                 content: "unused".to_string(),
                 input_tokens: 0,
                 output_tokens: 0,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -3345,11 +3344,11 @@ mod tests {
 
         async fn complete_with_tools(
             &self,
-            _request: ironclaw_llm::ToolCompletionRequest,
-        ) -> Result<ironclaw_llm::ToolCompletionResponse, crate::error::LlmError> {
+            _request: t3claw_llm::ToolCompletionRequest,
+        ) -> Result<t3claw_llm::ToolCompletionResponse, crate::error::LlmError> {
             let call = self.calls.fetch_add(1, Ordering::Relaxed);
             if call == 0 {
-                return Ok(ironclaw_llm::ToolCompletionResponse {
+                return Ok(t3claw_llm::ToolCompletionResponse {
                     content: None,
                     tool_calls: vec![ToolCall {
                         id: "call_img_0".to_string(),
@@ -3361,21 +3360,21 @@ mod tests {
                     }],
                     input_tokens: 0,
                     output_tokens: 0,
-                    finish_reason: ironclaw_llm::FinishReason::ToolUse,
+                    finish_reason: t3claw_llm::FinishReason::ToolUse,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                     reasoning: None,
                 });
             }
 
-            Ok(ironclaw_llm::ToolCompletionResponse {
+            Ok(t3claw_llm::ToolCompletionResponse {
                 content: Some(
                     "已生成小猫图片：\n\n![小猫](/mnt/data/generated_image.jpg)".to_string(),
                 ),
                 tool_calls: Vec::new(),
                 input_tokens: 0,
                 output_tokens: 0,
-                finish_reason: ironclaw_llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
                 reasoning: None,
@@ -3538,8 +3537,8 @@ mod tests {
         ];
         let result = rebuild_chat_messages_from_db(&messages);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].role, ironclaw_llm::Role::User);
-        assert_eq!(result[1].role, ironclaw_llm::Role::Assistant);
+        assert_eq!(result[0].role, t3claw_llm::Role::User);
+        assert_eq!(result[1].role, t3claw_llm::Role::Assistant);
     }
 
     /// Regression: a `PendingApproval` deserialized from a row written
@@ -3615,7 +3614,7 @@ mod tests {
         let result = Ok(AgenticLoopResult::Response {
             text: "done".to_string(),
             turn_usage: TurnUsageSummary {
-                usage: ironclaw_llm::TokenUsage {
+                usage: t3claw_llm::TokenUsage {
                     input_tokens: 12,
                     output_tokens: 3,
                     cache_read_input_tokens: 0,
@@ -3639,7 +3638,7 @@ mod tests {
             }
             .into(),
             turn_usage: TurnUsageSummary {
-                usage: ironclaw_llm::TokenUsage {
+                usage: t3claw_llm::TokenUsage {
                     input_tokens: 7,
                     output_tokens: 2,
                     cache_read_input_tokens: 0,
@@ -3728,7 +3727,7 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     async fn make_trace_capture_agent(
-        llm: Arc<dyn ironclaw_llm::LlmProvider>,
+        llm: Arc<dyn t3claw_llm::LlmProvider>,
     ) -> (Agent, Arc<dyn crate::db::Database>, tempfile::TempDir) {
         let (db, temp_dir) = crate::testing::test_db().await;
         let channels = Arc::new(ChannelManager::new());
@@ -3799,7 +3798,7 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     async fn make_trace_capture_agent_with_status_channel(
-        llm: Arc<dyn ironclaw_llm::LlmProvider>,
+        llm: Arc<dyn t3claw_llm::LlmProvider>,
         fail_status: bool,
     ) -> (
         Agent,
@@ -3883,7 +3882,7 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     async fn make_trace_capture_agent_with_statuses(
-        llm: Arc<dyn ironclaw_llm::LlmProvider>,
+        llm: Arc<dyn t3claw_llm::LlmProvider>,
     ) -> (
         Agent,
         Arc<dyn crate::db::Database>,
@@ -4320,10 +4319,10 @@ mod tests {
         assert_eq!(result.len(), 5);
 
         // user
-        assert_eq!(result[0].role, ironclaw_llm::Role::User);
+        assert_eq!(result[0].role, t3claw_llm::Role::User);
 
         // assistant with tool_calls
-        assert_eq!(result[1].role, ironclaw_llm::Role::Assistant);
+        assert_eq!(result[1].role, t3claw_llm::Role::Assistant);
         assert!(result[1].tool_calls.is_some());
         let tcs = result[1].tool_calls.as_ref().unwrap();
         assert_eq!(tcs.len(), 2);
@@ -4332,16 +4331,16 @@ mod tests {
         assert_eq!(tcs[1].name, "echo");
 
         // tool results
-        assert_eq!(result[2].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[2].role, t3claw_llm::Role::Tool);
         assert_eq!(result[2].tool_call_id, Some("call_0".to_string()));
         assert!(result[2].content.contains("Found 3 results"));
 
-        assert_eq!(result[3].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[3].role, t3claw_llm::Role::Tool);
         assert_eq!(result[3].tool_call_id, Some("call_1".to_string()));
         assert!(result[3].content.contains("timeout"));
 
         // final assistant
-        assert_eq!(result[4].role, ironclaw_llm::Role::Assistant);
+        assert_eq!(result[4].role, t3claw_llm::Role::Assistant);
         assert_eq!(result[4].content, "I found some results.");
     }
 
@@ -4365,7 +4364,7 @@ mod tests {
         let result = rebuild_chat_messages_from_db(&messages);
 
         assert_eq!(result.len(), 3);
-        assert_eq!(result[2].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[2].role, t3claw_llm::Role::Tool);
         assert_eq!(result[2].tool_call_id, Some("call_1".to_string()));
         assert_eq!(result[2].content, wrapped_error);
     }
@@ -4385,8 +4384,8 @@ mod tests {
 
         // Legacy rows are skipped, only user + assistant
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].role, ironclaw_llm::Role::User);
-        assert_eq!(result[1].role, ironclaw_llm::Role::Assistant);
+        assert_eq!(result[0].role, t3claw_llm::Role::User);
+        assert_eq!(result[1].role, t3claw_llm::Role::Assistant);
     }
 
     #[test]
@@ -4432,12 +4431,12 @@ mod tests {
         // Verify turn boundaries
         assert_eq!(result[0].content, "Find X");
         assert!(result[1].tool_calls.is_some());
-        assert_eq!(result[2].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[2].role, t3claw_llm::Role::Tool);
         assert_eq!(result[3].content, "Found X");
 
         assert_eq!(result[4].content, "Write it");
         assert!(result[5].tool_calls.is_some());
-        assert_eq!(result[6].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[6].role, t3claw_llm::Role::Tool);
         assert_eq!(result[7].content, "Written");
     }
 
@@ -4507,7 +4506,7 @@ mod tests {
         let result = rebuild_chat_messages_from_db(&messages);
 
         assert_eq!(result.len(), 4);
-        assert_eq!(result[2].role, ironclaw_llm::Role::Tool);
+        assert_eq!(result[2].role, t3claw_llm::Role::Tool);
         assert_eq!(result[2].content, "Generated image (image/jpeg)");
     }
 
@@ -4941,7 +4940,7 @@ mod tests {
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(GeneratedImageTool)).await;
-        let llm: Arc<dyn ironclaw_llm::LlmProvider> = Arc::new(SequencedImageLlm::new());
+        let llm: Arc<dyn t3claw_llm::LlmProvider> = Arc::new(SequencedImageLlm::new());
         let (agent, statuses) = make_thread_ops_test_agent_with(llm, tools).await;
         let session_id = Uuid::new_v4();
         let thread_id = Uuid::new_v4();
@@ -5023,7 +5022,7 @@ mod tests {
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(GeneratedImageTool)).await;
-        let llm: Arc<dyn ironclaw_llm::LlmProvider> = Arc::new(SequencedImageLlm::new());
+        let llm: Arc<dyn t3claw_llm::LlmProvider> = Arc::new(SequencedImageLlm::new());
         let (agent, _statuses) = make_thread_ops_test_agent_with(llm, tools).await;
         agent
             .hooks()

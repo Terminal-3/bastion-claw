@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
-use ironclaw_filesystem::{LocalFilesystem, RootFilesystem, ScopedFilesystem};
-use ironclaw_host_api::{
-    MountAlias, MountGrant, MountPermissions, MountView, ThreadId, VirtualPath,
-};
-use ironclaw_threads::{
+use t3claw_filesystem::{LocalFilesystem, RootFilesystem, ScopedFilesystem};
+use t3claw_host_api::{MountAlias, MountGrant, MountPermissions, MountView, ThreadId, VirtualPath};
+use t3claw_threads::{
     FilesystemSessionThreadService, SessionThreadService, ThreadHistoryRequest,
     ThreadMessageRecord, ThreadScope,
 };
@@ -17,11 +15,11 @@ pub enum RebornThreadHarnessError {
     #[error("failed to create thread harness tempdir: {0}")]
     Tempdir(#[from] std::io::Error),
     #[error("failed to configure local filesystem: {0}")]
-    Filesystem(#[from] ironclaw_filesystem::FilesystemError),
+    Filesystem(#[from] t3claw_filesystem::FilesystemError),
     #[error("invalid mount view: {0}")]
-    MountView(#[from] ironclaw_host_api::HostApiError),
+    MountView(#[from] t3claw_host_api::HostApiError),
     #[error("thread service failed: {0}")]
-    Thread(#[from] ironclaw_threads::SessionThreadError),
+    Thread(#[from] t3claw_threads::SessionThreadError),
     #[error("thread history does not contain final assistant reply containing {0:?}")]
     MissingFinalReply(String),
 }
@@ -94,8 +92,8 @@ impl RebornThreadHarness {
             .iter()
             .rev()
             .find(|message| {
-                message.kind == ironclaw_threads::MessageKind::Assistant
-                    && message.status == ironclaw_threads::MessageStatus::Finalized
+                message.kind == t3claw_threads::MessageKind::Assistant
+                    && message.status == t3claw_threads::MessageStatus::Finalized
             })
             .is_some_and(|message| {
                 message
@@ -116,7 +114,7 @@ impl RebornThreadHarness {
 fn scoped_threads_fs_at<F>(
     backend: Arc<F>,
     scope: &ThreadScope,
-) -> Result<Arc<ScopedFilesystem<F>>, ironclaw_host_api::HostApiError>
+) -> Result<Arc<ScopedFilesystem<F>>, t3claw_host_api::HostApiError>
 where
     F: RootFilesystem,
 {

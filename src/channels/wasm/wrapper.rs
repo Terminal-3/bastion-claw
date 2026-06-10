@@ -65,11 +65,11 @@ use crate::tools::wasm::credential_injector::{InjectedCredentials, inject_creden
 use crate::tools::wasm::{
     LogLevel, WasmResourceLimiter, reject_private_ip, ssrf_safe_client_builder,
 };
-use ironclaw_common::CredentialName;
-use ironclaw_safety::LeakDetector;
+use t3claw_common::CredentialName;
+use t3claw_safety::LeakDetector;
 
 #[cfg(any(test, debug_assertions))]
-const TEST_HTTP_REWRITE_MAP_ENV: &str = "IRONCLAW_TEST_HTTP_REWRITE_MAP";
+const TEST_HTTP_REWRITE_MAP_ENV: &str = "T3CLAW_TEST_HTTP_REWRITE_MAP";
 
 const WEBSOCKET_EVENT_QUEUE_RELATIVE_PATH: &str = "state/gateway_event_queue";
 const WEBSOCKET_EVENT_PROCESSING_QUEUE_RELATIVE_PATH: &str = "state/gateway_event_queue_processing";
@@ -79,7 +79,7 @@ const WEBSOCKET_OUTBOUND_MAX_FRAME_BYTES: usize = 2 * 1024 * 1024;
 const WECHAT_CHANNEL_NAME: &str = "wechat";
 const CHANNEL_BOUND_USER_ID_CONFIG_KEY: &str = "bound_user_id";
 #[cfg(any(test, debug_assertions))]
-const TELEGRAM_TEST_API_BASE_ENV: &str = "IRONCLAW_TEST_TELEGRAM_API_BASE_URL";
+const TELEGRAM_TEST_API_BASE_ENV: &str = "T3CLAW_TEST_TELEGRAM_API_BASE_URL";
 
 // Generate component model bindings from the WIT file
 wasmtime::component::bindgen!({
@@ -5609,7 +5609,7 @@ fn extract_host_from_url(url: &str) -> Option<String> {
 
 /// Rewrite outbound HTTP URLs for testing.
 ///
-/// `IRONCLAW_TEST_HTTP_REWRITE_MAP` is a JSON object mapping exact hostnames to
+/// `T3CLAW_TEST_HTTP_REWRITE_MAP` is a JSON object mapping exact hostnames to
 /// replacement base URLs. For example:
 /// `{"slack.com":"http://127.0.0.1:8080","files.slack.com":"http://127.0.0.1:8080"}`
 ///
@@ -5909,16 +5909,16 @@ fn prepare_response_attachments(
     let mut total_bytes: u64 = 0;
     let tmp_base = std::path::Path::new("/tmp");
     let home_base = dirs::home_dir()
-        .map(|h| h.join(".ironclaw"))
+        .map(|h| h.join(".t3claw"))
         .unwrap_or_default();
 
     for path in paths {
-        // Validate paths are under /tmp/ or ~/.ironclaw/ to prevent arbitrary file reads
+        // Validate paths are under /tmp/ or ~/.t3claw/ to prevent arbitrary file reads
         let validated = crate::tools::builtin::path_utils::validate_path(path, Some(tmp_base))
             .or_else(|_| crate::tools::builtin::path_utils::validate_path(path, Some(&home_base)));
         let validated = validated.map_err(|e| {
             format!(
-                "Invalid attachment path '{}': must be under /tmp/ or ~/.ironclaw/: {}",
+                "Invalid attachment path '{}': must be under /tmp/ or ~/.t3claw/: {}",
                 path, e
             )
         })?;
@@ -5990,8 +5990,8 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use ironclaw_common::CredentialName;
     use secrecy::SecretString;
+    use t3claw_common::CredentialName;
 
     use crate::channels::Channel;
     use crate::channels::wasm::capabilities::ChannelCapabilities;
@@ -6410,8 +6410,8 @@ mod tests {
                 "intents": 513,
                 "properties": {
                     "os": "linux",
-                    "browser": "ironclaw",
-                    "device": "ironclaw"
+                    "browser": "t3claw",
+                    "device": "t3claw"
                 }
             }
         }));
@@ -6436,8 +6436,8 @@ mod tests {
                         "intents": 513,
                         "properties": {
                             "os": "linux",
-                            "browser": "ironclaw",
-                            "device": "ironclaw"
+                            "browser": "t3claw",
+                            "device": "t3claw"
                         }
                     }))
                 );
@@ -6520,8 +6520,8 @@ mod tests {
             "intents": 513,
             "properties": {
                 "os": "linux",
-                "browser": "ironclaw",
-                "device": "ironclaw"
+                "browser": "t3claw",
+                "device": "t3claw"
             }
         });
 
@@ -6572,7 +6572,7 @@ mod tests {
             protocol: WebsocketProtocolConfig::DiscordGateway(DiscordGatewayWebsocketConfig {
                 identify: Some(serde_json::json!({
                     "intents": 513,
-                    "properties": { "os": "linux", "browser": "ironclaw", "device": "ironclaw" }
+                    "properties": { "os": "linux", "browser": "t3claw", "device": "t3claw" }
                 })),
                 identify_secret_name: Some("discord_bot_token".to_string()),
             }),
@@ -6815,7 +6815,7 @@ mod tests {
                 "identify_secret_name": "discord_bot_token",
                 "identify": {
                     "intents": 513,
-                    "properties": { "os": "linux", "browser": "ironclaw", "device": "ironclaw" }
+                    "properties": { "os": "linux", "browser": "t3claw", "device": "t3claw" }
                 }
             })),
             ..Default::default()
@@ -8544,7 +8544,7 @@ mod tests {
         let metadata = serde_json::json!({"chat_id": 42});
         let wit = status_to_wit(
             &crate::channels::StatusUpdate::AuthRequired {
-                extension_name: ironclaw_common::ExtensionName::new("weather").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("weather").unwrap(),
                 instructions: Some("Paste your token".to_string()),
                 auth_url: Some("https://example.com/auth".to_string()),
                 setup_url: None,
@@ -8709,7 +8709,7 @@ mod tests {
         let metadata = serde_json::json!(null);
         let wit = status_to_wit(
             &crate::channels::StatusUpdate::AuthCompleted {
-                extension_name: ironclaw_common::ExtensionName::new("weather").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("weather").unwrap(),
                 success: true,
                 message: "Token saved".to_string(),
             },
@@ -8732,7 +8732,7 @@ mod tests {
         let metadata = serde_json::json!(null);
         let wit = status_to_wit(
             &crate::channels::StatusUpdate::AuthCompleted {
-                extension_name: ironclaw_common::ExtensionName::new("weather").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("weather").unwrap(),
                 success: false,
                 message: "Invalid token".to_string(),
             },
@@ -9825,7 +9825,7 @@ mod tests {
         );
         assert_eq!(mime_from_extension("noext"), "application/octet-stream");
         assert_eq!(
-            mime_from_extension("/home/user/.ironclaw/screenshot.png"),
+            mime_from_extension("/home/user/.t3claw/screenshot.png"),
             "image/png"
         );
     }

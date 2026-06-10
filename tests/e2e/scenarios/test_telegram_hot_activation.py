@@ -27,11 +27,11 @@ _TELEGRAM_INSTALLED = {
         "state": "setup_required",
         "requires_pairing": True,
         "credential_title": "Configure credentials for Telegram",
-        "credential_instructions": "Enter your Telegram Bot API token from @BotFather. After you save it, IronClaw will start the bot in polling mode and wait for you to claim ownership.",
-        "credential_next_step": "Next: open your Telegram bot, send it any message, wait for the pairing code reply, then paste that code into IronClaw.",
+        "credential_instructions": "Enter your Telegram Bot API token from @BotFather. After you save it, T3Claw will start the bot in polling mode and wait for you to claim ownership.",
+        "credential_next_step": "Next: open your Telegram bot, send it any message, wait for the pairing code reply, then paste that code into T3Claw.",
         "setup_url": "https://t.me/BotFather",
         "pairing_title": "Claim ownership for Telegram",
-        "pairing_instructions": "Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into IronClaw. Telegram bots cannot message you first.",
+        "pairing_instructions": "Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into T3Claw. Telegram bots cannot message you first.",
         "restart_instructions": "If you close this claim step, send another message in the channel to get a new pairing code.",
     },
 }
@@ -217,7 +217,7 @@ async def test_telegram_hot_activation_transitions_installed_to_pairing(page):
                 {
                     "success": True,
                     "activated": True,
-                    "message": "Configuration saved and 'telegram' activated. Credentials are saved, but ownership is still required before the channel is ready. Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into IronClaw. Telegram bots cannot message you first.",
+                    "message": "Configuration saved and 'telegram' activated. Credentials are saved, but ownership is still required before the channel is ready. Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into T3Claw. Telegram bots cannot message you first.",
                     "onboarding_state": "pairing_required",
                     "onboarding": _TELEGRAM_PAIRING["onboarding"],
                 }
@@ -485,7 +485,7 @@ async def test_telegram_configure_modal_submit_then_cancel_pairing_and_restart(p
               state: 'pairing_required',
               requires_pairing: true,
               pairing_title: 'Claim ownership for Telegram',
-              pairing_instructions: 'Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into IronClaw. Telegram bots cannot message you first.',
+              pairing_instructions: 'Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into T3Claw. Telegram bots cannot message you first.',
               restart_instructions: 'If you close this claim step, send another message in the channel to get a new pairing code.'
             }
           });
@@ -513,7 +513,7 @@ async def test_telegram_configure_modal_submit_then_cancel_pairing_and_restart(p
             state: 'pairing_required',
             requires_pairing: true,
             pairing_title: 'Claim ownership for Telegram',
-            pairing_instructions: 'Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into IronClaw. Telegram bots cannot message you first.',
+            pairing_instructions: 'Open your Telegram bot, send it any message such as hi or /start, wait for the pairing code reply, then paste that code into T3Claw. Telegram bots cannot message you first.',
             restart_instructions: 'If you close this claim step, send another message in the channel to get a new pairing code.'
           }
         });

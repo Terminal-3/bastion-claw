@@ -1,15 +1,15 @@
-# IronClaw Reborn process lifecycle contract
+# T3Claw Reborn process lifecycle contract
 
 **Date:** 2026-04-25
 **Status:** V1 contract slice
-**Crate:** `crates/ironclaw_processes`
+**Crate:** `crates/t3claw_processes`
 **Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/capabilities.md`, `docs/reborn/contracts/filesystem.md`, `docs/reborn/contracts/events.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_processes` owns host-tracked background capability lifecycle state.
+`t3claw_processes` owns host-tracked background capability lifecycle state.
 
 It is intentionally below `CapabilityHost`:
 
@@ -19,7 +19,7 @@ CapabilityHost::spawn_json(...)
   -> selects a declared capability descriptor
   -> asks ProcessManager to create a process record
 
-ironclaw_processes
+t3claw_processes
   -> stores process identity and lifecycle
   -> optionally starts background execution through ProcessExecutor
   -> optionally owns resource reservations through ResourceManagedProcessStore
@@ -28,7 +28,7 @@ ironclaw_processes
   -> exposes status transitions such as complete/fail/kill
 ```
 
-It does not decide whether a caller may spawn a capability. Authorization remains in `ironclaw_authorization`, and caller-facing workflow remains in `ironclaw_capabilities`.
+It does not decide whether a caller may spawn a capability. Authorization remains in `t3claw_authorization`, and caller-facing workflow remains in `t3claw_capabilities`.
 
 ---
 
@@ -106,7 +106,7 @@ async fn await_result(scope, process_id) -> Result<ProcessResultRecord>;
 
 `status` preserves tenant/user isolation by returning `None` for out-of-scope records. `kill` delegates to the scoped store transition and signals cooperative cancellation only after a scoped kill succeeds. `await_process` polls the scoped current-state store until the record reaches `Completed`, `Failed`, or `Killed`, then returns a terminal `ProcessExit`. `subscribe` returns a scoped current-state subscription whose first `next()` yields the current record, whose later `next()` calls yield status changes, and whose terminal record is emitted once before returning `None`. `result` and `await_result` read terminal output/error metadata from a scoped `ProcessResultStore`; `output` resolves inline or referenced JSON output through the same scoped store. Missing or out-of-scope records fail closed with `UnknownProcess`.
 
-The V1 subscription is intentionally scoped and current-state based. It does not expose raw process input/output, host paths, or cross-tenant existence information, and it does not require `CapabilityHost` or `ironclaw_dispatcher` to own process lifecycle mechanics.
+The V1 subscription is intentionally scoped and current-state based. It does not expose raw process input/output, host paths, or cross-tenant existence information, and it does not require `CapabilityHost` or `t3claw_dispatcher` to own process lifecycle mechanics.
 
 `ProcessServices` is a composition helper that wires the process store, result store, and cancellation registry together so `ProcessHost` and `BackgroundProcessManager` share the same lifecycle/result/cancellation state:
 
@@ -116,7 +116,7 @@ let host = services.host();
 let manager = services.background_manager(executor);
 ```
 
-It also supports filesystem-backed composition from a shared filesystem handle. `CapabilityHost::with_process_services(...)` can derive its spawn manager from this same bundle, while callers still use `services.host()` for lifecycle/result/output operations. This helper is convenience wiring only; it does not move process lifecycle into `CapabilityHost`, `ironclaw_dispatcher`, or any runtime lane.
+It also supports filesystem-backed composition from a shared filesystem handle. `CapabilityHost::with_process_services(...)` can derive its spawn manager from this same bundle, while callers still use `services.host()` for lifecycle/result/output operations. This helper is convenience wiring only; it does not move process lifecycle into `CapabilityHost`, `t3claw_dispatcher`, or any runtime lane.
 
 `BackgroundProcessManager` composes a `ProcessStore` and `ProcessExecutor`:
 
@@ -166,7 +166,7 @@ fail / kill
   -> release reservation without recording usage
 ```
 
-Resource denial fails before process record creation. Caller-supplied reservation IDs are rejected before process record creation. The wrapper verifies that the inner store preserves the reservation ID it created and releases the reservation if start fails. The wrapper is deliberately below `CapabilityHost` and above concrete stores so resource ownership can compose with in-memory, filesystem, eventing, and future durable stores without making `ironclaw_dispatcher` process-aware.
+Resource denial fails before process record creation. Caller-supplied reservation IDs are rejected before process record creation. The wrapper verifies that the inner store preserves the reservation ID it created and releases the reservation if start fails. The wrapper is deliberately below `CapabilityHost` and above concrete stores so resource ownership can compose with in-memory, filesystem, eventing, and future durable stores without making `t3claw_dispatcher` process-aware.
 
 `EventingProcessStore` wraps any `ProcessStore` and emits best-effort lifecycle events after successful state transitions:
 
@@ -177,7 +177,7 @@ fail     -> process_failed
 kill     -> process_killed
 ```
 
-These events include tenant/user/agent `ResourceScope`, `CapabilityId`, provider `ExtensionId`, `RuntimeKind`, and `ProcessId`. The wrapper does not make `ironclaw_dispatcher` process-aware; process observability stays in the process lifecycle service.
+These events include tenant/user/agent `ResourceScope`, `CapabilityId`, provider `ExtensionId`, `RuntimeKind`, and `ProcessId`. The wrapper does not make `t3claw_dispatcher` process-aware; process observability stays in the process lifecycle service.
 
 `start` rejects duplicate process IDs within the same tenant/user/agent partition. Callers must transition existing records instead of overwriting lifecycle state. `complete`, `fail`, and `kill` only transition from `Running`; late executor completions after `kill` are ignored by the background manager because the store rejects the terminal-state overwrite. Because event emission happens after successful transitions, a killed process does not emit a misleading late `process_completed` event when the background executor finishes after kill.
 
@@ -201,7 +201,7 @@ Cross-tenant, cross-user, and cross-agent reads return `None`, empty lists, or `
 
 This slice does not implement:
 
-- direct WASM/Script/MCP process loops inside `ironclaw_processes`; runtime work is delegated through `ProcessExecutor`
+- direct WASM/Script/MCP process loops inside `t3claw_processes`; runtime work is delegated through `ProcessExecutor`
 - dynamic executor-reported actual resource usage; completion reconciliation currently uses configured/default usage
 - forced/preemptive cancellation of uncooperative executor tasks
 - generalized artifact references for large, streaming, binary, or sensitive outputs beyond the current JSON output file

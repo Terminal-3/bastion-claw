@@ -286,7 +286,7 @@ impl Channel for RelayChannel {
                             {
                                 Ok(record) => {
                                     let instructions = format!(
-                                        "Enter this code in IronClaw to pair your Slack account: `{}`",
+                                        "Enter this code in T3Claw to pair your Slack account: `{}`",
                                         record.code
                                     );
                                     let team_id = event.team_id().to_string();

@@ -1,6 +1,6 @@
 # Live Canary Regression Lanes
 
-IronClaw now has two complementary regression systems:
+T3Claw now has two complementary regression systems:
 
 - deterministic CI, which replays committed tests and traces without depending
   on real third-party providers for the main blocking path;
@@ -38,7 +38,7 @@ account guide rather than introducing another bespoke runner layout.
 | `deterministic-replay` | Replays `tests/e2e_live*.rs` fixtures without live LLM calls | GitHub-hosted | PR/staging via `test.yml`; manual via `live-canary.yml` | Yes in `test.yml` |
 | `public-smoke` | Real LLM plus public tools such as `zizmor_scan` and mission digest | GitHub-hosted | Daily and manual | Opens issue on scheduled failure |
 | `persona-rotating` | Real LLM multi-turn persona workflow, one persona per day | GitHub-hosted | Daily and manual | Opens issue on scheduled failure |
-| `private-oauth` | Google Drive auth gate and transparent refresh against a dedicated test account | Self-hosted `ironclaw-live` runner | Manual; scheduled only when enabled | Opens issue on scheduled failure |
+| `private-oauth` | Google Drive auth gate and transparent refresh against a dedicated test account | Self-hosted `t3claw-live` runner | Manual; scheduled only when enabled | Opens issue on scheduled failure |
 | `provider-matrix` | Same live behavior against multiple provider adapters | GitHub-hosted | Weekly and manual | Opens issue on scheduled failure |
 | `release-public-full` | Full public live suite for release candidates | GitHub-hosted | Manual | Release checklist gate |
 | `upgrade-canary` | Previous release DB opened by current checkout | GitHub-hosted | Manual | Release checklist gate |
@@ -91,7 +91,7 @@ Current provider material includes:
 Run public live smoke locally:
 
 ```bash
-IRONCLAW_LIVE_TEST=1 \
+T3CLAW_LIVE_TEST=1 \
 LLM_BACKEND=anthropic \
 ANTHROPIC_API_KEY=... \
 LANE=public-smoke \

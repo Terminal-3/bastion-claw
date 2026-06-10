@@ -1,4 +1,4 @@
-use ironclaw_engine::{ActionDef, ActionDiscoveryMetadata, ActionDiscoverySummary};
+use t3claw_engine::{ActionDef, ActionDiscoveryMetadata, ActionDiscoverySummary};
 
 use crate::bridge::action_projector::default_model_tool_surface;
 
@@ -188,7 +188,7 @@ pub(crate) fn mission_capability_actions() -> Vec<ActionDef> {
 mod tests {
     use super::mission_capability_actions;
 
-    fn action(name: &str) -> ironclaw_engine::ActionDef {
+    fn action(name: &str) -> t3claw_engine::ActionDef {
         mission_capability_actions()
             .into_iter()
             .find(|action| action.name == name)

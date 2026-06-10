@@ -1,7 +1,7 @@
 //! Resolver that builds an `EmbeddingsConfig` from binary-side `Settings`.
 //!
 //! The `EmbeddingsConfig` data shape, factory, cache, and providers all live
-//! in the `ironclaw_embeddings` crate. Only the bit that reads
+//! in the `t3claw_embeddings` crate. Only the bit that reads
 //! `crate::settings::Settings` (a binary-internal type) and validates
 //! env-driven base URLs against the SSRF blocklist (also binary-internal)
 //! stays here.
@@ -14,7 +14,7 @@ use crate::config::helpers::{
 };
 use crate::error::ConfigError;
 use crate::settings::Settings;
-use ironclaw_embeddings::{
+use t3claw_embeddings::{
     DEFAULT_EMBEDDING_CACHE_SIZE, EmbeddingsConfig, default_dimension_for_model,
 };
 

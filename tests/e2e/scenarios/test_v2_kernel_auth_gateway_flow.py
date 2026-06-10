@@ -31,8 +31,8 @@ from helpers import api_get, api_post, AUTH_TOKEN, wait_for_ready
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-gw-auth-e2e-")
-_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-gw-auth-e2e-home-")
+_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-gw-auth-e2e-")
+_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-gw-auth-e2e-home-")
 
 
 def _forward_coverage_env(env: dict):
@@ -149,7 +149,7 @@ async def mock_api():
 
 
 @pytest.fixture(scope="module")
-async def v2_server(ironclaw_binary, mock_llm_server, mock_api):
+async def v2_server(t3claw_binary, mock_llm_server, mock_api):
     mock_api_url = mock_api["url"]
     mock_api_host = mock_api_url.replace("http://", "")
 
@@ -160,7 +160,7 @@ async def v2_server(ironclaw_binary, mock_llm_server, mock_api):
         )
 
     home_dir = _HOME_TMPDIR.name
-    skills_dir = os.path.join(home_dir, ".ironclaw", "skills")
+    skills_dir = os.path.join(home_dir, ".t3claw", "skills")
     os.makedirs(skills_dir, exist_ok=True)
     _write_github_skill(skills_dir, mock_api_host)
 
@@ -177,8 +177,8 @@ async def v2_server(ironclaw_binary, mock_llm_server, mock_api):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=debug",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
         "HTTP_ALLOW_LOCALHOST": "true",
@@ -209,7 +209,7 @@ async def v2_server(ironclaw_binary, mock_llm_server, mock_api):
     _forward_coverage_env(env)
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

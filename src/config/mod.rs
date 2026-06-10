@@ -1,4 +1,4 @@
-//! Configuration for IronClaw.
+//! Configuration for T3Claw.
 //!
 //! Settings are loaded with priority: **DB/TOML > env > default**.
 //!
@@ -15,7 +15,7 @@
 //!   cost limits, auth tokens): env-only
 //! - API keys: env/secrets store only
 //!
-//! `DATABASE_URL` lives in `~/.ironclaw/.env` (loaded via dotenvy early
+//! `DATABASE_URL` lives in `~/.t3claw/.env` (loaded via dotenvy early
 //! in startup).
 
 pub mod acp;
@@ -76,12 +76,12 @@ pub use self::transcription::TranscriptionConfig;
 pub use self::tunnel::TunnelConfig;
 pub use self::wasm::WasmConfig;
 pub use self::workspace::WorkspaceConfig;
-pub use ironclaw_embeddings::{DEFAULT_EMBEDDING_CACHE_SIZE, EmbeddingsConfig};
-// LLM config / session types live in `ironclaw_llm`. Re-exported here so
+pub use t3claw_embeddings::{DEFAULT_EMBEDDING_CACHE_SIZE, EmbeddingsConfig};
+// LLM config / session types live in `t3claw_llm`. Re-exported here so
 // existing `crate::config::*Config` callers (notably `LlmConfig::resolve`
 // in `src/config/llm.rs`, plus the wizard / doctor) keep compiling without
 // being touched in this PR.
-pub use ironclaw_llm::{
+pub use t3claw_llm::{
     BedrockConfig, CacheRetention, GeminiOauthConfig, LlmConfig, NearAiConfig, OAUTH_PLACEHOLDER,
     OpenAiCodexConfig, RegistryProviderConfig, SessionConfig,
 };
@@ -206,7 +206,7 @@ impl Config {
                 gateway: None,
                 signal: None,
                 tui: None,
-                wasm_channels_dir: std::env::temp_dir().join("ironclaw-test-channels"),
+                wasm_channels_dir: std::env::temp_dir().join("t3claw-test-channels"),
                 wasm_channels_enabled: false,
                 configured_wasm_channels: Vec::new(),
                 wasm_channel_owner_ids: HashMap::new(),
@@ -306,7 +306,7 @@ impl Config {
         is_operator: bool,
     ) -> Result<Self, ConfigError> {
         let _ = dotenvy::dotenv();
-        crate::bootstrap::load_ironclaw_env();
+        crate::bootstrap::load_t3claw_env();
 
         let settings =
             Self::load_db_backed_settings(store, user_id, toml_path, is_operator, false).await?;
@@ -319,7 +319,7 @@ impl Config {
     /// and by CLI commands that don't have DB access.
     /// Falls back to legacy `settings.json` on disk if present.
     ///
-    /// Loads both `./.env` (standard, higher priority) and `~/.ironclaw/.env`
+    /// Loads both `./.env` (standard, higher priority) and `~/.t3claw/.env`
     /// (lower priority) via dotenvy, which never overwrites existing vars.
     pub async fn from_env() -> Result<Self, ConfigError> {
         Self::from_env_with_toml(None).await
@@ -361,7 +361,7 @@ impl Config {
     /// Load and merge a TOML config file into settings.
     ///
     /// If `explicit_path` is `Some`, loads from that path (errors are fatal).
-    /// If `None`, tries the default path `~/.ironclaw/config.toml` (missing
+    /// If `None`, tries the default path `~/.t3claw/config.toml` (missing
     /// file is silently ignored).
     fn apply_toml_overlay(
         settings: &mut Settings,
@@ -631,7 +631,7 @@ pub(crate) fn load_bootstrap_settings(
     toml_path: Option<&std::path::Path>,
 ) -> Result<Settings, ConfigError> {
     let _ = dotenvy::dotenv();
-    crate::bootstrap::load_ironclaw_env();
+    crate::bootstrap::load_t3claw_env();
 
     let mut settings = Settings::default();
     profile::apply_profile(&mut settings)?;
@@ -640,7 +640,7 @@ pub(crate) fn load_bootstrap_settings(
 }
 
 pub(crate) fn resolve_owner_id(settings: &Settings) -> Result<String, ConfigError> {
-    let env_owner_id = self::helpers::optional_env("IRONCLAW_OWNER_ID")?;
+    let env_owner_id = self::helpers::optional_env("T3CLAW_OWNER_ID")?;
     let settings_owner_id = settings.owner_id.clone();
     let configured_owner_id = env_owner_id.clone().or(settings_owner_id.clone());
 
@@ -657,7 +657,7 @@ pub(crate) fn resolve_owner_id(settings: &Settings) -> Result<String, ConfigErro
     {
         WARNED_EXPLICIT_DEFAULT_OWNER_ID.call_once(|| {
             tracing::warn!(
-                "IRONCLAW_OWNER_ID resolved to the legacy 'default' scope explicitly; durable state will keep legacy owner behavior"
+                "T3CLAW_OWNER_ID resolved to the legacy 'default' scope explicitly; durable state will keep legacy owner behavior"
             );
         });
     }
@@ -688,7 +688,7 @@ pub async fn inject_llm_keys_from_secrets(
 
     // Dynamically discover secret->env mappings from the provider registry.
     // Uses selectable() which deduplicates user overrides correctly.
-    let registry = ironclaw_llm::ProviderRegistry::load();
+    let registry = t3claw_llm::ProviderRegistry::load();
     let dynamic_mappings: Vec<(String, String)> = registry
         .selectable()
         .iter()
@@ -773,14 +773,14 @@ pub fn inject_single_var(key: &str, value: &str) {
     }
 }
 
-/// Register a one-time secondary env-lookup fallback with `ironclaw_common`
-/// so the workspace-wide `env_or_override` (used from `ironclaw_llm`) can
+/// Register a one-time secondary env-lookup fallback with `t3claw_common`
+/// so the workspace-wide `env_or_override` (used from `t3claw_llm`) can
 /// see values populated via `inject_single_var` / the secrets injection
 /// pipeline. Idempotent thanks to the underlying `OnceLock`.
 fn register_injected_vars_fallback() {
     static REGISTERED: std::sync::Once = std::sync::Once::new();
     REGISTERED.call_once(|| {
-        ironclaw_common::env_helpers::register_secondary_fallback(|key| {
+        t3claw_common::env_helpers::register_secondary_fallback(|key| {
             INJECTED_VARS
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -1214,14 +1214,14 @@ mod tests {
     }
 
     fn config_for_owner(owner_id: &str) -> Config {
-        let tmp = std::env::temp_dir().join(format!("ironclaw-resolve-test-{owner_id}"));
+        let tmp = std::env::temp_dir().join(format!("t3claw-resolve-test-{owner_id}"));
         let mut cfg = Config::for_testing(tmp.clone(), tmp.clone(), tmp);
         cfg.owner_id = owner_id.to_string();
         cfg
     }
 
     /// Return a path to a temporary empty TOML file so that tests do not
-    /// accidentally load the user's real `~/.ironclaw/config.toml`.
+    /// accidentally load the user's real `~/.t3claw/config.toml`.
     fn empty_toml_path() -> tempfile::NamedTempFile {
         tempfile::Builder::new()
             .suffix(".toml")

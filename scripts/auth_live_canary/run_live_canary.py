@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live auth canary runner with two modes.
 
-Starts a fresh local IronClaw instance and verifies real provider-backed auth
+Starts a fresh local T3Claw instance and verifies real provider-backed auth
 through either of two paths, selected by ``--mode``:
 
 - ``seeded`` — seeds real provider credentials into the DB and exercises both
@@ -76,7 +76,7 @@ GOOGLE_SCOPE_DEFAULT = "gmail.modify gmail.compose calendar.events"
 MODE_CONFIG = {
     "seeded": {
         "owner_user_id": "auth-live-owner",
-        "temp_prefix": "ironclaw-live-auth",
+        "temp_prefix": "t3claw-live-auth",
         "gateway_token_prefix": "auth-live",
         "reexec_env": "AUTH_LIVE_CANARY_REEXEC",
         "extra_gateway_env_names": (
@@ -87,7 +87,7 @@ MODE_CONFIG = {
     },
     "browser": {
         "owner_user_id": "auth-browser-owner",
-        "temp_prefix": "ironclaw-browser-auth",
+        "temp_prefix": "t3claw-browser-auth",
         "gateway_token_prefix": "browser-auth",
         "reexec_env": "AUTH_BROWSER_CANARY_REEXEC",
         "extra_gateway_env_names": (
@@ -359,7 +359,7 @@ async def seed_non_oauth_credentials(
             value=notion_refresh,
             provider="mcp:notion",
         )
-    # Notion MCP uses DCR — seed client_id/secret so ironclaw can refresh.
+    # Notion MCP uses DCR — seed client_id/secret so t3claw can refresh.
     notion_client_id = env_str("AUTH_LIVE_NOTION_CLIENT_ID")
     notion_client_secret = env_str("AUTH_LIVE_NOTION_CLIENT_SECRET")
     if notion_client_id:
@@ -389,7 +389,7 @@ async def run_seeded_mode(args: argparse.Namespace, stack: Any) -> list[ProbeRes
 
     owner_user_id = MODE_CONFIG["seeded"]["owner_user_id"]
 
-    # Phase 1: Google extensions — authenticate via OAuth flow so ironclaw
+    # Phase 1: Google extensions — authenticate via OAuth flow so t3claw
     # marks them as properly authenticated (direct DB seeding doesn't work).
     google_oauth_done = await seed_google_via_oauth(
         stack.base_url, stack.gateway_token, stack.db_path, owner_user_id,
@@ -421,7 +421,7 @@ async def run_seeded_mode(args: argparse.Namespace, stack: Any) -> list[ProbeRes
         )
         installed_extensions.add(probe.extension_install_name)
         if is_google and google_oauth_done:
-            # Google extensions share google_oauth_token but ironclaw tracks
+            # Google extensions share google_oauth_token but t3claw tracks
             # auth per-extension. Complete OAuth for each one individually.
             await complete_oauth_flow(
                 stack.base_url, stack.gateway_token,
@@ -517,7 +517,7 @@ async def trigger_auth_card(
     # Activate the extension via the API — this triggers the OAuth flow and
     # broadcasts an auth card via SSE to the browser. Sending a chat message
     # doesn't work because unactivated WASM tools aren't in the registry and
-    # ironclaw returns "tool not found" instead of an auth card.
+    # t3claw returns "tool not found" instead of an auth card.
     if base_url and token:
         response = await api_request(
             "POST",
@@ -650,7 +650,7 @@ async def handle_google_popup(popup: Any, case_key: str) -> None:
 
     await click_first_button_with_text(
         popup,
-        ["Continue", "Allow", "Grant access", "Go to IronClaw", "Confirm"],
+        ["Continue", "Allow", "Grant access", "Go to T3Claw", "Confirm"],
         timeout_ms=10000,
     )
 
@@ -730,7 +730,7 @@ async def handle_github_popup(popup: Any, case_key: str) -> None:
 
     await click_first_button_with_text(
         popup,
-        ["Authorize", "Authorize IronClaw", "Continue", "Approve", "Grant access"],
+        ["Authorize", "Authorize T3Claw", "Continue", "Approve", "Grant access"],
         timeout_ms=10000,
     )
 
@@ -1113,7 +1113,7 @@ def _preflight_refresh_notion_token() -> None:
     try:
         req = urllib.request.Request("https://mcp.notion.com/token", data=data, headers={
             "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "ironclaw-canary/1.0",
+            "User-Agent": "t3claw-canary/1.0",
         })
         with urllib.request.urlopen(req, timeout=15) as resp:
             body = json.loads(resp.read())

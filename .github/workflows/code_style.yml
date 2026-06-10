@@ -24,7 +24,7 @@ env:
   # Linux Secret Service). Guarded by src/secrets/keychain.rs::os_keychain_suppressed:
   # cfg!(test) covers unit tests; this covers integration/e2e that link the
   # non-cfg(test) library.
-  IRONCLAW_DISABLE_OS_KEYCHAIN: "1"
+  T3CLAW_DISABLE_OS_KEYCHAIN: "1"
 
 jobs:
   changes:
@@ -67,7 +67,7 @@ jobs:
             echo "has_boundary_check=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if printf '%s\n' "$CHANGED_FILES" | grep -Eq '^(crates/ironclaw_reborn/|crates/ironclaw_reborn_cli/|crates/ironclaw_reborn_config/|crates/ironclaw_architecture/tests/reborn_dependency_boundaries\.rs$|Cargo\.toml$|Cargo\.lock$|\.github/workflows/code_style\.yml$)'; then
+          if printf '%s\n' "$CHANGED_FILES" | grep -Eq '^(crates/t3claw_reborn/|crates/t3claw_reborn_cli/|crates/t3claw_reborn_config/|crates/t3claw_architecture/tests/reborn_dependency_boundaries\.rs$|Cargo\.toml$|Cargo\.lock$|\.github/workflows/code_style\.yml$)'; then
             echo "has_reborn_cli=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_reborn_cli=false" >> "$GITHUB_OUTPUT"
@@ -125,7 +125,7 @@ jobs:
           node-version: "22"
       - name: Check gateway JS syntax
         run: |
-          find crates/ironclaw_gateway/static/js -type f -name '*.js' \
+          find crates/t3claw_gateway/static/js -type f -name '*.js' \
             -exec node --check {} +
 
   deny-check:
@@ -208,18 +208,18 @@ jobs:
           shared-key: reborn-cli-smoke
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       - name: Test Reborn boot config crate
-        run: cargo test -p ironclaw_reborn_config
+        run: cargo test -p t3claw_reborn_config
       - name: Test Reborn CLI binary crate
-        run: cargo test -p ironclaw_reborn_cli
+        run: cargo test -p t3claw_reborn_cli
       - name: Test Reborn libSQL restart integration
         run: |
-          cargo test -p ironclaw_reborn \
+          cargo test -p t3claw_reborn \
             --features libsql-restart-tests \
             --test loop_driver_host \
             turn_runner_worker_completes_after_libsql_turn_and_thread_services_reopen \
             -- --nocapture
       - name: Test Reborn architecture boundaries
-        run: cargo test -p ironclaw_architecture reborn
+        run: cargo test -p t3claw_architecture reborn
 
   no-panics:
     name: No panics in production code

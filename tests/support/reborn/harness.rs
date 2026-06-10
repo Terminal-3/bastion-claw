@@ -25,15 +25,16 @@ use std::{
 };
 
 use async_trait::async_trait;
-use ironclaw_approvals::{ApprovalResolver, LeaseApproval};
-use ironclaw_authorization::{GrantAuthorizer, TrustAwareCapabilityDispatchAuthorizer};
-use ironclaw_extensions::ExtensionRegistry;
-use ironclaw_filesystem::{
+use serde_json::json;
+use t3claw_approvals::{ApprovalResolver, LeaseApproval};
+use t3claw_authorization::{GrantAuthorizer, TrustAwareCapabilityDispatchAuthorizer};
+use t3claw_extensions::ExtensionRegistry;
+use t3claw_filesystem::{
     BackendCapabilities, BackendId, BackendKind, CompositeRootFilesystem, ContentKind,
     InMemoryBackend, IndexPolicy, LocalFilesystem, MountDescriptor, RootFilesystem,
     ScopedFilesystem, StorageClass,
 };
-use ironclaw_host_api::{
+use t3claw_host_api::{
     Action, AgentId, ApprovalRequestId, CapabilityDescriptor, CapabilityGrant, CapabilityGrantId,
     CapabilityId, CapabilitySet, CredentialStageError, Decision, EffectKind, ExecutionContext,
     ExtensionId, GrantConstraints, HostPath, MountAlias, MountGrant, MountPermissions, MountView,
@@ -42,7 +43,7 @@ use ironclaw_host_api::{
     RuntimeHttpEgress, RuntimeHttpEgressError, RuntimeHttpEgressRequest, RuntimeHttpEgressResponse,
     RuntimeKind, SecretHandle, TenantId, ThreadId, TrustClass, UserId, VirtualPath,
 };
-use ironclaw_host_runtime::{
+use t3claw_host_runtime::{
     APPLY_PATCH_CAPABILITY_ID, BUILTIN_FIRST_PARTY_PROVIDER, CancelRuntimeWorkOutcome,
     CancelRuntimeWorkRequest, CapabilitySurfacePolicy,
     CapabilitySurfaceVersion as HostRuntimeCapabilitySurfaceVersion, ECHO_CAPABILITY_ID,
@@ -60,31 +61,31 @@ use ironclaw_host_runtime::{
     VisibleCapabilitySurface as RuntimeVisibleCapabilitySurface, WRITE_FILE_CAPABILITY_ID,
     builtin_first_party_handlers, builtin_first_party_package,
 };
-use ironclaw_loop_support::{
+use t3claw_loop_support::{
     CapabilityAllowSet, CapabilityResolveError, CapabilityResultWrite,
     CapabilitySurfaceProfileResolver, DEFAULT_SPAWN_SUBAGENT_CAPABILITY_ID,
     HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
     HostManagedModelRequest, HostRuntimeLoopCapabilityPortFactory, JsonSpawnSubagentInputCodec,
     LoopCapabilityPortFactory, LoopCapabilityResultWriter,
 };
-use ironclaw_network::{
+use t3claw_network::{
     NetworkHttpEgress, NetworkHttpError, NetworkHttpRequest, NetworkHttpResponse, NetworkUsage,
     PolicyNetworkHttpEgress, ReqwestNetworkTransport,
 };
-use ironclaw_product_adapters::{
+use t3claw_product_adapters::{
     ProductInboundAck, ProductInboundEnvelope, ProductInboundPayload, ProductTriggerReason,
     ProductWorkflow,
 };
-use ironclaw_product_workflow::{
+use t3claw_product_workflow::{
     ConversationBindingService, DefaultInboundTurnService, DefaultProductWorkflow,
     IdempotencyLedger, InboundTurnService, ProductConversationRouteKind, ResolveBindingRequest,
     ResolvedBinding,
 };
-use ironclaw_reborn::subagent::{
+use t3claw_reborn::subagent::{
     flavors::StaticSubagentDefinitionResolver, gate_resolution::BoundedSubagentGateResolutionStore,
     goal_store::InMemoryBoundedSubagentGoalStore,
 };
-use ironclaw_reborn::{
+use t3claw_reborn::{
     loop_exit_applier::{
         BlockedEvidenceRequest, CompletionEvidenceRequest, FailureEvidenceRequest,
         FinalCheckpointEvidenceRequest, LoopExitEvidencePort, ThreadCheckpointLoopExitEvidencePort,
@@ -95,22 +96,22 @@ use ironclaw_reborn::{
     },
     turn_runner::{TurnRunnerWakeSender, TurnRunnerWorker, TurnRunnerWorkerConfig},
 };
-use ironclaw_reborn_composition::{
+use t3claw_reborn_composition::{
     ProductLiveCapabilityIo, ProductLiveVisibleCapabilityRequestConfig, RebornBuildInput,
     RebornLocalDevApprovalTestParts, build_reborn_services, visible_capability_request_for_run,
 };
-use ironclaw_resources::InMemoryResourceGovernor;
-use ironclaw_secrets::{
+use t3claw_resources::InMemoryResourceGovernor;
+use t3claw_secrets::{
     InMemorySecretStore, SecretLease, SecretLeaseId, SecretLeaseStatus, SecretMaterial,
     SecretMetadata, SecretStore, SecretStoreError,
 };
-use ironclaw_threads::{
+use t3claw_threads::{
     FilesystemSessionThreadService, SessionThreadService, ThreadHistoryRequest,
     ThreadMessageRecord, ThreadScope,
 };
-use ironclaw_trust::{AdminConfig, AdminEntry, HostTrustAssignment, HostTrustPolicy};
-use ironclaw_trust::{EffectiveTrustClass, TrustDecision};
-use ironclaw_turns::{
+use t3claw_trust::{AdminConfig, AdminEntry, HostTrustAssignment, HostTrustPolicy};
+use t3claw_trust::{EffectiveTrustClass, TrustDecision};
+use t3claw_turns::{
     CancelRunRequest, FilesystemTurnStateStore, GateRef, GetLoopCheckpointRequest,
     GetRunStateRequest, IdempotencyKey, InMemoryCheckpointStateStore, LoopBlockedKind,
     LoopCheckpointKind, LoopCheckpointStore, LoopGateRef, LoopResultRef, ReplyTargetBindingRef,
@@ -127,8 +128,7 @@ use ironclaw_turns::{
         VisibleCapabilitySurface,
     },
 };
-use ironclaw_wasm::{WitToolHost, WitToolRuntimeConfig};
-use serde_json::json;
+use t3claw_wasm::{WitToolHost, WitToolRuntimeConfig};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -152,7 +152,7 @@ type HarnessResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 type HarnessCapabilityParts = (
     Arc<dyn LoopCapabilityPortFactory>,
     Arc<dyn CapabilitySurfaceProfileResolver>,
-    Arc<dyn ironclaw_loop_support::LoopCapabilityInputResolver>,
+    Arc<dyn t3claw_loop_support::LoopCapabilityInputResolver>,
     Arc<dyn LoopCapabilityResultWriter>,
     HarnessCapabilityRecorder,
 );
@@ -170,7 +170,7 @@ pub struct RebornBinaryE2EHarness {
     thread_harness: RebornThreadHarness,
     model_gateway: RebornTraceReplayModelGateway,
     capability_recorder: HarnessCapabilityRecorder,
-    milestone_sink: Arc<ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
+    milestone_sink: Arc<t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
     worker: Arc<TurnRunnerWorker>,
     cancel: CancellationToken,
     worker_tasks: Vec<JoinHandle<()>>,
@@ -284,7 +284,7 @@ impl RebornBinaryE2EHarness {
         Self::with_model_gateway(
             conversation_id,
             RebornTraceReplayModelGateway::with_responses([
-                ironclaw_loop_support::HostManagedModelResponse::assistant_reply(reply),
+                t3claw_loop_support::HostManagedModelResponse::assistant_reply(reply),
             ]),
             RecordingTestCapabilityPort::echo(),
         )
@@ -865,7 +865,7 @@ impl RebornBinaryE2EHarness {
         let checkpoint_state_store = Arc::new(InMemoryCheckpointStateStore::default());
         let loop_checkpoint_store: Arc<dyn LoopCheckpointStore> = turn_store.clone();
         let milestone_sink =
-            Arc::new(ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink::default());
+            Arc::new(t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink::default());
         let (
             capability_factory,
             capability_surface_resolver,
@@ -888,7 +888,7 @@ impl RebornBinaryE2EHarness {
         let composition = build_default_planned_runtime(DefaultPlannedRuntimeParts {
             turn_state: turn_state_for_runtime,
             thread_service: thread_harness.service.clone()
-                as Arc<dyn ironclaw_threads::SessionThreadService>,
+                as Arc<dyn t3claw_threads::SessionThreadService>,
             thread_scope: thread_scope.clone(),
             model_gateway: Arc::new(model_gateway.clone()),
             checkpoint_state_store,
@@ -903,7 +903,7 @@ impl RebornBinaryE2EHarness {
             subagent_spawn_input_codec: Arc::new(JsonSpawnSubagentInputCodec::new(
                 capability_input_resolver,
             )),
-            subagent_spawn_limits: ironclaw_loop_support::SubagentSpawnLimits::default(),
+            subagent_spawn_limits: t3claw_loop_support::SubagentSpawnLimits::default(),
             loop_exit_evidence: evidence,
             config: DefaultPlannedRuntimeConfig {
                 worker: TurnRunnerWorkerConfig {
@@ -966,7 +966,7 @@ impl RebornBinaryE2EHarness {
         thread_harness: RebornThreadHarness,
         model_gateway: RebornTraceReplayModelGateway,
         capability_recorder: HarnessCapabilityRecorder,
-        milestone_sink: Arc<ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
+        milestone_sink: Arc<t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
         composition: RebornRuntimeLoopComposition<
             dyn SessionThreadService,
             RebornTraceReplayModelGateway,
@@ -1162,7 +1162,7 @@ impl RebornBinaryE2EHarness {
                 actor,
                 run_id,
                 gate_resolution_ref: gate_ref,
-                precondition: ironclaw_turns::ResumeTurnPrecondition::AnyBlockedGate,
+                precondition: t3claw_turns::ResumeTurnPrecondition::AnyBlockedGate,
                 source_binding_ref: SourceBindingRef::new("src:resume")?,
                 reply_target_binding_ref: ReplyTargetBindingRef::new("reply:resume")?,
                 idempotency_key: IdempotencyKey::new(idempotency_key.into())?,
@@ -1455,7 +1455,7 @@ impl LoopExitEvidencePort for HarnessLoopExitEvidencePort {
     async fn is_cancellation_observed(
         &self,
         scope: &TurnScope,
-        turn_id: ironclaw_turns::TurnId,
+        turn_id: t3claw_turns::TurnId,
         run_id: TurnRunId,
     ) -> Result<bool, TurnError> {
         self.inner
@@ -1466,9 +1466,9 @@ impl LoopExitEvidencePort for HarnessLoopExitEvidencePort {
     async fn latest_checkpoint_kind(
         &self,
         scope: &TurnScope,
-        turn_id: ironclaw_turns::TurnId,
+        turn_id: t3claw_turns::TurnId,
         run_id: TurnRunId,
-    ) -> Result<Option<ironclaw_turns::LoopCheckpointKind>, TurnError> {
+    ) -> Result<Option<t3claw_turns::LoopCheckpointKind>, TurnError> {
         self.inner
             .latest_checkpoint_kind(scope, turn_id, run_id)
             .await
@@ -1478,7 +1478,7 @@ impl LoopExitEvidencePort for HarnessLoopExitEvidencePort {
 impl HarnessCapabilityMode {
     fn into_parts(
         self,
-        milestone_sink: Arc<ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
+        milestone_sink: Arc<t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
     ) -> HarnessResult<HarnessCapabilityParts> {
         match self {
             Self::Recording(port) => {
@@ -1533,13 +1533,13 @@ struct HostRuntimeCapabilityHarness {
 
 struct HostRuntimeHarnessOptions {
     mounts: MountView,
-    runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+    runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
 }
 
 impl HostRuntimeHarnessOptions {
     fn new(
         mounts: MountView,
-        runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+        runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
     ) -> Self {
         Self {
             mounts,
@@ -1551,7 +1551,7 @@ impl HostRuntimeHarnessOptions {
 impl HostRuntimeCapabilityHarness {
     async fn file_tools() -> HarnessResult<Self> {
         Self::file_tools_with_runtime_policy(Some(
-            ironclaw_reborn_composition::local_dev_yolo_runtime_policy(true)?,
+            t3claw_reborn_composition::local_dev_yolo_runtime_policy(true)?,
         ))
         .await
     }
@@ -1561,7 +1561,7 @@ impl HostRuntimeCapabilityHarness {
     }
 
     async fn file_tools_with_runtime_policy(
-        runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+        runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
     ) -> HarnessResult<Self> {
         Self::new(
             "reborn-e2e-builtin-tools",
@@ -1652,7 +1652,7 @@ impl HostRuntimeCapabilityHarness {
             UserId::new("reborn-e2e-skill-management-user")?,
             HostRuntimeHarnessOptions::new(
                 skill_mounts()?,
-                Some(ironclaw_reborn_composition::local_dev_yolo_runtime_policy(
+                Some(t3claw_reborn_composition::local_dev_yolo_runtime_policy(
                     true,
                 )?),
             ),
@@ -1676,7 +1676,7 @@ impl HostRuntimeCapabilityHarness {
             UserId::new("reborn-e2e-trigger-management-user")?,
             HostRuntimeHarnessOptions::new(
                 MountView::default(),
-                Some(ironclaw_reborn_composition::local_dev_yolo_runtime_policy(
+                Some(t3claw_reborn_composition::local_dev_yolo_runtime_policy(
                     true,
                 )?),
             ),
@@ -1691,7 +1691,7 @@ impl HostRuntimeCapabilityHarness {
         secrets: Vec<SecretHandle>,
         provider_id: ExtensionId,
         user_id: UserId,
-        runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+        runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
     ) -> HarnessResult<Self> {
         Self::new_with_options(
             service_label,
@@ -1726,15 +1726,15 @@ impl HostRuntimeCapabilityHarness {
         let workspace_root = storage_root.join("workspace");
         std::fs::create_dir_all(&workspace_root)?;
         let mut input = if runtime_policy.as_ref().is_some_and(|policy| {
-            policy.resolved_profile == ironclaw_host_api::runtime_policy::RuntimeProfile::LocalYolo
+            policy.resolved_profile == t3claw_host_api::runtime_policy::RuntimeProfile::LocalYolo
         }) {
             let host_home_root = root.path().join("host-home");
             std::fs::create_dir_all(&host_home_root)?;
-            ironclaw_reborn_composition::local_runtime_build_input_with_options(
-                ironclaw_reborn_composition::RebornCompositionProfile::LocalDevYolo,
+            t3claw_reborn_composition::local_runtime_build_input_with_options(
+                t3claw_reborn_composition::RebornCompositionProfile::LocalDevYolo,
                 service_label,
                 storage_root,
-                ironclaw_reborn_composition::RebornLocalRuntimeProfileOptions {
+                t3claw_reborn_composition::RebornLocalRuntimeProfileOptions {
                     confirm_host_access: true,
                 },
             )?
@@ -1921,7 +1921,7 @@ impl HostRuntimeCapabilityHarness {
 
     fn capability_factory(
         self: &Arc<Self>,
-        milestone_sink: Arc<ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
+        milestone_sink: Arc<t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
     ) -> Arc<dyn LoopCapabilityPortFactory> {
         Arc::new(HostRuntimeHarnessCapabilityPortFactory {
             harness: Arc::clone(self),
@@ -2125,7 +2125,7 @@ impl HostRuntime for RecordingHostRuntime {
 
 struct HostRuntimeHarnessCapabilityPortFactory {
     harness: Arc<HostRuntimeCapabilityHarness>,
-    milestone_sink: Arc<ironclaw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
+    milestone_sink: Arc<t3claw_turns::run_profile::InMemoryLoopHostMilestoneSink>,
 }
 
 #[async_trait]
@@ -2263,7 +2263,7 @@ fn local_dev_host_runtime_with_registry_and_runtime_http_egress(
         local_dev_root_filesystem(storage_root, LocalDevRootMounts::core_builtins())?,
         Arc::new(InMemoryResourceGovernor::new()),
         Arc::new(GrantAuthorizer::new()),
-        ironclaw_processes::ProcessServices::in_memory(),
+        t3claw_processes::ProcessServices::in_memory(),
         HostRuntimeCapabilitySurfaceVersion::new("reborn-app-v1")?,
     )
     .with_secret_store(Arc::new(StaticSecretStore::new(
@@ -2274,7 +2274,7 @@ fn local_dev_host_runtime_with_registry_and_runtime_http_egress(
         result: Ok(SecretHandle::new("github_manual_access")?),
     }))
     .with_first_party_capabilities(Arc::new(builtin_first_party_handlers(Arc::new(
-        ironclaw_triggers::InMemoryTriggerRepository::default(),
+        t3claw_triggers::InMemoryTriggerRepository::default(),
     ))?))
     .with_first_party_http_egress(egress)
     .with_trust_policy(Arc::new(first_party_trust_policy()?));
@@ -2293,7 +2293,7 @@ fn local_dev_host_runtime_with_registry_and_egress(
         local_dev_root_filesystem(storage_root, LocalDevRootMounts::github_assets())?,
         Arc::new(InMemoryResourceGovernor::new()),
         Arc::new(GithubHarnessAuthorizer::new()?),
-        ironclaw_processes::ProcessServices::in_memory(),
+        t3claw_processes::ProcessServices::in_memory(),
         HostRuntimeCapabilitySurfaceVersion::new("reborn-app-v1")?,
     )
     .with_secret_store(Arc::new(StaticSecretStore::new(
@@ -2304,7 +2304,7 @@ fn local_dev_host_runtime_with_registry_and_egress(
         result: Ok(SecretHandle::new("github_manual_access")?),
     }))
     .with_first_party_capabilities(Arc::new(builtin_first_party_handlers(Arc::new(
-        ironclaw_triggers::InMemoryTriggerRepository::default(),
+        t3claw_triggers::InMemoryTriggerRepository::default(),
     ))?))
     .with_runtime_http_egress(runtime_http_egress)
     .with_trust_policy(Arc::new(github_first_party_trust_policy()?))
@@ -2327,12 +2327,12 @@ fn local_dev_host_runtime_with_live_http_egress(
         local_dev_root_filesystem(storage_root, LocalDevRootMounts::core_builtins())?,
         Arc::new(InMemoryResourceGovernor::new()),
         Arc::new(GrantAuthorizer::new()),
-        ironclaw_processes::ProcessServices::in_memory(),
+        t3claw_processes::ProcessServices::in_memory(),
         HostRuntimeCapabilitySurfaceVersion::new("reborn-app-v1")?,
     )
     .with_secret_store(Arc::new(InMemorySecretStore::new()))
     .with_first_party_capabilities(Arc::new(builtin_first_party_handlers(Arc::new(
-        ironclaw_triggers::InMemoryTriggerRepository::default(),
+        t3claw_triggers::InMemoryTriggerRepository::default(),
     ))?))
     .try_with_host_http_egress(PolicyNetworkHttpEgress::new(ReqwestNetworkTransport::new(
         Duration::from_secs(2),
@@ -2707,7 +2707,7 @@ impl RuntimeHttpEgress for RecordingRuntimeHttpEgress {
 }
 
 #[async_trait]
-impl ironclaw_host_runtime::ToolCallHttpEgress for RecordingRuntimeHttpEgress {
+impl t3claw_host_runtime::ToolCallHttpEgress for RecordingRuntimeHttpEgress {
     async fn execute_for_model_visible_output(
         &self,
         request: RuntimeHttpEgressRequest,
@@ -2797,7 +2797,7 @@ impl LoopCapabilityResultWriter for RecordingCapabilityResultWriter {
             .await?;
         self.results.lock().unwrap().push(RecordedCapabilityResult {
             capability_id: CapabilityId::new(
-                ironclaw_loop_support::DEFAULT_SPAWN_SUBAGENT_CAPABILITY_ID,
+                t3claw_loop_support::DEFAULT_SPAWN_SUBAGENT_CAPABILITY_ID,
             )
             .map_err(|error| {
                 AgentLoopHostError::new(AgentLoopHostErrorKind::Internal, error.to_string())
@@ -2981,10 +2981,10 @@ impl RecordingTestCapabilityPort {
     fn completed_result(&self) -> CapabilityOutcome {
         let ordinal = self.next_result.fetch_add(1, Ordering::SeqCst);
         CapabilityOutcome::Completed(CapabilityResultMessage {
-            result_ref: ironclaw_turns::LoopResultRef::new(format!("result:test-echo-{ordinal}"))
+            result_ref: t3claw_turns::LoopResultRef::new(format!("result:test-echo-{ordinal}"))
                 .expect("valid result ref"),
             safe_summary: "echo: hi".to_string(),
-            progress: ironclaw_turns::run_profile::CapabilityProgress::MadeProgress,
+            progress: t3claw_turns::run_profile::CapabilityProgress::MadeProgress,
             terminate_hint: false,
             byte_len: 0,
         })
@@ -3270,8 +3270,8 @@ where
     Ok(Arc::new(ScopedFilesystem::with_fixed_view(backend, mounts)))
 }
 
-pub fn trace_tool_call_response() -> ironclaw_loop_support::HostManagedModelResponse {
-    ironclaw_loop_support::HostManagedModelResponse {
+pub fn trace_tool_call_response() -> t3claw_loop_support::HostManagedModelResponse {
+    t3claw_loop_support::HostManagedModelResponse {
         safe_text_deltas: Vec::new(),
         safe_reasoning_deltas: Vec::new(),
         usage: None,

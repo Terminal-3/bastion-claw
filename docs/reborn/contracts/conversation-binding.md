@@ -8,7 +8,7 @@
 
 ## 1. Purpose
 
-Conversation binding is the adapter-safe ingress boundary between external product surfaces and `ironclaw_turns::TurnCoordinator`.
+Conversation binding is the adapter-safe ingress boundary between external product surfaces and `t3claw_turns::TurnCoordinator`.
 It also defines the planned host-trusted ingress seam used by scheduler and
 trigger fires.
 
@@ -39,7 +39,7 @@ Reply-target binding is separate from external ingress identity. This contract b
 
 ## 3. Implemented semantic slice
 
-`crates/ironclaw_conversations` provides the first contract slice:
+`crates/t3claw_conversations` provides the first contract slice:
 
 - typed external refs: `AdapterKind`, `AdapterInstallationId`, `ExternalActorRef`, `ExternalConversationRef`, `ExternalEventId`;
 - `ConversationBindingService`, `SessionThreadService`, and `InboundTurnService` traits/DTOs;
@@ -69,11 +69,11 @@ This is not the final durable transcript store. The conversation contract stores
 14. Source binding and reply target binding refs are distinct. Egress must validate the stored reply target for the current actor/thread before sending, and validation returns the adapter kind, adapter installation id, and full external conversation route needed to address the reply. Reply routes are owner-scoped by default to the exact external actor pairing key, not just `UserId`; explicit shared/group markers may monotonically widen ordinary reply routes to thread participants. Authority-bearing outbound payloads such as approval prompts and auth prompts must not use shared/group widening and require exact-owner validation.
 15. Accepted inbound messages mint message-scoped reply target refs that snapshot the exact external route and route access policy for that inbound message. Stable binding-level reply target refs strip per-message IDs; reply routing for message-scoped refs must preserve them. Ingress writes must use the canonical binding-level reply ref, not an older message-scoped reply snapshot.
 16. Accepted inbound message writes must validate that the supplied source binding ref and reply target binding ref belong to the same tenant/thread binding, and that caller-supplied external routes match the stable binding identity. Only per-message external IDs may vary; loose caller-supplied ref/route tuples are rejected fail-closed.
-17. Conversation ingress must preserve typed `ironclaw_turns::TurnError` failures rather than flattening them to strings, so adapters can keep status/category/retry semantics without parsing display text.
+17. Conversation ingress must preserve typed `t3claw_turns::TurnError` failures rather than flattening them to strings, so adapters can keep status/category/retry semantics without parsing display text.
 18. Public serialized external refs must enforce the same invariants as constructors. Deserialization cannot bypass empty/control-character/oversized ref validation.
 19. Public external route components may be up to 512 bytes for adapter compatibility. Durable PostgreSQL/libSQL implementations must not rely on a raw wide composite btree key for `(tenant, adapter_kind, installation, space, conversation, thread)` uniqueness; use typed rows plus a collision-resistant digest/indirection key derived from length-prefixed components.
 20. Message content crosses this boundary as a content ref. Raw user text is owned by the transcript/content storage boundary, not turn state.
-21. Host-trusted ingress is a host-only boundary for schedulers and trigger fires. The conversation-owned trusted trigger submitter implements `TrustedTriggerFireSubmitter` and must perform the same replay lookup as `handle_inbound_turn()` first, before any new binding creation or trusted-scope application, so duplicate scheduled-slot retries hit the existing inbound idempotency record instead of minting a second turn. The raw `TrustedInboundTurnRequest` constructor and concrete submitter type stay private inside `ironclaw_conversations`; no public DTO or facade exposes `trusted_agent_id` or `trusted_project_id`. Composition computes the trigger-to-conversation binding identity once while materializing the prompt, and the sealed trigger request carries that canonical binding into conversations for private trusted request construction. Adapter-supplied `requested_agent_id` / `requested_project_id` hints are not present on the host-trusted trigger path and are discarded before binding resolution.
+21. Host-trusted ingress is a host-only boundary for schedulers and trigger fires. The conversation-owned trusted trigger submitter implements `TrustedTriggerFireSubmitter` and must perform the same replay lookup as `handle_inbound_turn()` first, before any new binding creation or trusted-scope application, so duplicate scheduled-slot retries hit the existing inbound idempotency record instead of minting a second turn. The raw `TrustedInboundTurnRequest` constructor and concrete submitter type stay private inside `t3claw_conversations`; no public DTO or facade exposes `trusted_agent_id` or `trusted_project_id`. Composition computes the trigger-to-conversation binding identity once while materializing the prompt, and the sealed trigger request carries that canonical binding into conversations for private trusted request construction. Adapter-supplied `requested_agent_id` / `requested_project_id` hints are not present on the host-trusted trigger path and are discarded before binding resolution.
 22. Host-trusted trigger fires are submitted only through the conversation-owned submitter trait object returned by `trusted_trigger_fire_submitter(...)` and wired by host-owned composition services from durable host state. Product adapters cannot build this submitter or submit trusted trigger requests under workspace architecture rules. Trusted trigger ingress details live in [`triggers.md`](triggers.md); this contract owns only the replay-first trusted-scope adapter. No delivery target data belongs in `ExternalConversationRef`, `TurnActor`, `adapter_kind`, or any trusted ingress identity.
 
 ---
@@ -83,13 +83,13 @@ This is not the final durable transcript store. The conversation contract stores
 Current semantic coverage lives in:
 
 ```text
-crates/ironclaw_conversations/tests/inbound_contract.rs
+crates/t3claw_conversations/tests/inbound_contract.rs
 ```
 
 Run:
 
 ```bash
-cargo test -p ironclaw_conversations --test inbound_contract
+cargo test -p t3claw_conversations --test inbound_contract
 ```
 
 The planned trusted ingress implementation must add a caller-level regression

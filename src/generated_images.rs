@@ -171,7 +171,7 @@ pub(crate) fn stage_generated_image_data_url(data_url: &str) -> Result<String, S
     }
 
     let path = std::path::Path::new("/tmp").join(format!(
-        "ironclaw-generated-image-{}.{}",
+        "t3claw-generated-image-{}.{}",
         Uuid::new_v4(),
         extension
     ));
@@ -186,7 +186,7 @@ pub(crate) fn is_staged_generated_image_path(path: &str) -> bool {
     let is_generated = path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("ironclaw-generated-image-"));
+        .is_some_and(|name| name.starts_with("t3claw-generated-image-"));
     is_tmp && is_generated
 }
 

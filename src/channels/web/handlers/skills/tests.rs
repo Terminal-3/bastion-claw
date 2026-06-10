@@ -13,7 +13,7 @@ use crate::channels::web::types::SkillSourceKind;
 fn catalog_entry_matches_installed_slug_suffix() {
     let installed = vec!["mortgage-calculator".to_string()];
 
-    assert!(ironclaw_skills::catalog::catalog_entry_is_installed(
+    assert!(t3claw_skills::catalog::catalog_entry_is_installed(
         "finance/mortgage-calculator",
         "Mortgage Calculator",
         &installed,
@@ -24,7 +24,7 @@ fn catalog_entry_matches_installed_slug_suffix() {
 fn catalog_entry_matches_installed_display_name() {
     let installed = vec!["Mortgage Calculator".to_string()];
 
-    assert!(ironclaw_skills::catalog::catalog_entry_is_installed(
+    assert!(t3claw_skills::catalog::catalog_entry_is_installed(
         "finance/mortgage-calculator",
         "Mortgage Calculator",
         &installed,
@@ -35,7 +35,7 @@ fn catalog_entry_matches_installed_display_name() {
 fn catalog_entry_does_not_match_unrelated_installed_skill() {
     let installed = vec!["budget-planner".to_string()];
 
-    assert!(!ironclaw_skills::catalog::catalog_entry_is_installed(
+    assert!(!t3claw_skills::catalog::catalog_entry_is_installed(
         "finance/mortgage-calculator",
         "Mortgage Calculator",
         &installed,
@@ -46,7 +46,7 @@ fn catalog_entry_does_not_match_unrelated_installed_skill() {
 fn catalog_entry_matches_owner_aware_normalized_install_name() {
     let installed = vec!["finance-mortgage-calculator".to_string()];
 
-    assert!(ironclaw_skills::catalog::catalog_entry_is_installed(
+    assert!(t3claw_skills::catalog::catalog_entry_is_installed(
         "finance/mortgage-calculator",
         "Mortgage Calculator",
         &installed,
@@ -68,23 +68,23 @@ fn install_requested_identifier_prefers_resolved_slug_for_manual_name_installs()
 #[tokio::test]
 async fn skill_info_reports_bundle_files() {
     let install_dir = tempfile::tempdir().expect("tempdir");
-    let metadata = ironclaw_skills::registry::InstalledSkillMetadata {
+    let metadata = t3claw_skills::registry::InstalledSkillMetadata {
         source_url: Some("https://example.com/skill".to_string()),
         source_subdir: None,
         ..Default::default()
     };
     let extra_files = vec![
-        ironclaw_skills::registry::InstallFile {
+        t3claw_skills::registry::InstallFile {
             relative_path: Path::new("requirements.txt").to_path_buf(),
             contents: b"httpx==0.27.0\n".to_vec(),
         },
-        ironclaw_skills::registry::InstallFile {
+        t3claw_skills::registry::InstallFile {
             relative_path: Path::new("scripts/run.py").to_path_buf(),
             contents: b"print('ok')\n".to_vec(),
         },
     ];
 
-    let (_, skill) = ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+    let (_, skill) = t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
         install_dir.path(),
         "demo-skill",
         "---\nname: demo-skill\ndescription: Demo\nversion: 1.0.0\n---\n\n# Demo\n",
@@ -111,7 +111,7 @@ async fn skill_info_reports_bundle_files() {
 #[tokio::test]
 async fn skill_info_hides_management_controls_when_skill_is_not_manageable() {
     let install_dir = tempfile::tempdir().expect("tempdir");
-    let (_, skill) = ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+    let (_, skill) = t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
         install_dir.path(),
         "demo-skill",
         "---\nname: demo-skill\ndescription: Demo\nversion: 1.0.0\n---\n\n# Demo\n",
@@ -139,7 +139,7 @@ async fn skill_info_allows_delete_for_user_managed_skill() {
     )
     .expect("skill file");
 
-    let mut registry = ironclaw_skills::SkillRegistry::new(dir.path().to_path_buf());
+    let mut registry = t3claw_skills::SkillRegistry::new(dir.path().to_path_buf());
     registry.discover_all().await;
     let skill = registry.find_by_name("user-skill").expect("skill").clone();
 
@@ -185,7 +185,7 @@ async fn state_with_skill(
     std::fs::create_dir(&skill_dir).expect("skill dir");
     std::fs::write(skill_dir.join("SKILL.md"), content).expect("skill file");
 
-    let mut registry = ironclaw_skills::SkillRegistry::new(dir.path().to_path_buf());
+    let mut registry = t3claw_skills::SkillRegistry::new(dir.path().to_path_buf());
     registry.discover_all().await;
 
     let mut state = test_gateway_state(None);
@@ -204,7 +204,7 @@ async fn state_with_installed_skill(
     let dir = tempfile::tempdir().expect("tempdir");
     let user_dir = dir.path().join("skills");
     let installed_dir = dir.path().join("installed_skills");
-    ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+    t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
         &installed_dir,
         "installed-skill",
         content,
@@ -215,7 +215,7 @@ async fn state_with_installed_skill(
     .expect("install bundle");
 
     let mut registry =
-        ironclaw_skills::SkillRegistry::new(user_dir).with_installed_dir(installed_dir);
+        t3claw_skills::SkillRegistry::new(user_dir).with_installed_dir(installed_dir);
     registry.discover_all().await;
 
     let mut state = test_gateway_state(None);
@@ -248,7 +248,7 @@ async fn state_with_read_only_skills() -> (
         .into_boxed_slice(),
     );
 
-    let mut registry = ironclaw_skills::SkillRegistry::new(user_dir)
+    let mut registry = t3claw_skills::SkillRegistry::new(user_dir)
         .with_workspace_dir(workspace_dir)
         .with_bundled_content(bundled);
     registry.discover_all().await;
@@ -268,7 +268,7 @@ async fn multi_tenant_state_with_skill_template() -> (
     let user_dir = dir.path().join("skills");
     let installed_dir = dir.path().join("installed_skills");
     let mut registry =
-        ironclaw_skills::SkillRegistry::new(user_dir).with_installed_dir(installed_dir);
+        t3claw_skills::SkillRegistry::new(user_dir).with_installed_dir(installed_dir);
     registry.discover_all().await;
 
     let mut state = test_gateway_state(None);
@@ -281,7 +281,7 @@ async fn multi_tenant_state_with_skill_template() -> (
 
 fn multi_tenant_state_with_shared_registry(
     owner_id: &str,
-    registry: Arc<RwLock<ironclaw_skills::SkillRegistry>>,
+    registry: Arc<RwLock<t3claw_skills::SkillRegistry>>,
 ) -> Arc<crate::channels::web::platform::state::GatewayState> {
     let mut state = test_gateway_state(None);
     let state_mut = Arc::get_mut(&mut state).expect("state is not shared");
@@ -396,7 +396,7 @@ async fn skills_install_and_list_are_scoped_to_authenticated_user() {
 async fn skills_install_and_list_are_scoped_by_tenant_and_user() {
     let dir = tempfile::tempdir().expect("tempdir");
     let registry = Arc::new(RwLock::new(
-        ironclaw_skills::SkillRegistry::new(dir.path().join("skills"))
+        t3claw_skills::SkillRegistry::new(dir.path().join("skills"))
             .with_installed_dir(dir.path().join("installed_skills")),
     ));
     let tenant_a = multi_tenant_state_with_shared_registry("tenant-a-owner", Arc::clone(&registry));

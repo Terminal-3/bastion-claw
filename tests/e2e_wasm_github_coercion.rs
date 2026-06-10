@@ -25,7 +25,7 @@ mod tests {
 
     use serde_json::json;
 
-    use ironclaw_llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
+    use t3claw_llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::{
@@ -99,7 +99,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "list_issues",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "state": "open",
                                     "limit": "50"
                                 }),
@@ -165,7 +165,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "get_issue",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "issue_number": "42"
                                 }),
                             }],
@@ -231,7 +231,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "list_pull_requests",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "limit": "25"
                                 }),
                             }],
@@ -441,7 +441,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "create_branch",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "branch": "feature/replay-test",
                                     "from_ref": "main"
                                 }),
@@ -502,7 +502,7 @@ mod tests {
             "content": "IyBSZXBsYXkgZG9jCg==",
             "branch": "feature/replay-test",
             "committer": {
-                "name": "IronClaw Bot",
+                "name": "T3Claw Bot",
                 "email": "bot@example.com"
             }
         })
@@ -522,13 +522,13 @@ mod tests {
                                 arguments: json!({
                                     "action": "create_or_update_file",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "path": "docs/replay.md",
                                     "message": "Add replay doc",
                                     "content": "# Replay doc\n",
                                     "branch": "feature/replay-test",
                                     "committer": {
-                                        "name": "IronClaw Bot",
+                                        "name": "T3Claw Bot",
                                         "email": "bot@example.com"
                                     }
                                 }),
@@ -597,7 +597,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "delete_file",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "path": "docs/replay.md",
                                     "message": "Remove replay doc",
                                     "sha": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
@@ -671,7 +671,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "create_release",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "tag_name": "v1.2.3",
                                     "target_commitish": "main",
                                     "name": "Replay Release",

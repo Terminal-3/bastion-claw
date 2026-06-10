@@ -3,9 +3,9 @@
 **Status:** Implemented for blocking mode; background mode deferred
 **Date:** 2026-05-19
 **Branch:** `subagent-spawn-design`
-**Scope:** `crates/ironclaw_agent_loop`, `crates/ironclaw_turns`,
-`crates/ironclaw_loop_support`, `crates/ironclaw_reborn`,
-`crates/ironclaw_reborn_composition`
+**Scope:** `crates/t3claw_agent_loop`, `crates/t3claw_turns`,
+`crates/t3claw_loop_support`, `crates/t3claw_reborn`,
+`crates/t3claw_reborn_composition`
 
 This is the **overarching design doc**. Per-phase implementation docs (detailed,
 with pseudo code) live alongside this file:
@@ -18,7 +18,7 @@ with pseudo code) live alongside this file:
 
 ## 1. Context & motivation
 
-The IronClaw **Reborn** agent loop has no way for a running agent loop to spawn a
+The T3Claw **Reborn** agent loop has no way for a running agent loop to spawn a
 child loop. The broader goal is a *system around agent loops* covering four loop
 types — **subagents**, long-running **missions**, **cron** jobs, and **trigger**
 (event-matched) jobs. This design delivers **subagents first**; the other three
@@ -44,7 +44,7 @@ exist because of that review.
 
 ### Legacy / out of scope
 
-`src/agent/`, `src/worker/`, `src/tools/`, and `crates/ironclaw_engine/` are
+`src/agent/`, `src/worker/`, `src/tools/`, and `crates/t3claw_engine/` are
 **legacy** and are not designed against. The Reborn loop is the only target.
 
 ## 2. Goals & non-goals
@@ -94,7 +94,7 @@ exist because of that review.
 3. **Static over dynamic.** Subagent flavors are a compile-time table; direction
    prompts are `include_str!`'d `.md` files. No plugin loader.
 4. **Respect crate boundaries.** The sealed loop framework stays product-agnostic;
-   `ironclaw_turns` owns coordination contracts; `host_runtime` is untouched.
+   `t3claw_turns` owns coordination contracts; `host_runtime` is untouched.
 5. **Fail loud, fail closed.** No silent fallbacks on store/IO; security gates
    reject by default. Every concurrency-relevant write is durable before any
    side-effect (no in-memory source of truth for distributed state).
@@ -147,11 +147,11 @@ The `result_ref` payload schema is **defined** (not implicit) — see §6 row
 ### 5.3 What changes — by layer
 
 ```
-ironclaw_agent_loop    + `subagent` LoopFamily (static composition)
+t3claw_agent_loop    + `subagent` LoopFamily (static composition)
 (sealed framework)     + GateKind::AwaitDependentRun (pub(crate), wire-stable)
                        (executor: unchanged)
 
-ironclaw_turns         + CapabilityOutcome::AwaitDependentRun
+t3claw_turns         + CapabilityOutcome::AwaitDependentRun
                          (`SpawnedChildRun` reserved for deferred background)
 (coordination)         + AwaitDependentRun across LoopGateKind / LoopBlockedKind /
                          BlockedReason  and  TurnStatus::BlockedDependentRun
@@ -169,17 +169,17 @@ ironclaw_turns         + CapabilityOutcome::AwaitDependentRun
                            will all need this same shape.
                        + DefaultTurnCoordinator::with_event_sink(...)
 
-ironclaw_loop_support  + spawn handling in the capability-port impl
+t3claw_loop_support  + spawn handling in the capability-port impl
 (host I/O glue)        ~ prompt/context port: direction system msg + user-role goal
                        + attenuation (CapabilityAllowSet) + hard allow_nesting gate
 
-ironclaw_reborn        + `subagent` PlannedDriver + run-profile→driver binding
+t3claw_reborn        + `subagent` PlannedDriver + run-profile→driver binding
 (loop library)         + built-in subagent flavor table + direction .md files
                        + DURABLE subagent goal store (DB-backed; piggybacks on
                          turn-state persistence — not an in-memory store)
                        + SubagentCompletionObserver (TurnEventSink)
 
-ironclaw_reborn_composition
+t3claw_reborn_composition
 (product composition)  + concrete product-live subagent assembly:
                          DB-backed store construction, root-provided
                          PendingGateProjectionSink adapter, composite event
@@ -193,12 +193,12 @@ ironclaw_reborn_composition
                          cascades)
                        ~ runtime.rs wiring
 
-ironclaw_host_runtime / ironclaw_host_api   — unchanged
+t3claw_host_runtime / t3claw_host_api   — unchanged
 ```
 
 ### 5.4 Considered alternative — why not `Process`
 
-A natural question is whether `crates/ironclaw_processes/` (the Reborn kernel's
+A natural question is whether `crates/t3claw_processes/` (the Reborn kernel's
 existing `Process` abstraction, reachable today via `CapabilityHost::spawn_json`
 + `EffectKind::SpawnProcess` + `CapabilityOutcome::SpawnedProcess`) is the right
 substrate for a subagent. **It is not.**
@@ -227,8 +227,8 @@ ports, autonomous-wake delivery into the parent thread transcript, restart
 reconciliation, recursive subtree cancellation with tombstones, and per-tree
 durable descendant reservation. Wiring those onto `Process` would require
 duplicating the entire turn-coordination layer (and its store schema) inside
-`ironclaw_processes`. That violates crate boundaries — `ironclaw_turns` owns
-turn execution; `ironclaw_processes` owns OS-level work — and produces more
+`t3claw_processes`. That violates crate boundaries — `t3claw_turns` owns
+turn execution; `t3claw_processes` owns OS-level work — and produces more
 code, not less.
 
 **Conclusion:** a child agent loop is **not** an OS process. It is a
@@ -268,7 +268,7 @@ spawn time and keyed by the coordinator-minted `TurnRunId`.
 | **Per-tree descendant atomicity** | The per-run-tree descendant cap (`MAX_TREE_DESCENDANTS`) is enforced via a **durable `SpawnTreeReservation` row keyed by scoped `spawn_tree_root_run_id`** — `reserve_tree_descendants(scope, root, delta, cap)` is atomic at the store, fails closed without mutation when over cap, and runs **before `submit_turn`**. Concurrent admit across subtrees cannot over-admit. (Concurrent parent turns on the *same* parent thread are impossible by the per-`TurnScope` active-run lock, but a single root can have many concurrent subtrees on different threads.) |
 | Loop family | One static `subagent` `LoopFamily` (`LoopFamilyId "subagent"`); default strategies + tighter `BudgetStrategy`. Bound to a dedicated `subagent` `PlannedDriver`. |
 | Flavors | Built-in static table — v1: `general`, `researcher`. Each: direction id, tool allowlist, model, iteration + token/cost budget, `allow_nesting`. |
-| Direction prompt | Static `.md` per flavor (`include_str!`, `ironclaw_reborn/src/directions/`), selected by static match. The system message. |
+| Direction prompt | Static `.md` per flavor (`include_str!`, `t3claw_reborn/src/directions/`), selected by static match. The system message. |
 | Goal placement | The parent-injected goal + `Handoff` blob are the child's **first user message**, delimited as task data (`## Task (from parent)` / `## Context from parent`). **Never** the system message — the goal is model-generated and may carry upstream-tainted content. |
 | **Goal durability (DB-backed)** | Persisted in a **durable, DB-backed** subagent goal store keyed by the child `TurnRunId`. Implementation piggybacks on turn-state persistence (the same backend that stores `TurnRunRecord`). The child run id is **known before** `submit_turn` via `prepare_turn` — no staging key, no rekey. Survives process restart by construction. A store miss **fails the child run loudly**. |
 | Lineage | `parent_run_id`, `subagent_depth`, and `spawn_tree_root_run_id` fields on `SubmitTurnRequest` and `TurnRunRecord` (durable). `children_of` and `get_run_record` are store queries — no in-memory index as source of truth. |
@@ -293,7 +293,7 @@ that approvals already use.
 
 ### 7.2 Spawn flow — blocking
 
-`spawn_subagent` is an ordinary capability; the `ironclaw_loop_support` capability
+`spawn_subagent` is an ordinary capability; the `t3claw_loop_support` capability
 port handles it and returns an `AwaitDependentRun` gate. Background branches in
 the diagram are historical design context and are not exposed by the current
 schema.
@@ -437,12 +437,12 @@ mitigations below are **load-bearing**, not optional.
 
 | Crate | Rule | This design | Verdict |
 |---|---|---|---|
-| `ironclaw_agent_loop` | sealed; product-agnostic; refs not raw prompts | one `subagent` family; `GateKind::AwaitDependentRun` is neutral; executor gains only outcome-to-existing-gate/result mapping | ✅ |
-| `ironclaw_turns` | coordination contracts; lifecycle metadata + refs | `CapabilityOutcome` variants, blocked-kind variants, lineage fields, `prepare_turn` API, atomic descendant reservation query | ✅ |
-| `ironclaw_loop_support` | host-port adapter glue; no stateful stores | blocking spawn handling in the capability port; concrete stores and projection sinks are injected by composition | ✅ |
-| `ironclaw_reborn` | generic loop library; driver/profile/readiness; no root `src/` adapters | family driver, profiles, flavors, directions, Reborn-neutral goal/tombstone traits, observer/reconciler logic, and readiness metadata | ✅ |
-| `ironclaw_reborn_composition` | concrete product-live assembly; still no root `src/` imports | DB-backed store construction, root-provided `PendingGateProjectionSink`, composite event sink, and runtime assembly | ✅ |
-| `ironclaw_host_runtime` / `ironclaw_host_api` | — | untouched | ✅ |
+| `t3claw_agent_loop` | sealed; product-agnostic; refs not raw prompts | one `subagent` family; `GateKind::AwaitDependentRun` is neutral; executor gains only outcome-to-existing-gate/result mapping | ✅ |
+| `t3claw_turns` | coordination contracts; lifecycle metadata + refs | `CapabilityOutcome` variants, blocked-kind variants, lineage fields, `prepare_turn` API, atomic descendant reservation query | ✅ |
+| `t3claw_loop_support` | host-port adapter glue; no stateful stores | blocking spawn handling in the capability port; concrete stores and projection sinks are injected by composition | ✅ |
+| `t3claw_reborn` | generic loop library; driver/profile/readiness; no root `src/` adapters | family driver, profiles, flavors, directions, Reborn-neutral goal/tombstone traits, observer/reconciler logic, and readiness metadata | ✅ |
+| `t3claw_reborn_composition` | concrete product-live assembly; still no root `src/` imports | DB-backed store construction, root-provided `PendingGateProjectionSink`, composite event sink, and runtime assembly | ✅ |
+| `t3claw_host_runtime` / `t3claw_host_api` | — | untouched | ✅ |
 
 Five wire-stable enums gain `AwaitDependentRun` / `BlockedDependentRun`
 variants, with `SpawnedChildRun` reserved for deferred background support:
@@ -457,7 +457,7 @@ breaking already-persisted records. Each gets a raw-JSON round-trip test;
 (`CapabilityOutcome`/`TurnStatus`), which should force a compile break at every
 transition site. `TurnStatus::BlockedDependentRun` is a persisted-enum migration —
 grep producers, add a legacy-value deserialization test, and update the two
-exhaustive `TurnStatus` match sites in `ironclaw_turns` `memory.rs`
+exhaustive `TurnStatus` match sites in `t3claw_turns` `memory.rs`
 (`resume_turn_once`, `request_cancel_once`). See `phase-1-contracts.md`.
 
 ## 11. Implementation phases
@@ -477,20 +477,20 @@ PHASE 0 — PREREQUISITE (general, not subagent-specific)
           BlockedApproval but UI sees nothing" gap for every blocked turn —
           system-issued cancellation turns today, all future loop types
           (subagent, cron, mission, trigger). Replayable from cursor.
-          Lives in ironclaw_event_projections (consumer) + the existing
+          Lives in t3claw_event_projections (consumer) + the existing
           PendingGateStore reader surface (unchanged for UI).
           ── must land before Phase 2's subagent paths are useful in production;
              can be built in parallel with Phase 1.
 
 PHASE 1 — Contracts & isolated units                                [needs none]
-  P1.A  ironclaw_turns contract additions
+  P1.A  t3claw_turns contract additions
           (CapabilityOutcome variants, blocked-kind variants, lineage fields,
            prepare_turn / requested_run_id, tree-descendant-reserve query,
            with_event_sink)
-  P1.B  ironclaw_agent_loop: `subagent` family + GateKind::AwaitDependentRun
+  P1.B  t3claw_agent_loop: `subagent` family + GateKind::AwaitDependentRun
           ── needs P1.A's variant names; in practice land P1.A first, then P1.B
              can build in parallel with P1.C
-  P1.C  ironclaw_reborn data: direction .md files, DB-backed goal-store schema,
+  P1.C  t3claw_reborn data: direction .md files, DB-backed goal-store schema,
         flavor table, SpawnTreeReservation row schema
           ── independent of P1.A/B at the data level
 
@@ -499,9 +499,9 @@ PHASE 2 — Mechanisms                   (4 parallel workstreams; each needs Pha
           uses prepare_turn + reservation; persists goal under known child id
   P2.B  loop_support: prompt composition + attenuation             [needs P1.A, P1.C]
           system = direction .md ; user = goal + handoff
-  P2.C  ironclaw_reborn: `subagent` PlannedDriver + profile binding [needs P1.B]
+  P2.C  t3claw_reborn: `subagent` PlannedDriver + profile binding [needs P1.B]
           + child runs inherit parent owner_user_id
-  P2.D  ironclaw_reborn: SubagentCompletionObserver                [needs P1.A, P1.C]
+  P2.D  t3claw_reborn: SubagentCompletionObserver                [needs P1.A, P1.C]
           live delivery; writes SubagentResultTombstone on mid-cancel completes
         ── P2.A and P2.B touch the same crate but different files; coordinate
            file ownership (capability port vs prompt port).
@@ -532,7 +532,7 @@ Detailed per-phase docs with pseudo code:
   delivery.
 - **Quality gate:** `cargo fmt`; `cargo clippy --all --benches --tests --examples
   --all-features` (zero warnings); `cargo test`.
-- **Architecture guardrails:** `cargo test -p ironclaw_architecture --test
+- **Architecture guardrails:** `cargo test -p t3claw_architecture --test
   reborn_dependency_boundaries` and `scripts/reborn-e2e-rust.sh architecture`
   must pass, with any intentional boundary-rule changes reviewed in the same PR.
 - **Replay/snapshot evidence:** add deterministic subagent trace fixtures and run

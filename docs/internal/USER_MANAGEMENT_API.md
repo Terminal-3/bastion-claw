@@ -1,6 +1,6 @@
 # User Management API
 
-DB-backed user management for multi-tenant IronClaw deployments. Covers admin user CRUD, per-user secrets provisioning, self-service profile, API token management, and usage reporting.
+DB-backed user management for multi-tenant T3Claw deployments. Covers admin user CRUD, per-user secrets provisioning, self-service profile, API token management, and usage reporting.
 
 ## Authentication
 
@@ -211,7 +211,7 @@ Permanently delete a user and all associated data (tokens, jobs, conversations, 
 
 ## Admin: Per-User Secrets
 
-Provision secrets on behalf of individual users. The primary use case is an application backend (acting as admin) that configures per-user credentials so each user's IronClaw agent can call back to external services.
+Provision secrets on behalf of individual users. The primary use case is an application backend (acting as admin) that configures per-user credentials so each user's T3Claw agent can call back to external services.
 
 Secrets are encrypted at rest with AES-256-GCM using a per-secret HKDF-derived key. Plaintext values are **never returned** by any endpoint — they can only be used by the agent's tool system at runtime.
 
@@ -260,17 +260,17 @@ Create or update a secret for the specified user. If a secret with the same name
 
 ```bash
 # Admin creates a user
-curl -X POST https://ironclaw.example.com/api/admin/users \
+curl -X POST https://t3claw.example.com/api/admin/users \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"display_name": "Alice", "role": "member"}'
 # Response includes: {"id": "alice-uuid", "token": "alice-bearer-token", ...}
 
 # Admin provisions a per-user callback secret
-curl -X PUT https://ironclaw.example.com/api/admin/users/alice-uuid/secrets/app_callback_token \
+curl -X PUT https://t3claw.example.com/api/admin/users/alice-uuid/secrets/app_callback_token \
   -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"value": "per-user-jwt-for-alice", "provider": "my-app"}'
 
-# Now Alice's IronClaw agent can use the "app_callback_token" secret
+# Now Alice's T3Claw agent can use the "app_callback_token" secret
 # when calling tools that need to authenticate back to the app backend.
 ```
 
@@ -495,7 +495,7 @@ Revoke one of the authenticated user's tokens. Users can only revoke their own t
 
 Routes through the full agent loop — tools, memory, safety, and server-side conversation state are all active. Compatible with any standard OpenAI SDK via `client.responses.create()`.
 
-**Path prefix:** The canonical path is `/api/v1/responses`, matching the rest of IronClaw's HTTP surface. The older `/v1/responses` path is retained as an alias for backward compatibility with clients that were already configured against it (see [ironclaw#2201](https://github.com/nearai/ironclaw/issues/2201)). Both paths accept identical request bodies and return identical responses; new integrations should target `/api/v1/responses`.
+**Path prefix:** The canonical path is `/api/v1/responses`, matching the rest of T3Claw's HTTP surface. The older `/v1/responses` path is retained as an alias for backward compatibility with clients that were already configured against it (see [t3claw#2201](https://github.com/nearai/ironclaw/issues/2201)). Both paths accept identical request bodies and return identical responses; new integrations should target `/api/v1/responses`.
 
 **Auth:** Any authenticated user (`Authorization: Bearer <token>`)
 
@@ -559,7 +559,7 @@ Create a response.
 }
 ```
 
-**Streaming:** When `stream: true`, IronClaw returns SSE events:
+**Streaming:** When `stream: true`, T3Claw returns SSE events:
 
 | Event | Description |
 |-------|-------------|
@@ -570,7 +570,7 @@ Create a response.
 | `response.completed` | Full response done |
 | `response.failed` | Error or tool approval required |
 
-**Multi-turn:** Pass `previous_response_id` from the previous response's `id` to continue in the same thread. IronClaw decodes the thread UUID statelessly from the response ID — no lookup table required.
+**Multi-turn:** Pass `previous_response_id` from the previous response's `id` to continue in the same thread. T3Claw decodes the thread UUID statelessly from the response ID — no lookup table required.
 
 **Status values:** `completed` | `failed`
 

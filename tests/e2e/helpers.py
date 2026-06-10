@@ -215,10 +215,10 @@ AUTH_TOKEN = "e2e-test-token"
 OWNER_SCOPE_ID = "e2e-owner-scope"
 HTTP_WEBHOOK_SECRET = "e2e-http-webhook-secret"
 
-# Bearer token for the Reborn WebUI v2 surface (`ironclaw-reborn serve`).
+# Bearer token for the Reborn WebUI v2 surface (`t3claw-reborn serve`).
 # Must be >= 32 bytes: `serve` also uses this value as the SSO session-signing
 # key and refuses to bind with a shorter secret. Distinct from AUTH_TOKEN,
-# which targets the legacy `ironclaw` web channel.
+# which targets the legacy `t3claw` web channel.
 REBORN_V2_AUTH_TOKEN = "e2e-reborn-v2-bearer-token-0123456789abcdef"
 
 # Selectors for the Reborn WebUI v2 React SPA (served under /v2/). The shell
@@ -272,7 +272,7 @@ def auth_headers(token: str = AUTH_TOKEN) -> dict[str, str]:
 
 
 async def api_get(base_url: str, path: str, *, token: str = AUTH_TOKEN, **kwargs) -> httpx.Response:
-    """Make an authenticated GET request to the ironclaw API."""
+    """Make an authenticated GET request to the t3claw API."""
     async with httpx.AsyncClient() as client:
         return await client.get(
             f"{base_url}{path}",
@@ -283,7 +283,7 @@ async def api_get(base_url: str, path: str, *, token: str = AUTH_TOKEN, **kwargs
 
 
 async def api_post(base_url: str, path: str, *, token: str = AUTH_TOKEN, **kwargs) -> httpx.Response:
-    """Make an authenticated POST request to the ironclaw API."""
+    """Make an authenticated POST request to the t3claw API."""
     async with httpx.AsyncClient() as client:
         return await client.post(
             f"{base_url}{path}",
@@ -600,12 +600,12 @@ def _reserve_loopback_port() -> int:
 
 
 _ENGINE_V2_BASE_ENV = {
-    "RUST_LOG": "ironclaw=debug",
+    "RUST_LOG": "t3claw=debug",
     "RUST_BACKTRACE": "1",
     "ENGINE_V2": "true",
     "AGENT_AUTO_APPROVE_TOOLS": "true",
     "HTTP_ALLOW_LOCALHOST": "true",
-    "SECRETS_MASTER_KEY": hashlib.sha256(b"ironclaw-4112-e2e-master-key").hexdigest(),
+    "SECRETS_MASTER_KEY": hashlib.sha256(b"t3claw-4112-e2e-master-key").hexdigest(),
     "GATEWAY_ENABLED": "true",
     "GATEWAY_HOST": "127.0.0.1",
     "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
@@ -621,13 +621,13 @@ _ENGINE_V2_BASE_ENV = {
     "EMBEDDING_ENABLED": "false",
     "WASM_ENABLED": "false",
     "ONBOARD_COMPLETED": "true",
-    "IRONCLAW_DISABLE_OS_KEYCHAIN": "1",
+    "T3CLAW_DISABLE_OS_KEYCHAIN": "1",
 }
 
 
 @asynccontextmanager
 async def _start_engine_v2_server(
-    ironclaw_binary: str,
+    t3claw_binary: str,
     *,
     mock_llm_server: str,
     port: int,
@@ -637,7 +637,7 @@ async def _start_engine_v2_server(
     label: str,
     env_overrides: dict[str, str] | None = None,
 ) -> AsyncIterator[str]:
-    """Start an ENGINE_V2 ironclaw process and yield its base URL.
+    """Start an ENGINE_V2 t3claw process and yield its base URL.
 
     Centralises the subprocess-lifecycle boilerplate shared across all three
     v2 auth E2E server fixtures.
@@ -646,10 +646,10 @@ async def _start_engine_v2_server(
         **_ENGINE_V2_BASE_ENV,
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "GATEWAY_PORT": str(port),
         "GATEWAY_USER_ID": user_id,
-        "IRONCLAW_OWNER_ID": user_id,
+        "T3CLAW_OWNER_ID": user_id,
         "LLM_BASE_URL": mock_llm_server,
         "LIBSQL_PATH": db_path,
     }
@@ -658,7 +658,7 @@ async def _start_engine_v2_server(
     _forward_coverage_env(env)
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,

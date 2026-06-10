@@ -1,15 +1,15 @@
-# IronClaw Reborn secrets service contract
+# T3Claw Reborn secrets service contract
 
 **Date:** 2026-04-26
 **Status:** V1 service-boundary slice
-**Crate:** `crates/ironclaw_secrets`
+**Crate:** `crates/t3claw_secrets`
 **Depends on:** `docs/reborn/contracts/host-api.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_secrets` is the scoped secret metadata and lease service for Reborn.
+`t3claw_secrets` is the scoped secret metadata and lease service for Reborn.
 
 It turns opaque host API handles into explicit, short-lived access leases:
 
@@ -95,7 +95,7 @@ let material = secrets.consume(&scope, lease.id).await?;
 Durable libSQL/PostgreSQL storage is provided by `FilesystemSecretStore` and
 `FilesystemCredentialBroker` over the database-backed `RootFilesystem`
 implementations. Backend selection is now a property of the filesystem layer;
-`ironclaw_secrets` stores encrypted payloads and per-record salts under scoped
+`t3claw_secrets` stores encrypted payloads and per-record salts under scoped
 filesystem paths, with tenant id projected as a defense-in-depth index. Store
 readiness must fail closed when the configured master key is missing or
 malformed. The earlier filesystem-stored key-check sentinel was removed with the

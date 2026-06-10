@@ -2,16 +2,16 @@
 
 **Status:** Draft implementation contract
 **Date:** 2026-04-24
-**Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/filesystem.md`, `crates/ironclaw_host_api`, `crates/ironclaw_filesystem`
+**Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/filesystem.md`, `crates/t3claw_host_api`, `crates/t3claw_filesystem`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_extensions` owns extension package metadata, manifest validation, filesystem discovery, and capability declaration registration.
+`t3claw_extensions` owns extension package metadata, manifest validation, filesystem discovery, and capability declaration registration.
 It also owns generic extension installation state: manifests, installations,
 activation state, health snapshots, and opaque credential bindings. Domain
-crates such as `ironclaw_product_adapter_registry` project their own host API
+crates such as `t3claw_product_adapter_registry` project their own host API
 sections from that generic state rather than owning a second installation
 store.
 
@@ -28,9 +28,9 @@ It does **not** execute capabilities.
 
 Execution belongs to:
 
-- `ironclaw_wasm` for WASM modules
-- `ironclaw_scripts` for Docker-backed native CLI/script capabilities
-- `ironclaw_mcp` for MCP adapter calls
+- `t3claw_wasm` for WASM modules
+- `t3claw_scripts` for Docker-backed native CLI/script capabilities
+- `t3claw_mcp` for MCP adapter calls
 - host-policy-selected service crates for first-party/system work
 
 ---
@@ -38,7 +38,7 @@ Execution belongs to:
 ## 2. Core invariant
 
 ```text
-ironclaw_extensions knows what can run.
+t3claw_extensions knows what can run.
 runtime crates know how to run it.
 ```
 
@@ -72,7 +72,7 @@ Recommended package layout:
 Rules:
 
 - `<extension_id>` must match the manifest `id`.
-- extension IDs use `ironclaw_host_api::ExtensionId` validation.
+- extension IDs use `t3claw_host_api::ExtensionId` validation.
 - manifest-local paths are relative package asset paths.
 - manifest-local paths must not be absolute, scoped aliases, URLs, raw host paths, contain `..`, contain backslashes, or contain control characters.
 - resolved assets become `VirtualPath`s under `/system/extensions/<extension_id>/...`.
@@ -87,7 +87,7 @@ The older top-level `parameters_schema` manifest shape is no longer parsed on
 production discovery paths.
 
 Installed third-party manifests (`InstalledLocal` / `RegistryInstalled`) declare
-model-visible tools through `[[host_api]] id = "ironclaw.capability_provider/v1"`.
+model-visible tools through `[[host_api]] id = "t3claw.capability_provider/v1"`.
 Legacy top-level `[[capabilities]]` declarations are accepted only for
 `ManifestSource::HostBundled` packages such as host-owned built-ins and explicit
 compatibility fixtures.
@@ -205,11 +205,11 @@ kind = "wasm"
 module = "wasm/telegram.wasm"
 
 [[host_api]]
-id = "ironclaw.product_adapter/v1"
+id = "t3claw.product_adapter/v1"
 section = "product_adapter.inbound"
 
 [[host_api]]
-id = "ironclaw.capability_provider/v1"
+id = "t3claw.capability_provider/v1"
 section = "capability_provider.tools"
 
 [product_adapter.inbound]
@@ -230,7 +230,7 @@ prompt_doc_ref = "prompts/telegram/send_message.md"
 
 Rules:
 
-- `ironclaw_extensions` parses the envelope, validates host API refs, and dispatches to a composition-wired host API contract registry.
+- `t3claw_extensions` parses the envelope, validates host API refs, and dispatches to a composition-wired host API contract registry.
 - Domain contract handlers own section pattern validation, cardinality, typed section schema validation, and catalog/read-model projection.
 - Domain contract handlers must not treat manifest `trust` / `descriptor_trust_default` as effective runtime authority. Effective trust and grants come from composition-owned trust policy evaluation, not self-declared manifest metadata.
 - Model-visible capability-provider sections must carry enough cold metadata to project an LLM-facing tool descriptor: stable capability ID, human description, input schema ref, output schema ref, effects, permission default, and visibility. `prompt_doc_ref` is optional lazy help metadata, not part of the mandatory per-turn surface.
@@ -240,11 +240,11 @@ Rules:
 - Every `[[host_api]]` must reference an existing explicit `section` path.
 - Operational sections must be referenced by `[[host_api]]`; inert metadata may live under `[metadata.*]` or `[x.*]`.
 - Manifest validation is atomic: any invalid host API contract invalidates the extension manifest.
-- Runtime loading, handshakes, catalog publication, authority grants, and execution remain outside `ironclaw_extensions`.
+- Runtime loading, handshakes, catalog publication, authority grants, and execution remain outside `t3claw_extensions`.
 
 Migration rules:
 
-- Installed third-party extensions must move each model-visible top-level `[[capabilities]]` entry under `[[capability_provider.tools.capabilities]]` and reference it from `[[host_api]] id = "ironclaw.capability_provider/v1"`.
+- Installed third-party extensions must move each model-visible top-level `[[capabilities]]` entry under `[[capability_provider.tools.capabilities]]` and reference it from `[[host_api]] id = "t3claw.capability_provider/v1"`.
 - Host-bundled built-ins may keep top-level `[[capabilities]]` while first-party packaging remains synthetic/host-owned.
 - Do not mix `[[host_api]]` with top-level `[[capabilities]]` in one manifest.
 - Deprecated path scope is only legacy top-level capability declarations for installed third-party manifests; extension manifest v2 itself remains active.
@@ -253,7 +253,7 @@ Migration rules:
 
 ## 5. Runtime declarations
 
-Manifest runtime kinds map to `ironclaw_host_api::RuntimeKind`:
+Manifest runtime kinds map to `t3claw_host_api::RuntimeKind`:
 
 | Manifest `kind` | RuntimeKind | Meaning |
 |---|---|---|
@@ -421,7 +421,7 @@ Local contract tests should prove:
 
 ## 12. Non-goals
 
-Do not add in `ironclaw_extensions` V1:
+Do not add in `t3claw_extensions` V1:
 
 - WASM module loading
 - Docker/container execution

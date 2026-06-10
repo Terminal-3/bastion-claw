@@ -1,14 +1,14 @@
 """Regression coverage for #3317 — Telegram pairing chat-claim flow.
 
 The user-visible bug: the Telegram bot's pairing reply said
-"Enter this code in IronClaw to pair your Telegram account: <code>" without
+"Enter this code in T3Claw to pair your Telegram account: <code>" without
 naming a specific surface, so users naturally pasted the code into their
 TUI/CLI chat. The agent rejected it ("wrong place; send it in Telegram"),
 leaving them stuck.
 
 This scenario asserts both halves of the fix:
 
-1. The pairing reply now lists every IronClaw surface explicitly
+1. The pairing reply now lists every T3Claw surface explicitly
    (Settings → Channels, agent chat, terminal CLI), so the user knows
    exactly where to type the code.
 
@@ -17,7 +17,7 @@ This scenario asserts both halves of the fix:
    matching the bot reply's instructions.
 
 Without this coverage, the surface-explicit reply could quietly regress
-to a generic "Enter this code in IronClaw" wording, or the chat-claim
+to a generic "Enter this code in T3Claw" wording, or the chat-claim
 parser could be unhooked from the bridge handler, and #3317 would
 silently come back.
 """
@@ -197,7 +197,7 @@ async def test_telegram_pairing_reply_names_every_surface(
         f"pairing reply must mention chat-surface command 'approve telegram': "
         f"{pairing_text}"
     )
-    assert "ironclaw pairing approve telegram" in pairing_text, (
+    assert "t3claw pairing approve telegram" in pairing_text, (
         f"pairing reply must mention CLI fallback: {pairing_text}"
     )
 
@@ -206,7 +206,7 @@ async def test_telegram_pairing_reply_names_every_surface(
     # unpaired, so their DMs are intercepted by the allowlist gate in
     # the WASM channel before the agent parser ever sees the command —
     # they'd just get another pairing reply. Pairing approval requires
-    # an already-authenticated IronClaw surface (web / TUI / CLI).
+    # an already-authenticated T3Claw surface (web / TUI / CLI).
     # Reference: review on PR #3381.
     assert "TUI / web / Telegram" not in pairing_text, (
         "pairing reply must not list Telegram itself as a chat surface "
@@ -374,7 +374,7 @@ async def test_telegram_dm_approve_command_is_intercepted_by_allowlist_gate(
     """An unpaired Telegram user cannot complete pairing from Telegram itself.
 
     Reviewer concern on PR #3381: if the bot's pairing reply tells users
-    they can type `approve telegram CODE` "in any IronClaw chat
+    they can type `approve telegram CODE` "in any T3Claw chat
     (TUI / web / Telegram)", a user following that instruction *back into
     Telegram* gets the message intercepted by `handle_message`'s
     allowlist gate before the agent parser ever sees it — they just get

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="ironclaw.png?v=2" alt="IronClaw" width="200"/>
+  <img src="ironclaw.png?v=2" alt="T3Claw" width="200"/>
 </p>
 
-<h1 align="center">IronClaw</h1>
+<h1 align="center">T3Claw</h1>
 
 <p align="center">
   <strong>安全可靠的个人 AI 助手，始终站在你这边</strong>
@@ -35,16 +35,16 @@
 
 ## 设计理念
 
-IronClaw 基于一个简单的原则：**你的 AI 助手应该为你服务，而不是与你为敌。**
+T3Claw 基于一个简单的原则：**你的 AI 助手应该为你服务，而不是与你为敌。**
 
-在 AI 系统对数据处理日益不透明、与企业利益捆绑的今天，IronClaw 选择了一条不同的路：
+在 AI 系统对数据处理日益不透明、与企业利益捆绑的今天，T3Claw 选择了一条不同的路：
 
 - **数据归你所有** — 所有信息存储在本地，加密保护，始终在你掌控之下
 - **透明至上** — 完全开源，可审计，没有隐藏的遥测或数据收集
 - **自主扩展** — 随时构建新工具，无需等待供应商更新
 - **纵深防御** — 多层安全机制抵御提示注入和数据泄露
 
-IronClaw 是一个你真正可以信赖的 AI 助手，无论是个人生活还是工作。
+T3Claw 是一个你真正可以信赖的 AI 助手，无论是个人生活还是工作。
 
 ## 功能特性
 
@@ -67,7 +67,7 @@ IronClaw 是一个你真正可以信赖的 AI 助手，无论是个人生活还�
 
 ### 自主扩展
 
-- **动态工具构建** — 描述你的需求，IronClaw 会将其构建为 WASM 工具
+- **动态工具构建** — 描述你的需求，T3Claw 会将其构建为 WASM 工具
 - **MCP 协议** — 连接模型上下文协议（Model Context Protocol）服务器以获取额外能力
 - **插件架构** — 无需重启即可加载新的 WASM 工具和渠道
 
@@ -88,12 +88,12 @@ IronClaw 是一个你真正可以信赖的 AI 助手，无论是个人生活还�
 
 ## 下载或编译
 
-访问 [Releases 页面](https://github.com/nearai/ironclaw/releases/) 查看最新版本。
+访问 [Releases 页面](https://github.com/Terminal-3/t3-claw/releases/) 查看最新版本。
 
 <details>
   <summary>通过 Windows 安装程序安装 (Windows)</summary>
 
-下载 [Windows 安装程序](https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-x86_64-pc-windows-msvc.msi) 并运行。
+下载 [Windows 安装程序](https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-x86_64-pc-windows-msvc.msi) 并运行。
 
 </details>
 
@@ -101,7 +101,7 @@ IronClaw 是一个你真正可以信赖的 AI 助手，无论是个人生活还�
   <summary>通过 PowerShell 脚本安装 (Windows)</summary>
 
 ```sh
-irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.ps1 | iex
+irm https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-installer.ps1 | iex
 ```
 
 </details>
@@ -110,7 +110,7 @@ irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-install
   <summary>通过 Shell 脚本安装 (macOS、Linux、Windows/WSL)</summary>
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-installer.sh | sh
 ```
 </details>
 
@@ -118,7 +118,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/release
   <summary>通过 Homebrew 安装 (macOS/Linux)</summary>
 
 ```sh
-brew install ironclaw
+brew install t3claw
 ```
 
 </details>
@@ -130,8 +130,8 @@ brew install ironclaw
 
 ```bash
 # 克隆仓库
-git clone https://github.com/nearai/ironclaw.git
-cd ironclaw
+git clone https://github.com/Terminal-3/t3-claw.git
+cd t3claw
 
 # 编译
 cargo build --release
@@ -142,12 +142,12 @@ cargo test
 
 如需进行**完整发布构建**（修改了渠道源码后），先运行 `./scripts/build-all.sh` 重新编译渠道。
 
-> **可选：** 微信语音消息（`audio/silk`）需要独立的 `ironclaw-silk-decoder`
+> **可选：** 微信语音消息（`audio/silk`）需要独立的 `t3claw-silk-decoder`
 > 辅助二进制才能被转写。该工具因为依赖 `silk-codec`（会引入 `bindgen` /
 > `libclang`），已被排除在默认工作区之外。请使用
-> `./crates/ironclaw_silk_decoder/build.sh` 单独编译（需要 libclang 与 C
-> 编译器），再把生成的二进制放到 `$PATH`、`ironclaw` 同级目录，或通过
-> `IRONCLAW_SILK_DECODER` 环境变量指定路径。即使没有它，语音消息仍会送达，
+> `./crates/t3claw_silk_decoder/build.sh` 单独编译（需要 libclang 与 C
+> 编译器），再把生成的二进制放到 `$PATH`、`t3claw` 同级目录，或通过
+> `T3CLAW_SILK_DECODER` 环境变量指定路径。即使没有它，语音消息仍会送达，
 > 只是会以原始的 `audio/silk` 数据块形式呈现。
 
 </details>
@@ -156,25 +156,25 @@ cargo test
 
 ```bash
 # 创建数据库
-createdb ironclaw
+createdb t3claw
 
 # 启用 pgvector 扩展
-psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+psql t3claw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 ## 配置
 
-运行设置向导来配置 IronClaw：
+运行设置向导来配置 T3Claw：
 
 ```bash
-ironclaw onboard
+t3claw onboard
 ```
 
-向导将引导你完成数据库连接、NEAR AI 身份验证（通过浏览器 OAuth）和密钥加密（使用系统钥匙串）。设置会保存在数据库中；引导变量（如 `DATABASE_URL`、`LLM_BACKEND`）写入 `~/.ironclaw/.env`，以便在数据库连接前可用。
+向导将引导你完成数据库连接、NEAR AI 身份验证（通过浏览器 OAuth）和密钥加密（使用系统钥匙串）。设置会保存在数据库中；引导变量（如 `DATABASE_URL`、`LLM_BACKEND`）写入 `~/.t3claw/.env`，以便在数据库连接前可用。
 
 ### 替代 LLM 提供商
 
-IronClaw 默认使用 NEAR AI，但开箱即用地支持多种 LLM 提供商。
+T3Claw 默认使用 NEAR AI，但开箱即用地支持多种 LLM 提供商。
 内置提供商包括 **Anthropic**、**OpenAI**、**GitHub Copilot**、**Google Gemini**、**MiniMax**、**Mistral** 和 **Ollama**（本地部署）。同时也支持 OpenAI 兼容服务，如 **OpenRouter**（300+ 模型）、**Together AI**、**Fireworks AI** 以及自托管服务器（**vLLM**、**LiteLLM**）。
 
 在向导中选择你的提供商，或直接设置环境变量：
@@ -195,7 +195,7 @@ LLM_MODEL=anthropic/claude-sonnet-4
 
 ## 安全机制
 
-IronClaw 实现了纵深防御策略来保护你的数据并防止滥用。
+T3Claw 实现了纵深防御策略来保护你的数据并防止滥用。
 
 ### WASM 沙箱
 
@@ -286,17 +286,17 @@ WASM ──► 白名单  ──► 泄露扫描 ──► 凭据  ──► 执
 
 ## 使用方式
 
-Engine v2 当前需要显式开启。如果你想运行新的引擎而不是旧的代理循环，请在启动 IronClaw 时设置 `ENGINE_V2=true`。
+Engine v2 当前需要显式开启。如果你想运行新的引擎而不是旧的代理循环，请在启动 T3Claw 时设置 `ENGINE_V2=true`。
 
 ```bash
 # 首次设置（配置数据库、认证等）
-ironclaw onboard
+t3claw onboard
 
 # 启动已安装的二进制
-ironclaw
+t3claw
 
 # 使用 Engine v2 启动已安装的二进制
-ENGINE_V2=true ironclaw
+ENGINE_V2=true t3claw
 
 # 从源码启动交互式 REPL
 cargo run
@@ -305,7 +305,7 @@ cargo run
 ENGINE_V2=true cargo run
 
 # 使用 Engine v2 并启用调试日志
-ENGINE_V2=true RUST_LOG=ironclaw=debug cargo run
+ENGINE_V2=true RUST_LOG=t3claw=debug cargo run
 ```
 
 ## 开发
@@ -318,7 +318,7 @@ cargo fmt
 cargo clippy --all --benches --tests --examples --all-features
 
 # 运行测试
-createdb ironclaw_test
+createdb t3claw_test
 cargo test
 
 # 运行指定测试
@@ -330,7 +330,7 @@ cargo test test_name
 
 ## OpenClaw 传承
 
-IronClaw 是受 [OpenClaw](https://github.com/openclaw/openclaw) 启发的 Rust 重新实现。参见 [FEATURE_PARITY.md](FEATURE_PARITY.md) 了解完整的功能追踪矩阵。
+T3Claw 是受 [OpenClaw](https://github.com/openclaw/openclaw) 启发的 Rust 重新实现。参见 [FEATURE_PARITY.md](FEATURE_PARITY.md) 了解完整的功能追踪矩阵。
 
 主要差异：
 

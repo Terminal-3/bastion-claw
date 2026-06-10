@@ -147,7 +147,7 @@ fn redact_oauth_state_for_logs(state: &str) -> String {
     format!("sha256:{short_hash}:len={}", state.len())
 }
 
-/// Resolve the IronClaw user who initiated a Slack relay OAuth flow.
+/// Resolve the T3Claw user who initiated a Slack relay OAuth flow.
 ///
 /// `auth_channel_relay` (in `extensions/manager.rs`) stores the
 /// initiating user_id under `relay:{name}:oauth_user`, namespaced by
@@ -207,7 +207,7 @@ async fn resolve_relay_oauth_user(
 /// redirect the user's browser here. The `state` query parameter correlates
 /// the callback with a pending OAuth flow registered by `start_wasm_oauth()`.
 ///
-/// Used on hosted instances where `IRONCLAW_OAUTH_CALLBACK_URL` points to
+/// Used on hosted instances where `T3CLAW_OAUTH_CALLBACK_URL` points to
 /// the gateway (e.g., `https://kind-deer.agent1.near.ai/oauth/callback`).
 /// Local/desktop mode continues to use the TCP listener on port 9876.
 pub(crate) async fn oauth_callback_handler(
@@ -326,7 +326,7 @@ pub(crate) async fn oauth_callback_handler(
                 correlation = %correlation,
                 "OAuth callback missing or empty state parameter"
             );
-            return oauth_error_page("IronClaw");
+            return oauth_error_page("T3Claw");
         }
     };
 
@@ -340,7 +340,7 @@ pub(crate) async fn oauth_callback_handler(
                 state = %redact_oauth_state_for_logs(&state_param),
                 "OAuth callback missing or empty code parameter"
             );
-            return oauth_error_page("IronClaw");
+            return oauth_error_page("T3Claw");
         }
     };
 
@@ -354,7 +354,7 @@ pub(crate) async fn oauth_callback_handler(
                 correlation = %correlation,
                 "OAuth callback fired but extension manager is not configured"
             );
-            return oauth_error_page("IronClaw");
+            return oauth_error_page("T3Claw");
         }
     };
 
@@ -371,7 +371,7 @@ pub(crate) async fn oauth_callback_handler(
                 "OAuth callback received with malformed state"
             );
             clear_auth_mode(&state, &state.owner_id).await;
-            return oauth_error_page("IronClaw");
+            return oauth_error_page("T3Claw");
         }
     };
     let lookup_key = decoded_state.flow_id.clone();
@@ -395,7 +395,7 @@ pub(crate) async fn oauth_callback_handler(
                 lookup_key = %redacted_lookup_key,
                 "OAuth callback received with unknown or expired state"
             );
-            return oauth_error_page("IronClaw");
+            return oauth_error_page("T3Claw");
         }
     };
 
@@ -1018,7 +1018,7 @@ pub(crate) async fn slack_relay_oauth_callback_handler(
         .into_response();
     }
 
-    // Resolve the IronClaw user who initiated this OAuth flow BEFORE the
+    // Resolve the T3Claw user who initiated this OAuth flow BEFORE the
     // result block so the completion toast can be routed to that tenant
     // even on the failure path.
     let oauth_user = resolve_relay_oauth_user(
@@ -1083,7 +1083,7 @@ pub(crate) async fn slack_relay_oauth_callback_handler(
             .await
             .map_err(|e| format!("Failed to activate relay channel: {}", e))?;
 
-        // Create channel identity pairing: Slack authed_user_id → IronClaw user.
+        // Create channel identity pairing: Slack authed_user_id → T3Claw user.
         // Fetch authed_user_id from the relay's connections API (server-side,
         // not from the redirect URL which could be tampered).
         if let Some(pairing_store) = ext_mgr.pairing_store() {
@@ -1114,7 +1114,7 @@ pub(crate) async fn slack_relay_oauth_callback_handler(
                 })?;
 
             // The outer `oauth_user` (resolved by `resolve_relay_oauth_user`
-            // above the result block) is the IronClaw user this OAuth flow
+            // above the result block) is the T3Claw user this OAuth flow
             // belongs to. Reuse it here so the pairing identity and the
             // completion toast always agree on the target tenant. The
             // temporary `relay:{ext}:oauth_user` secret was already
@@ -1181,7 +1181,7 @@ pub(crate) async fn slack_relay_oauth_callback_handler(
     // `state.owner_id` was a cross-tenant misroute even after the
     // global-broadcast leak was closed.
     let onboarding_event = AppEvent::OnboardingState {
-        extension_name: ironclaw_common::ExtensionName::from_trusted(relay_extension_name.clone()),
+        extension_name: t3claw_common::ExtensionName::from_trusted(relay_extension_name.clone()),
         state: if success {
             crate::channels::web::types::OnboardingStateDto::Ready
         } else {
@@ -1201,7 +1201,7 @@ pub(crate) async fn slack_relay_oauth_callback_handler(
         axum::response::Html(
             "<html><body style='font-family: system-ui; text-align: center; padding: 60px;'>\
              <h2>Slack Connected!</h2>\
-             <p>You can close this tab and return to IronClaw.</p>\
+             <p>You can close this tab and return to T3Claw.</p>\
              <script>window.close()</script>\
              </body></html>"
                 .to_string(),
@@ -1475,7 +1475,7 @@ mod tests {
         oauth_proxy_auth_token: Option<String>,
     ) -> crate::auth::oauth::PendingOAuthFlow {
         crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -1733,7 +1733,7 @@ mod tests {
 
         // Insert an expired flow.
         let flow = crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -1802,7 +1802,7 @@ mod tests {
         let mut receiver = sse_mgr.sender().subscribe();
         let created_at = expired_flow_created_at();
         let flow = crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -1912,7 +1912,7 @@ mod tests {
         // stripped and the flow was found by the raw nonce.
         let created_at = expired_flow_created_at();
         let flow = crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -1999,7 +1999,7 @@ mod tests {
 
         let created_at = expired_flow_created_at();
         let flow = crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -2078,7 +2078,7 @@ mod tests {
 
         let created_at = expired_flow_created_at();
         let flow = crate::auth::oauth::PendingOAuthFlow {
-            extension_name: ironclaw_common::ExtensionName::new("test_tool").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("test_tool").unwrap(),
             display_name: "Test Tool".to_string(),
             token_url: "https://example.com/token".to_string(),
             client_id: "client123".to_string(),
@@ -2150,9 +2150,8 @@ mod tests {
         // Keep the process-wide env locked for the full callback so the handler
         // sees a stable proxy URL/token configuration throughout the test.
         let _env_guard = crate::config::helpers::lock_env();
-        let _exchange_url_guard =
-            set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
-        let _proxy_auth_guard = set_env_var("IRONCLAW_OAUTH_PROXY_AUTH_TOKEN", None);
+        let _exchange_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
+        let _proxy_auth_guard = set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", None);
         let _gateway_token_guard = set_env_var("GATEWAY_AUTH_TOKEN", Some("gateway-test-token"));
 
         let secrets = test_secrets_store();
@@ -2250,10 +2249,9 @@ mod tests {
         // Keep the process-wide env locked for the full callback so the handler
         // sees a stable proxy URL/token configuration throughout the test.
         let _env_guard = crate::config::helpers::lock_env();
-        let _exchange_url_guard =
-            set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
+        let _exchange_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
         let _proxy_auth_guard = set_env_var(
-            "IRONCLAW_OAUTH_PROXY_AUTH_TOKEN",
+            "T3CLAW_OAUTH_PROXY_AUTH_TOKEN",
             Some("shared-oauth-proxy-secret"),
         );
         let _gateway_token_guard = set_env_var("GATEWAY_AUTH_TOKEN", None);
@@ -2350,9 +2348,8 @@ mod tests {
 
         let proxy = MockOauthProxyServer::start().await;
         let _env_guard = crate::config::helpers::lock_env();
-        let _exchange_url_guard =
-            set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
-        let _proxy_auth_guard = set_env_var("IRONCLAW_OAUTH_PROXY_AUTH_TOKEN", None);
+        let _exchange_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", Some(&proxy.base_url()));
+        let _proxy_auth_guard = set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", None);
         let _gateway_token_guard = set_env_var("GATEWAY_AUTH_TOKEN", Some("gateway-test-token"));
 
         let secrets = test_secrets_store();
@@ -2421,8 +2418,8 @@ mod tests {
 
         let _env_guard = crate::config::helpers::lock_env();
         let _exchange_url_guard =
-            set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", Some("http://127.0.0.1:1"));
-        let _proxy_auth_guard = set_env_var("IRONCLAW_OAUTH_PROXY_AUTH_TOKEN", None);
+            set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", Some("http://127.0.0.1:1"));
+        let _proxy_auth_guard = set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", None);
         let _gateway_token_guard = set_env_var("GATEWAY_AUTH_TOKEN", Some("gateway-test-token"));
 
         let secrets = test_secrets_store();
@@ -2684,7 +2681,7 @@ mod tests {
     }
 
     /// Regression: the `relay:{ext}:oauth_user` secret stores the
-    /// IronClaw user who initiated the OAuth flow. The callback must
+    /// T3Claw user who initiated the OAuth flow. The callback must
     /// consume it unconditionally once the value is read, regardless of
     /// whether downstream activation, identity-pairing, or a missing
     /// `pairing_store` causes the result block to short-circuit. Leaving

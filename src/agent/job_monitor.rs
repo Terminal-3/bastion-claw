@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 use crate::channels::IncomingMessage;
 use crate::context::{ContextManager, JobState};
-use ironclaw_common::AppEvent;
+use t3claw_common::AppEvent;
 
 /// Route context for forwarding job monitor events back to the user's channel.
 #[derive(Debug, Clone)]
@@ -218,7 +218,7 @@ pub fn spawn_completion_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_common::JobResultStatus;
+    use t3claw_common::JobResultStatus;
 
     fn test_route() -> JobMonitorRoute {
         JobMonitorRoute {
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(msg.user_id, "user-1");
         assert_eq!(
             msg.thread_id,
-            Some(ironclaw_common::ExternalThreadId::from_trusted(
+            Some(t3claw_common::ExternalThreadId::from_trusted(
                 "thread-1".to_string()
             ))
         );

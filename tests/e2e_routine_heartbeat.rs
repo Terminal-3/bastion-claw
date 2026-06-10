@@ -17,25 +17,25 @@ mod tests {
     use secrecy::SecretString;
     use uuid::Uuid;
 
-    use ironclaw::agent::routine::{
+    use t3claw::agent::routine::{
         NotifyConfig, Routine, RoutineAction, RoutineGuardrails, RoutineRun, RunStatus, Trigger,
     };
-    use ironclaw::agent::routine_engine::RoutineEngine;
-    use ironclaw::agent::{HeartbeatConfig, HeartbeatRunner, Scheduler, SchedulerDeps};
-    use ironclaw::channels::IncomingMessage;
-    use ironclaw::config::{AgentConfig, RoutineConfig, SafetyConfig};
-    use ironclaw::context::{ContextManager, JobContext};
-    use ironclaw::db::{Database, libsql::LibSqlBackend};
-    use ironclaw::extensions::ExtensionManager;
-    use ironclaw::hooks::HookRegistry;
-    use ironclaw::secrets::{InMemorySecretsStore, SecretsCrypto, SecretsStore};
-    use ironclaw::tools::builtin::routine::RoutineUpdateTool;
-    use ironclaw::tools::mcp::{McpProcessManager, McpSessionManager};
-    use ironclaw::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput, ToolRegistry};
-    use ironclaw::workspace::Workspace;
-    use ironclaw::workspace::hygiene::HygieneConfig;
-    use ironclaw_llm::LlmProvider;
-    use ironclaw_safety::SafetyLayer;
+    use t3claw::agent::routine_engine::RoutineEngine;
+    use t3claw::agent::{HeartbeatConfig, HeartbeatRunner, Scheduler, SchedulerDeps};
+    use t3claw::channels::IncomingMessage;
+    use t3claw::config::{AgentConfig, RoutineConfig, SafetyConfig};
+    use t3claw::context::{ContextManager, JobContext};
+    use t3claw::db::{Database, libsql::LibSqlBackend};
+    use t3claw::extensions::ExtensionManager;
+    use t3claw::hooks::HookRegistry;
+    use t3claw::secrets::{InMemorySecretsStore, SecretsCrypto, SecretsStore};
+    use t3claw::tools::builtin::routine::RoutineUpdateTool;
+    use t3claw::tools::mcp::{McpProcessManager, McpSessionManager};
+    use t3claw::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput, ToolRegistry};
+    use t3claw::workspace::Workspace;
+    use t3claw::workspace::hygiene::HygieneConfig;
+    use t3claw_llm::LlmProvider;
+    use t3claw_safety::SafetyLayer;
 
     use crate::support::trace_llm::{LlmTrace, TraceLlm, TraceResponse, TraceStep, TraceToolCall};
 
@@ -342,14 +342,14 @@ mod tests {
             SchedulerDeps {
                 tools: registry.clone(),
                 extension_manager: extension_manager.clone(),
-                store: Some(ironclaw::tenant::SystemScope::new(db.clone())),
+                store: Some(t3claw::tenant::SystemScope::new(db.clone())),
                 hooks: Arc::new(HookRegistry::new()),
             },
         ));
 
         Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db),
+            t3claw::tenant::SystemScope::new(db),
             llm,
             ws,
             notify_tx,
@@ -357,7 +357,7 @@ mod tests {
             extension_manager,
             registry,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ))
     }
@@ -481,7 +481,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -489,7 +489,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -561,7 +561,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -569,7 +569,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -642,7 +642,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -650,7 +650,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -750,7 +750,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -758,7 +758,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -852,7 +852,7 @@ mod tests {
             .emit_system_event(
                 "github",
                 "issue.opened",
-                &serde_json::json!({"repository": "NearAI/IronClaw"}),
+                &serde_json::json!({"repository": "NearAI/T3Claw"}),
                 Some("default"),
             )
             .await;
@@ -894,7 +894,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -902,7 +902,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -988,7 +988,7 @@ mod tests {
 
         let result = runner.check_heartbeat().await;
         match result {
-            ironclaw::agent::HeartbeatResult::NeedsAttention(msg) => {
+            t3claw::agent::HeartbeatResult::NeedsAttention(msg) => {
                 assert!(
                     msg.contains("error"),
                     "Expected 'error' in attention message: {msg}"
@@ -1033,7 +1033,7 @@ mod tests {
 
         let result = runner.check_heartbeat().await;
         assert!(
-            matches!(result, ironclaw::agent::HeartbeatResult::Skipped),
+            matches!(result, t3claw::agent::HeartbeatResult::Skipped),
             "Expected Skipped for empty checklist, got: {result:?}"
         );
     }
@@ -1070,7 +1070,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(Arc::clone(&db)),
+            t3claw::tenant::SystemScope::new(Arc::clone(&db)),
             llm,
             ws,
             notify_tx,
@@ -1078,7 +1078,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -1161,10 +1161,10 @@ mod tests {
 
     #[tokio::test]
     async fn full_job_max_concurrent_blocks_second_fire_while_first_active() {
-        use ironclaw::agent::routine::{
+        use t3claw::agent::routine::{
             NotifyConfig, Routine, RoutineAction, RoutineGuardrails, RoutineRun, RunStatus, Trigger,
         };
-        use ironclaw::error::RoutineError;
+        use t3claw::error::RoutineError;
 
         let (db, _tmp) = create_test_db().await;
         let ws = create_workspace(&db);
@@ -1193,7 +1193,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             RoutineConfig::default(),
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -1201,7 +1201,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 
@@ -1302,7 +1302,7 @@ mod tests {
 
         let engine = Arc::new(RoutineEngine::new(
             config,
-            ironclaw::tenant::SystemScope::new(db.clone()),
+            t3claw::tenant::SystemScope::new(db.clone()),
             llm,
             ws,
             notify_tx,
@@ -1310,7 +1310,7 @@ mod tests {
             None,
             tools,
             safety,
-            ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             None,
         ));
 

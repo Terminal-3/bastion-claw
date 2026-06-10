@@ -14,7 +14,7 @@ use axum::{
     response::IntoResponse,
 };
 
-use ironclaw_gateway::{LayoutConfig, ResolvedWidget, WidgetManifest, is_safe_widget_id};
+use t3claw_gateway::{LayoutConfig, ResolvedWidget, WidgetManifest, is_safe_widget_id};
 
 use crate::channels::web::auth::{AdminUser, AuthenticatedUser};
 use crate::channels::web::handlers::memory::resolve_workspace;
@@ -318,7 +318,7 @@ pub async fn project_widgets_handler(
             .ok()
             .map(|d| d.content)
             .filter(|c| !c.trim().is_empty() && c.len() <= MAX_WIDGET_CSS_BYTES)
-            .map(|raw| ironclaw_gateway::scope_css(&raw, &manifest.id));
+            .map(|raw| t3claw_gateway::scope_css(&raw, &manifest.id));
 
         let enabled = layout
             .widgets

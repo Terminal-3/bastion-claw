@@ -4,7 +4,7 @@ description: "通过 Telegram 与智能体交互"
 icon: telegram
 ---
 
-您可以创建 Telegram 机器人并将 IronClaw 智能体连接到它。配置完成后，您可以在私信中与智能体对话，也可以将其添加到群聊中参与讨论。
+您可以创建 Telegram 机器人并将 T3Claw 智能体连接到它。配置完成后，您可以在私信中与智能体对话，也可以将其添加到群聊中参与讨论。
 
 <Note>
 如果您还没有设置智能体，请先查看我们的[快速开始指南](../quickstart)
@@ -28,17 +28,17 @@ icon: telegram
     向 BotFather 发送 `/newbot` 命令，然后按照说明创建新机器人。您需要为机器人选择一个名称和用户名。用户名必须以"bot"结尾，例如"my_agent_bot"。
     </Step>
     <Step title="获取机器人令牌">
-    创建机器人后，BotFather 会给您一个类似这样的令牌：`123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`。此令牌用于认证您的机器人并允许其访问 Telegram API。请妥善保管此令牌，不要与任何人分享。稍后您将需要它来在 IronClaw 中配置 Telegram 频道。
+    创建机器人后，BotFather 会给您一个类似这样的令牌：`123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ`。此令牌用于认证您的机器人并允许其访问 Telegram API。请妥善保管此令牌，不要与任何人分享。稍后您将需要它来在 T3Claw 中配置 Telegram 频道。
     </Step>
 </Steps>
 
 </Step>
-<Step title="在 IronClaw 中配置 Telegram 频道">
+<Step title="在 T3Claw 中配置 Telegram 频道">
 
-    使用 `--channels-only` 标志调用 IronClaw CLI 引导向导，仅配置频道而无需再次执行整个引导过程：
+    使用 `--channels-only` 标志调用 T3Claw CLI 引导向导，仅配置频道而无需再次执行整个引导过程：
 
     ```
-    ironclaw onboard --channels-only
+    t3claw onboard --channels-only
     ```
 
     <Steps>
@@ -58,16 +58,16 @@ icon: telegram
 </Step>
 
 <Step title="测试 Telegram 频道">
-    配置完 Telegram 频道后，是时候测试一下了。如果智能体尚未运行，请先启动 `ironclaw`：
+    配置完 Telegram 频道后，是时候测试一下了。如果智能体尚未运行，请先启动 `t3claw`：
 
     ```
-    ironclaw
+    t3claw
     ```
 
     在 Telegram 中向您的机器人发送一条消息。它会回复一个命令，您需要在终端中执行该命令以完成频道设置：
 
     ```
-    ironclaw pairing approve telegram <PAIRING_CODE>
+    t3claw pairing approve telegram <PAIRING_CODE>
     ```
 </Step>
 
@@ -98,7 +98,7 @@ Telegram 机器人默认启用隐私模式，这限制了它们接收的群组�
 
 ## 配置选项
 
-您可以通过 `.ironclaw/channels/telegram.capabilities.json` 文件配置 Telegram 频道的行为，该文件在首次设置频道后自动创建。
+您可以通过 `.t3claw/channels/telegram.capabilities.json` 文件配置 Telegram 频道的行为，该文件在首次设置频道后自动创建。
 
 <Accordion title="选项概览">
 
@@ -186,7 +186,7 @@ Telegram 机器人默认启用隐私模式，这限制了它们接收的群组�
 
 ## 群聊参与
 
-IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只回复命令（使用 `/help` 查看可用命令列表）。如果您希望机器人回复提及或所有群组消息，需要进行配置。
+T3Claw 可以配置为参与 Telegram 群聊。默认情况下，机器人只回复命令（使用 `/help` 查看可用命令列表）。如果您希望机器人回复提及或所有群组消息，需要进行配置。
 
 ### 将机器人添加到群组
 
@@ -201,10 +201,10 @@ IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只�
    - 添加成员 → 搜索您的机器人用户名
    - 授予管理员权限（可选但推荐）
 
-3. **在 IronClaw 中配置 `bot_username`**：
+3. **在 T3Claw 中配置 `bot_username`**：
    ```json
    {
-     "bot_username": "MyIronClawBot"
+     "bot_username": "MyT3ClawBot"
    }
    ```
 
@@ -212,7 +212,7 @@ IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只�
 
 #### 命令和提及
 
-当使用命令（如 `/skills`）或提及机器人（如 `@MyIronClawBot 天气怎么样？`）时，机器人会响应。
+当使用命令（如 `/skills`）或提及机器人（如 `@MyT3ClawBot 天气怎么样？`）时，机器人会响应。
 
 配置：
 
@@ -221,7 +221,7 @@ IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只�
 
 ```json
 {
-  "bot_username": "MyIronClawBot",
+  "bot_username": "MyT3ClawBot",
   "respond_to_all_group_messages": false
 }
 ```
@@ -241,7 +241,7 @@ IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只�
 配置：
 ```json
 {
-  "bot_username": "MyIronClawBot",
+  "bot_username": "MyT3ClawBot",
   "respond_to_all_group_messages": true
 }
 ```
@@ -275,11 +275,11 @@ IronClaw 可以配置为参与 Telegram 群聊。默认情况下，机器人只�
 
 ## Webhook 密钥（可选）
 
-当 IronClaw 在 webhook 模式下运行时，Telegram 通过向您的公共 URL 发送 HTTP 请求来传递消息。由于该 URL 可从互联网访问，任何第三方都可以向其发送伪造请求。
+当 T3Claw 在 webhook 模式下运行时，Telegram 通过向您的公共 URL 发送 HTTP 请求来传递消息。由于该 URL 可从互联网访问，任何第三方都可以向其发送伪造请求。
 
-Webhook 密钥是您在 IronClaw 中配置的共享令牌。Telegram 在每个请求中包含该令牌。IronClaw 拒绝不携带正确令牌的任何请求，因此只有真正的 Telegram 流量才能到达您的智能体。
+Webhook 密钥是您在 T3Claw 中配置的共享令牌。Telegram 在每个请求中包含该令牌。T3Claw 拒绝不携带正确令牌的任何请求，因此只有真正的 Telegram 流量才能到达您的智能体。
 
-要启用此功能，在 `.ironclaw/channels/telegram.capabilities.json` 中添加 `telegram_webhook_secret`：
+要启用此功能，在 `.t3claw/channels/telegram.capabilities.json` 中添加 `telegram_webhook_secret`：
 
 ```json
 {
@@ -329,6 +329,6 @@ Webhook 密钥仅在 `polling_enabled` 为 `false` 时有效。如果您使用�
   </Accordion>
 
   <Accordion title="设置时所有者绑定超时">
-    向导等待 120 秒接收第一条消息。如果超时，请在 Telegram 中向您的机器人发送 `/start`，然后重新运行 `ironclaw onboard --channels-only`。
+    向导等待 120 秒接收第一条消息。如果超时，请在 Telegram 中向您的机器人发送 `/start`，然后重新运行 `t3claw onboard --channels-only`。
   </Accordion>
 </AccordionGroup>

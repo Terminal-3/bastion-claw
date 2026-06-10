@@ -7,16 +7,16 @@ extension boundaries.
 
 ## Current Base
 
-- `crates/ironclaw_auth` owns product auth flows, callback claim/fail/complete,
+- `crates/t3claw_auth` owns product auth flows, callback claim/fail/complete,
   credential accounts, provider exchange contracts, and in-memory fakes.
-- `crates/ironclaw_first_party_extensions` owns concrete first-party userland
+- `crates/t3claw_first_party_extensions` owns concrete first-party userland
   extension behavior, package descriptors, and host-bundled handlers.
-- `crates/ironclaw_first_party_extension_ports` owns loop-facing adapter and
+- `crates/t3claw_first_party_extension_ports` owns loop-facing adapter and
   port contracts for first-party extension activation/execution surfaces.
-- `crates/ironclaw_reborn_composition` wires built-in first-party packages,
+- `crates/t3claw_reborn_composition` wires built-in first-party packages,
   handler registries, product auth ports, secret stores, and runtime HTTP
   egress.
-- `crates/ironclaw_host_runtime` owns host runtime authority,
+- `crates/t3claw_host_runtime` owns host runtime authority,
   `FirstPartyCapabilityHandler`, `FirstPartyCapabilityRegistry`, and built-in
   first-party dispatch.
 
@@ -24,18 +24,18 @@ extension boundaries.
 
 | Old source | Decision | Replacement owner |
 | --- | --- | --- |
-| Phase 1 `crates/ironclaw_oauth` | Rewrite, do not port as a crate | `crates/ironclaw_auth::oauth` helpers |
+| Phase 1 `crates/t3claw_oauth` | Rewrite, do not port as a crate | `crates/t3claw_auth::oauth` helpers |
 | Phase 2 blocked-auth resume path | Drop for this stack | Already covered by current product auth continuation flow |
-| Phase 3 Google provider scaffold | Rewrite | `ironclaw_auth` provider helper plus `ironclaw_first_party_extensions::gsuite` |
+| Phase 3 Google provider scaffold | Rewrite | `t3claw_auth` provider helper plus `t3claw_first_party_extensions::gsuite` |
 | Phase 4 composition wiring | Defer | GitHub issue blocked on composition/manifest PRs |
-| Phase 5 Calendar package | Port/adapt | `crates/ironclaw_first_party_extensions::gsuite::calendar` |
-| Phase 6 Gmail package | Port/adapt | `crates/ironclaw_first_party_extensions::gsuite::gmail` |
+| Phase 5 Calendar package | Port/adapt | `crates/t3claw_first_party_extensions::gsuite::calendar` |
+| Phase 6 Gmail package | Port/adapt | `crates/t3claw_first_party_extensions::gsuite::gmail` |
 | Phase 7 UI prompts | Defer | Follow-up UI issue only if backend needs it |
 | Phase 8 live harness | Defer | GitHub issue for ignored/manual live tests |
 
 ## Port Rules
 
-- Do not recreate `ironclaw_oauth` or `ironclaw_native_extensions`.
+- Do not recreate `t3claw_oauth` or `t3claw_native_extensions`.
 - Keep OAuth callback authority on:
   `RebornProductAuthServices::handle_oauth_callback -> AuthFlowManager`.
 - Validate callback flow, scope, state, provider, and PKCE before provider
@@ -59,15 +59,15 @@ extension boundaries.
 
 ## Target Verification
 
-- Phase 2: `cargo test -p ironclaw_auth`
-- Phase 3/4: `cargo test -p ironclaw_first_party_extensions`
-- Port contract changes: `cargo test -p ironclaw_first_party_extension_ports`
-- Dependency changes: `cargo test -p ironclaw_architecture reborn_crate_dependency_boundaries_hold`
+- Phase 2: `cargo test -p t3claw_auth`
+- Phase 3/4: `cargo test -p t3claw_first_party_extensions`
+- Port contract changes: `cargo test -p t3claw_first_party_extension_ports`
+- Dependency changes: `cargo test -p t3claw_architecture reborn_crate_dependency_boundaries_hold`
 
 ## 2026-06-02 Reborn WASM Parity Slice
 
 - Drive, Docs, Sheets, and Slides now port as host-bundled WASM packages under
-  `crates/ironclaw_first_party_extensions/assets/`.
+  `crates/t3claw_first_party_extensions/assets/`.
 - Each product exposes operation-level Reborn capability IDs instead of a mixed
   `*.execute` tool. The WASM wrappers derive the hidden v1 action discriminator
   from the host invocation context, so model input cannot select a different

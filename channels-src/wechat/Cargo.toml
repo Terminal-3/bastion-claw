@@ -2,7 +2,7 @@
 name = "wechat-channel"
 version = "0.1.0"
 edition = "2021"
-description = "WeChat iLink Bot channel for IronClaw"
+description = "WeChat iLink Bot channel for T3Claw"
 license = "MIT OR Apache-2.0"
 
 [lib]

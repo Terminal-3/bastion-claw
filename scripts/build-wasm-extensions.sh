@@ -193,7 +193,7 @@ if $BUILD_TOOLS; then
 fi
 
 if $BUILD_FIRST_PARTY; then
-    first_party_manifests=(crates/ironclaw_first_party_extensions/assets/*/manifest.toml)
+    first_party_manifests=(crates/t3claw_first_party_extensions/assets/*/manifest.toml)
     build_manifest_set "first-party WASM extensions" build_first_party_extension "${first_party_manifests[@]}"
 fi
 

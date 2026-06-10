@@ -8,21 +8,21 @@ use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
 use async_trait::async_trait;
-use ironclaw_loop_support::{
-    HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
-    HostIdentityMessageContent, HostManagedModelMessageRole, HostManagedModelResponse,
-    IdentityApplicability, IdentityFileName,
-};
-use ironclaw_product_adapters::ProductTriggerReason;
-use ironclaw_turns::{
-    LoopMessageRef, TurnStatus,
-    run_profile::{LoopRunContext, PromptMode},
-};
 use reborn_support::harness::{
     RebornBinaryE2EHarness, RebornHarnessSharedStorage, RecordingTestCapabilityPort,
     test_product_scope,
 };
 use reborn_support::model_replay::RebornTraceReplayModelGateway;
+use t3claw_loop_support::{
+    HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
+    HostIdentityMessageContent, HostManagedModelMessageRole, HostManagedModelResponse,
+    IdentityApplicability, IdentityFileName,
+};
+use t3claw_product_adapters::ProductTriggerReason;
+use t3claw_turns::{
+    LoopMessageRef, TurnStatus,
+    run_profile::{LoopRunContext, PromptMode},
+};
 
 const TENANT_ALPHA_IDENTITY: &str = "Alice alpha tenant identity: likes rust ferris.";
 const TENANT_BETA_IDENTITY: &str = "Alice beta tenant identity: likes neon orchids.";
@@ -153,7 +153,7 @@ async fn reborn_identity_tenant_scope_isolation_parity() {
     beta.shutdown().await;
 }
 
-fn system_prompt_text(request: &ironclaw_loop_support::HostManagedModelRequest) -> String {
+fn system_prompt_text(request: &t3claw_loop_support::HostManagedModelRequest) -> String {
     request
         .messages
         .iter()

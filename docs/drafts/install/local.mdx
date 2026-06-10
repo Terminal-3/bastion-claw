@@ -1,10 +1,10 @@
 ---
 title: Local Installation
 sidebarTitle: Local
-description: Install IronClaw on Linux, macOS, or Windows
+description: Install T3Claw on Linux, macOS, or Windows
 ---
 
-Install IronClaw directly on your local machine for personal use. This is the simplest and most common installation method.
+Install T3Claw directly on your local machine for personal use. This is the simplest and most common installation method.
 
 ## Installation by OS
 
@@ -13,10 +13,10 @@ Install IronClaw directly on your local machine for personal use. This is the si
     ### Quick Install (Shell Script)
 
     ```bash
-    curl -fsSL https://install.ironclaw.ai | bash
+    curl -fsSL https://install.t3claw.ai | bash
     ```
 
-    This installs to `~/.local/bin/ironclaw`. Add to your PATH if needed:
+    This installs to `~/.local/bin/t3claw`. Add to your PATH if needed:
 
     ```bash
     export PATH="$HOME/.local/bin:$PATH"
@@ -27,12 +27,12 @@ Install IronClaw directly on your local machine for personal use. This is the si
 
     ```bash
     # Add repository
-    curl -fsSL https://repo.ironclaw.ai/gpg | sudo gpg --dearmor -o /usr/share/keyrings/ironclaw.gpg
-    echo "deb [signed-by=/usr/share/keyrings/ironclaw.gpg] https://repo.ironclaw.ai stable main" | sudo tee /etc/apt/sources.list.d/ironclaw.list
+    curl -fsSL https://repo.t3claw.ai/gpg | sudo gpg --dearmor -o /usr/share/keyrings/t3claw.gpg
+    echo "deb [signed-by=/usr/share/keyrings/t3claw.gpg] https://repo.t3claw.ai stable main" | sudo tee /etc/apt/sources.list.d/t3claw.list
 
     # Install
     sudo apt update
-    sudo apt install ironclaw
+    sudo apt install t3claw
     ```
 
     ### Build from Source
@@ -44,26 +44,26 @@ Install IronClaw directly on your local machine for personal use. This is the si
 
     # Build
     git clone https://github.com/nearai/ironclaw.git
-    cd ironclaw
+    cd t3claw
     cargo build --release
 
     # Install
-    sudo cp target/release/ironclaw /usr/local/bin/
+    sudo cp target/release/t3claw /usr/local/bin/
     ```
 
     ### Post-Install
 
     1. **Run the wizard**:
        ```bash
-       ironclaw onboard
+       t3claw onboard
        ```
 
     2. **Select libSQL** (recommended) during Step 1
 
     3. **Service setup** (optional):
        ```bash
-       ironclaw service install
-       sudo systemctl enable --now ironclaw
+       t3claw service install
+       sudo systemctl enable --now t3claw
        ```
   </Tab>
 
@@ -72,37 +72,37 @@ Install IronClaw directly on your local machine for personal use. This is the si
 
     ```bash
     # Add tap
-    brew tap ironclaw-ai/tap
+    brew tap t3claw-ai/tap
 
     # Install
-    brew install ironclaw
+    brew install t3claw
     ```
 
     ### Shell Script
 
     ```bash
-    curl -fsSL https://install.ironclaw.ai | bash
+    curl -fsSL https://install.t3claw.ai | bash
     ```
 
-    Installs to `~/.local/bin/ironclaw`.
+    Installs to `~/.local/bin/t3claw`.
 
     ### Post-Install
 
     1. **Run the wizard**:
        ```bash
-       ironclaw onboard
+       t3claw onboard
        ```
 
     2. **macOS Keychain** (Step 2): Two system dialogs are expected:
        - "Enter your password to unlock the keychain"
-       - "Allow ironclaw to access this keychain item"
+       - "Allow t3claw to access this keychain item"
 
        Click "Always Allow" to minimize future prompts.
 
     3. **Service setup** (optional):
        ```bash
-       ironclaw service install
-       brew services start ironclaw
+       t3claw service install
+       brew services start t3claw
        ```
   </Tab>
 
@@ -120,7 +120,7 @@ Install IronClaw directly on your local machine for personal use. This is the si
 
     ```bash
     # Inside WSL2
-    curl -fsSL https://install.ironclaw.ai | bash
+    curl -fsSL https://install.t3claw.ai | bash
     ```
 
     ### Access from Windows
@@ -133,12 +133,12 @@ Install IronClaw directly on your local machine for personal use. This is the si
     ### Post-Install
 
     ```bash
-    ironclaw onboard
-    ironclaw run
+    t3claw onboard
+    t3claw run
     ```
 
     <Note>
-    WSL2 is the recommended way to run IronClaw on Windows. Native Windows support is available but less tested.
+    WSL2 is the recommended way to run T3Claw on Windows. Native Windows support is available but less tested.
     </Note>
   </Tab>
 
@@ -146,12 +146,12 @@ Install IronClaw directly on your local machine for personal use. This is the si
     ### PowerShell Install
 
     ```powershell
-    irm https://install.ironclaw.ai | iex
+    irm https://install.t3claw.ai | iex
     ```
 
     Or manually:
-    1. Download `ironclaw-x86_64-pc-windows-msvc.zip` from [releases](https://github.com/nearai/ironclaw/releases)
-    2. Extract to `C:\Program Files\IronClaw\`
+    1. Download `t3claw-x86_64-pc-windows-msvc.zip` from [releases](https://github.com/nearai/ironclaw/releases)
+    2. Extract to `C:\Program Files\T3Claw\`
     3. Add to PATH
 
     ### Manual PATH Setup
@@ -160,7 +160,7 @@ Install IronClaw directly on your local machine for personal use. This is the si
     # Add to system PATH
     [Environment]::SetEnvironmentVariable(
       "Path",
-      $env:Path + ";C:\Program Files\IronClaw",
+      $env:Path + ";C:\Program Files\T3Claw",
       "User"
     )
     ```
@@ -168,8 +168,8 @@ Install IronClaw directly on your local machine for personal use. This is the si
     ### Post-Install
 
     ```powershell
-    ironclaw onboard
-    ironclaw run
+    t3claw onboard
+    t3claw run
     ```
 
     <Warning>
@@ -185,7 +185,7 @@ For local installs, use **libSQL** (embedded SQLite):
 ```
 Wizard Step 1: Database Connection
 → Select "libSQL"
-→ Path: ~/.ironclaw/ironclaw.db (default)
+→ Path: ~/.t3claw/t3claw.db (default)
 ```
 
 Benefits of libSQL for local use:
@@ -204,7 +204,7 @@ Your OS manages the encryption master key:
   <Accordion title="macOS" icon="apple">
     Uses macOS Keychain. Two dialogs expected:
     1. "Enter your password to unlock the keychain"
-    2. "Allow ironclaw to access this keychain item"
+    2. "Allow t3claw to access this keychain item"
 
     Click "Always Allow" on the second dialog to prevent repeated prompts.
   </Accordion>
@@ -230,38 +230,38 @@ Your OS manages the encryption master key:
 
 ## Service Installation
 
-Run IronClaw as a background service:
+Run T3Claw as a background service:
 
 <Tabs>
   <Tab title="Linux (systemd)">
     ```bash
     # Install service
-    ironclaw service install
+    t3claw service install
 
     # Enable and start
-    sudo systemctl enable --now ironclaw
+    sudo systemctl enable --now t3claw
 
     # Check status
-    sudo systemctl status ironclaw
+    sudo systemctl status t3claw
 
     # View logs
-    sudo journalctl -u ironclaw -f
+    sudo journalctl -u t3claw -f
     ```
   </Tab>
 
   <Tab title="macOS (launchd)">
     ```bash
     # Install service
-    ironclaw service install
+    t3claw service install
 
     # Start with Homebrew
-    brew services start ironclaw
+    brew services start t3claw
 
     # Or manually
-    launchctl load ~/Library/LaunchAgents/ai.ironclaw.service.plist
+    launchctl load ~/Library/LaunchAgents/ai.t3claw.service.plist
 
     # Check status
-    launchctl list | grep ironclaw
+    launchctl list | grep t3claw
     ```
   </Tab>
 
@@ -277,22 +277,22 @@ Run IronClaw as a background service:
 
 ```bash
 # Check version
-ironclaw --version
+t3claw --version
 
 # Run diagnostics
-ironclaw doctor
+t3claw doctor
 
 # Expected output:
-# ✓ Binary: ironclaw v0.13.0
-# ✓ Config directory: /home/user/.ironclaw
+# ✓ Binary: t3claw v0.13.0
+# ✓ Config directory: /home/user/.t3claw
 # ✓ Database: libSQL (not yet initialized)
 # ✓ Docker: available (optional)
 ```
 
 ## Next Steps
 
-1. **Run the wizard**: `ironclaw onboard`
-2. **Start IronClaw**: `ironclaw run`
+1. **Run the wizard**: `t3claw onboard`
+2. **Start T3Claw**: `t3claw run`
 3. **Open Web Gateway**: `http://127.0.0.1:3000`
 
 <CardGroup cols={2}>

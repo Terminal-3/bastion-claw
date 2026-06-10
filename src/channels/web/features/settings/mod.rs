@@ -1723,14 +1723,14 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // env guard must span async hot-reload flow
     async fn settings_set_handler_triggers_llm_provider_hot_reload() {
-        use ironclaw_llm::{SessionConfig, SessionManager, build_provider_chain};
+        use t3claw_llm::{SessionConfig, SessionManager, build_provider_chain};
 
         let _env_guard = lock_env();
         let secrets = test_secrets_store();
         let (db, tmp) = crate::testing::test_db().await;
 
         // Starting config: NEAR AI backend with "model-start".
-        let initial = ironclaw_llm::testing::nearai_test_config("model-start");
+        let initial = t3claw_llm::testing::nearai_test_config("model-start");
 
         let session = Arc::new(SessionManager::new(SessionConfig::default()));
         let (primary, _cheap, _recording, reload_handle) =
@@ -1840,15 +1840,15 @@ mod tests {
     /// wrapper so tests can observe swap side effects.
     async fn hot_reload_harness() -> (
         Arc<GatewayState>,
-        Arc<dyn ironclaw_llm::LlmProvider>,
+        Arc<dyn t3claw_llm::LlmProvider>,
         tempfile::TempDir,
     ) {
-        use ironclaw_llm::{SessionConfig, SessionManager, build_provider_chain};
+        use t3claw_llm::{SessionConfig, SessionManager, build_provider_chain};
 
         let secrets = test_secrets_store();
         let (db, tmp) = crate::testing::test_db().await;
 
-        let initial = ironclaw_llm::testing::nearai_test_config("model-start");
+        let initial = t3claw_llm::testing::nearai_test_config("model-start");
         let session = Arc::new(SessionManager::new(SessionConfig::default()));
         let (primary, _cheap, _recording, reload_handle) =
             build_provider_chain(&initial, Arc::clone(&session))

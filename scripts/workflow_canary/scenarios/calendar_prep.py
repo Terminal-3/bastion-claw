@@ -12,7 +12,7 @@ Phase 2 coverage (this scenario):
    ``[CANARY-WORKFLOW-CAL-LIST]`` sentinel.
 3. Mock LLM emits an http GET to
    ``www.googleapis.com/calendar/v3/.../primary/events`` →
-   ``IRONCLAW_TEST_HTTP_REMAP`` routes to ``calendar_mock`` →
+   ``T3CLAW_TEST_HTTP_REMAP`` routes to ``calendar_mock`` →
    the seeded event comes back in the response.
 4. Mock LLM second-iteration matcher (matched on the event title
    appearing in "Tool `http` returned: ...") emits a Telegram

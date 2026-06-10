@@ -11,7 +11,7 @@ individual symptoms look reasonable in isolation (one extra Arc, one
 extra method arg, one `with_*` builder, one `#[allow(...)]`). The
 class is recognizable only when you grep for the smoke alarms across
 the crate: 11 `#[allow(clippy::too_many_arguments)]` annotations in
-`crates/ironclaw_engine/`, a 7,933-line `runtime/mission.rs`, two
+`crates/t3claw_engine/`, a 7,933-line `runtime/mission.rs`, two
 parallel action-dispatch pipelines, and the same six Arcs threaded
 through three layers without ever being given a name.
 

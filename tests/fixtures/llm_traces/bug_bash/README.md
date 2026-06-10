@@ -14,9 +14,9 @@ the prompt/context shape that triggered a production bug.
 
 ```bash
 # 1. Reproduce the bug live against staging.
-IRONCLAW_RECORD_TRACE=1 \
-IRONCLAW_TRACE_OUTPUT=tests/fixtures/llm_traces/bug_bash/<name>.json \
-IRONCLAW_TRACE_MODEL_NAME=bug-bash-<issue>-<slug> \
+T3CLAW_RECORD_TRACE=1 \
+T3CLAW_TRACE_OUTPUT=tests/fixtures/llm_traces/bug_bash/<name>.json \
+T3CLAW_TRACE_MODEL_NAME=bug-bash-<issue>-<slug> \
 cargo run
 
 # 2. Interact with the agent until you observe the bug.

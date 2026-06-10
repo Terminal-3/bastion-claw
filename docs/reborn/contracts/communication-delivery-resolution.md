@@ -12,7 +12,7 @@ Communication delivery resolution decides which outbound target should be tried
 for a user-visible communication event after Reborn has already determined that
 delivery should be attempted.
 
-Candidate selection is part of the `ironclaw_outbound::OutboundPolicyService`
+Candidate selection is part of the `t3claw_outbound::OutboundPolicyService`
 contract. The selection step returns a **candidate only**; the same outbound
 service boundary then validates the target, records a delivery attempt, and
 hands a validated target to the product outbound path. Transport traffic remains
@@ -37,10 +37,10 @@ product surface.
 
 | Component | Owns | Does not own |
 | --- | --- | --- |
-| `ironclaw_outbound::OutboundPolicyService` | Candidate selection, target revalidation, delivery-attempt recording, pre-send gating | Trigger execution, auth/approval state, transport send |
-| `ironclaw_outbound::OutboundResolutionEngine` | Optional internal helper for candidate selection inside `OutboundPolicyService` | Public caller boundary, target validation authority, delivery-attempt records |
-| `ironclaw_conversations` | Ingress identity, source-route binding, reply-target binding semantics | Outbound policy selection, product-specific reply behavior |
-| `ironclaw_event_projections` / `ironclaw_event_streams` | Durable event facts, projection rebuilds, notification/fan-out surfaces | Final outbound target choice, transport send, send authority |
+| `t3claw_outbound::OutboundPolicyService` | Candidate selection, target revalidation, delivery-attempt recording, pre-send gating | Trigger execution, auth/approval state, transport send |
+| `t3claw_outbound::OutboundResolutionEngine` | Optional internal helper for candidate selection inside `OutboundPolicyService` | Public caller boundary, target validation authority, delivery-attempt records |
+| `t3claw_conversations` | Ingress identity, source-route binding, reply-target binding semantics | Outbound policy selection, product-specific reply behavior |
+| `t3claw_event_projections` / `t3claw_event_streams` | Durable event facts, projection rebuilds, notification/fan-out surfaces | Final outbound target choice, transport send, send authority |
 | `ProductAdapter` implementations and transport glue | Rendering after outbound policy approves a candidate; host-provided transport execution | Communication policy selection, durable delivery state |
 
 The resolver must stay host-owned and deterministic. Product adapters can
@@ -143,7 +143,7 @@ pub enum RunNotificationOrigin {
 conversation. `TriggerCommunicationContext` identifies the trigger fire without
 turning that trigger into a communication destination. The trigger reference is
 an outbound-local correlation value; the canonical trigger identity belongs to
-the future `ironclaw_triggers::TriggerId` in PR 9.
+the future `t3claw_triggers::TriggerId` in PR 9.
 
 `SystemEventReasonCode` is a stable, redacted enum/code. Human-readable backend
 details, raw tool input, prompt material, OAuth state, approval payloads, and
@@ -156,7 +156,7 @@ has been selected and validated.
 ## 5. Preference Fields
 
 User communication preferences are owned by an
-`ironclaw_outbound::CommunicationPreferenceRepository` backed by a dedicated
+`t3claw_outbound::CommunicationPreferenceRepository` backed by a dedicated
 typed tenant/user database table. They are not stored in the generic JSON
 settings store and are not profile/tone preferences.
 
@@ -223,7 +223,7 @@ an automatic hop to some other channel.
 
 ## 7. Validation Boundary
 
-Validation and delivery-attempt recording remain in `ironclaw_outbound`.
+Validation and delivery-attempt recording remain in `t3claw_outbound`.
 
 The flow is:
 
@@ -252,7 +252,7 @@ available yet.
 
 When a trigger result must be delivered externally, the resolver treats it as a
 communication event, not as trigger authority. Trigger identity stays in the
-trigger domain; outbound destination choice stays in `ironclaw_outbound`.
+trigger domain; outbound destination choice stays in `t3claw_outbound`.
 
 ---
 

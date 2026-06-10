@@ -36,7 +36,7 @@ The filesystem catalog bridges these worlds. It lets trusted host services answe
 
 ## 2. Why this matches the current codebase
 
-Current IronClaw already has several storage styles:
+Current T3Claw already has several storage styles:
 
 ```text
 memory_documents + memory_chunks
@@ -51,7 +51,7 @@ secrets
 jobs, conversations, routines, users, pairings, WASM tools
   typed DB records
 
-pending-gates.json and ~/.ironclaw/.env
+pending-gates.json and ~/.t3claw/.env
   local-file persistence escape hatches
 
 project mounts
@@ -89,7 +89,7 @@ redaction, or encryption semantics, keep a typed repository.
 
 ## 4. Catalog model
 
-`ironclaw_filesystem` owns a trusted catalog interface:
+`t3claw_filesystem` owns a trusted catalog interface:
 
 ```rust
 pub trait FilesystemCatalog {
@@ -166,7 +166,7 @@ Canonical path shape:
 /memory/tenants/{tenant_id}/users/{user_id}/agents/{agent_id-or-_none}/projects/{project_id-or-_none}/notes/*.md
 ```
 
-Implemented first seam in `ironclaw_memory`:
+Implemented first seam in `t3claw_memory`:
 
 ```rust
 MemoryBackend
@@ -191,7 +191,7 @@ LibSqlMemoryDocumentRepository
 PostgresMemoryDocumentRepository
 ```
 
-`ironclaw_filesystem` remains generic. `ironclaw_memory` owns memory-specific path grammar, host-resolved memory context, plugin backend contracts, scope parsing, repository delegation, directory inference, and write-after-persist index hook invocation.
+`t3claw_filesystem` remains generic. `t3claw_memory` owns memory-specific path grammar, host-resolved memory context, plugin backend contracts, scope parsing, repository delegation, directory inference, and write-after-persist index hook invocation.
 
 Reuse rule: Reborn memory should port/adapt the current working workspace implementation instead of inventing parallel SQL or chunking semantics. The current source-of-truth implementation is in `src/workspace/{document,chunker,repository,search}.rs`, `src/db/libsql/workspace.rs`, and the existing workspace migrations.
 
@@ -231,7 +231,7 @@ A future diagnostic/export feature may emit redacted secret metadata as file-sha
 
 ## 8. Implementation sequence
 
-1. Add `MountDescriptor`, `PathPlacement`, `BackendCapabilities`, `ContentKind`, `IndexPolicy`, and `FilesystemCatalog` to `ironclaw_filesystem`.
+1. Add `MountDescriptor`, `PathPlacement`, `BackendCapabilities`, `ContentKind`, `IndexPolicy`, and `FilesystemCatalog` to `t3claw_filesystem`.
 2. Add `CompositeRootFilesystem` with longest-prefix backend routing and catalog lookup.
 3. Update `contracts/filesystem.md` and filesystem guardrails.
 4. Add a memory-document backend design/implementation slice that maps `/memory/...` virtual files to memory document repositories.
@@ -246,4 +246,4 @@ A future diagnostic/export feature may emit redacted secret metadata as file-sha
 - overlapping roots use longest-prefix routing
 - exact duplicate roots fail closed
 - missing roots fail closed without backend side effects
-- no new dependency edges from `ironclaw_filesystem` into product, runtime, secret, approval, process, or event crates
+- no new dependency edges from `t3claw_filesystem` into product, runtime, secret, approval, process, or event crates

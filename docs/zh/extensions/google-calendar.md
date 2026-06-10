@@ -16,7 +16,7 @@ Google Calendar 扩展允许您的智能体与 Google Calendar 交互，包括�
 前往 [Google Cloud Console](https://console.cloud.google.com) 创建一个新项目，或者选择一个已有项目。
 
 1. 点击 **Select a project** → **New Project**
-2. 为项目命名（例如 `ironclaw-calendar`），然后点击 **Create**
+2. 为项目命名（例如 `t3claw-calendar`），然后点击 **Create**
 
 </Step>
 
@@ -32,7 +32,7 @@ Google Calendar 扩展允许您的智能体与 Google Calendar 交互，包括�
 
 1. 点击 **Create client**
 2. 将 **Application type** 设为 **Web application**
-3. 为客户端命名（例如 `ironclaw-calendar`）
+3. 为客户端命名（例如 `t3claw-calendar`）
 4. 在 **Authorized redirect URIs** 下点击 **+ Add URI**，填入：
 
    ```
@@ -90,23 +90,23 @@ export GOOGLE_OAUTH_CLIENT_SECRET=<your-client-secret>
 运行以下命令安装扩展：
 
 ```bash
-ironclaw registry install google-calendar
+t3claw registry install google-calendar
 ```
 
 </Step>
 
 <Step title="配置您的凭证">
 
-向 IronClaw 提供您的 OAuth 凭证：
+向 T3Claw 提供您的 OAuth 凭证：
 
 ```bash
-ironclaw tool auth google-calendar
+t3claw tool auth google-calendar
 ```
 
-按照提示粘贴 `credentials.json` 文件内容，或者提供该文件的路径。IronClaw 会为您打开一个浏览器窗口来授权访问日历。授权完成后，token 会被安全存储。
+按照提示粘贴 `credentials.json` 文件内容，或者提供该文件的路径。T3Claw 会为您打开一个浏览器窗口来授权访问日历。授权完成后，token 会被安全存储。
 
 <Info>
-授权流程只需要运行一次。之后 IronClaw 会在需要时自动刷新访问 token。
+授权流程只需要运行一次。之后 T3Claw 会在需要时自动刷新访问 token。
 </Info>
 
 </Step>

@@ -1,14 +1,14 @@
-# IronClaw Reborn dispatcher contract
+# T3Claw Reborn dispatcher contract
 
 Date: 2026-04-24
 Status: V1 contract slice
-Crate: `crates/ironclaw_dispatcher`
+Crate: `crates/t3claw_dispatcher`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_dispatcher` is the composition-only runtime dispatch layer for Reborn.
+`t3claw_dispatcher` is the composition-only runtime dispatch layer for Reborn.
 
 It connects already-validated extension capabilities to runtime lanes:
 
@@ -21,7 +21,7 @@ ExtensionRegistry + RootFilesystem + ResourceGovernor + registered RuntimeAdapte
 
 The dispatcher does not discover extensions, parse manifests, implement policy, open files directly, resolve secrets, or execute product workflows. It wires service crates together and fails closed when a required lane or declaration is missing.
 
-The dispatch port contracts live in `ironclaw_host_api`:
+The dispatch port contracts live in `t3claw_host_api`:
 
 ```rust
 CapabilityDispatchRequest
@@ -31,7 +31,7 @@ DispatchError
 RuntimeDispatchErrorKind
 ```
 
-`ironclaw_dispatcher` implements that neutral port. Higher-level workflow crates such as `ironclaw_capabilities` depend on `ironclaw_host_api`, not on the concrete dispatcher crate in production code.
+`t3claw_dispatcher` implements that neutral port. Higher-level workflow crates such as `t3claw_capabilities` depend on `t3claw_host_api`, not on the concrete dispatcher crate in production code.
 
 ---
 
@@ -66,7 +66,7 @@ RuntimeDispatcher::from_arcs(registry, root_filesystem, resource_governor)
 
 The owned form keeps dispatcher composition-only while allowing `DispatchProcessExecutor` to run capability-backed processes without leaking borrowed app state into a spawned task.
 
-`ExtensionRegistry` remains the authority for what can run. Runtime adapter owners remain the authority for how a lane runs. The concrete WASM, Script, and MCP adapters now live in `ironclaw_host_runtime`, so `ironclaw_dispatcher` no longer has normal dependencies on `ironclaw_wasm`, `ironclaw_scripts`, or `ironclaw_mcp`.
+`ExtensionRegistry` remains the authority for what can run. Runtime adapter owners remain the authority for how a lane runs. The concrete WASM, Script, and MCP adapters now live in `t3claw_host_runtime`, so `t3claw_dispatcher` no longer has normal dependencies on `t3claw_wasm`, `t3claw_scripts`, or `t3claw_mcp`.
 
 ---
 
@@ -109,9 +109,9 @@ V1 routes any `RuntimeKind` through a registered adapter:
 
 | Runtime kind | Dispatch behavior |
 | --- | --- |
-| `Wasm` | Executes through a configured WASM adapter, usually composed by `ironclaw_host_runtime` |
-| `Script` | Executes through a configured Script adapter, usually composed by `ironclaw_host_runtime` |
-| `Mcp` | Executes through a configured MCP adapter, usually composed by `ironclaw_host_runtime` |
+| `Wasm` | Executes through a configured WASM adapter, usually composed by `t3claw_host_runtime` |
+| `Script` | Executes through a configured Script adapter, usually composed by `t3claw_host_runtime` |
+| `Mcp` | Executes through a configured MCP adapter, usually composed by `t3claw_host_runtime` |
 | `FirstParty` | Requires a registered host-service adapter |
 | `System` | Requires a registered system-service adapter |
 
@@ -200,6 +200,6 @@ These tests are intentionally caller-level: they drive `RuntimeDispatcher::dispa
 
 WASM, Script, and MCP are all first-class V1 runtime lanes.
 
-`ironclaw_dispatcher` still remains an already-authorized router only. It must not take dependencies on authorization, approvals, run-state, memory, secrets, network workflow, process lifecycle, or concrete host-runtime composition. Runtime lanes are registered through `RuntimeAdapter`.
+`t3claw_dispatcher` still remains an already-authorized router only. It must not take dependencies on authorization, approvals, run-state, memory, secrets, network workflow, process lifecycle, or concrete host-runtime composition. Runtime lanes are registered through `RuntimeAdapter`.
 
 Because Script and MCP are first-class, their adapters must satisfy the same redaction, resource, process, event, and network-enforcement contracts as WASM. If a required obligation cannot be enforced for a lane, that invocation fails closed before dispatch.

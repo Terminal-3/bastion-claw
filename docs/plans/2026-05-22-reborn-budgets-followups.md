@@ -51,20 +51,20 @@ The biggest leverage in the smallest diff. The field already exists on
 defaults to `NoOpBudgetAccountant`, which means daily USD caps never
 actually fire in prod. This PR:
 
-1. Build a `GovernorBackedAccountant` in `crates/ironclaw_reborn_composition/src/lib.rs` (production composition) using:
+1. Build a `GovernorBackedAccountant` in `crates/t3claw_reborn_composition/src/lib.rs` (production composition) using:
    - the already-built `PersistentResourceGovernor` (`resource_store` /
      `governor` at lib.rs:370-371);
    - the `BudgetDefaults` resolved from
-     `ironclaw_reborn_config::BudgetDefaults`;
+     `t3claw_reborn_config::BudgetDefaults`;
    - a `ZeroCostTable` for now (until a cost table per provider lands —
      deferred).
 2. Pass the accountant into `RebornLoopDriverHostFactory` via the
    existing `with_model_budget_accountant` builder
-   (`crates/ironclaw_reborn/src/runtime.rs:346-348`).
+   (`crates/t3claw_reborn/src/runtime.rs:346-348`).
 3. Wire the same factory parameter through the
    `RebornRuntimeLoopParts` struct so non-production callers can still
    pass `None` and get `NoOpBudgetAccountant`.
-4. Add a smoke test in `crates/ironclaw_reborn_composition/tests/` that
+4. Add a smoke test in `crates/t3claw_reborn_composition/tests/` that
    builds the production substrate, executes one model call, and
    asserts a non-zero reservation reached the governor.
 
@@ -73,20 +73,20 @@ no-op accountant remains the test default.
 
 ### PR 2 — B1: filesystem-backed `BudgetGateStore`
 
-In-memory only ships today (`crates/ironclaw_resources/src/gate.rs:128`).
+In-memory only ships today (`crates/t3claw_resources/src/gate.rs:128`).
 A restart drops every pending approval gate, forcing users to
 re-request approval. Mirror the existing
 `FilesystemResourceGovernorStore` shape:
 
-- New file `crates/ironclaw_resources/src/filesystem_gate_store.rs`.
+- New file `crates/t3claw_resources/src/filesystem_gate_store.rs`.
 - Generic over `RootFilesystem` like the governor store.
 - Atomic-replace + parent-dir-sync pattern (same as
   `filesystem_store.rs`).
 - One JSON snapshot per scope:
   `/resources/budget-gates/<scope-key>.json`.
-- Wire into `crates/ironclaw_reborn_composition/src/lib.rs` alongside
+- Wire into `crates/t3claw_reborn_composition/src/lib.rs` alongside
   the existing resource store.
-- Contract tests in `crates/ironclaw_resources/tests/` covering open,
+- Contract tests in `crates/t3claw_resources/tests/` covering open,
   resolve, expiry, and reload-after-restart parity with the in-memory
   store.
 
@@ -112,7 +112,7 @@ Approach: a `ReservationGuard` RAII struct that:
   before returning.
 
 This replaces the manual `in_flight.remove` + `release` pair. The
-guard lives in `crates/ironclaw_loop_support/src/budget_accountant.rs`
+guard lives in `crates/t3claw_loop_support/src/budget_accountant.rs`
 (near the in-flight map) so the contract stays in one file.
 
 Acceptance: drop-in regression test that cancels a `stream_model`
@@ -121,10 +121,10 @@ returns to zero within one tokio tick.
 
 ### PR 4 — E1: kill the dead inner accountant
 
-`ThreadBackedLoopModelPort` (`crates/ironclaw_loop_support/src/lib.rs:731-1004`)
+`ThreadBackedLoopModelPort` (`crates/t3claw_loop_support/src/lib.rs:731-1004`)
 carries an `Option<Arc<dyn LoopModelBudgetAccountant>>` and a
 `with_budget_accountant` builder, but the production wiring at
-`crates/ironclaw_reborn/src/loop_driver_host.rs:598-617` never sets
+`crates/t3claw_reborn/src/loop_driver_host.rs:598-617` never sets
 it — accountant work lives in the outer `HostManagedLoopModelPort`.
 This is exactly the "optional Arc that is required in production"
 smell in `.claude/rules/architecture.md` (#2), except inverted: the
@@ -135,14 +135,14 @@ builder, and the dead branches in `stream_model`. Update the inner
 tests to drop the now-unused setup. (Collapsing the two wrappers
 entirely is a larger refactor; not in scope for this follow-up.)
 
-Acceptance: `clippy::dead_code` clean; the `crates/ironclaw_loop_support`
+Acceptance: `clippy::dead_code` clean; the `crates/t3claw_loop_support`
 unit + contract tests still pass; only the outer port runs accountant
 hooks.
 
 ### PR 5 — D1: `CascadeOutcome` carries warnings alongside the terminal verdict
 
 Today `evaluate_cascade_for_account`
-(`crates/ironclaw_resources/src/lib.rs:1716`) short-circuits on the
+(`crates/t3claw_resources/src/lib.rs:1716`) short-circuits on the
 first non-Allow intervention, dropping any warnings accumulated before
 a pause/deny. The Gemini comment and review comments #4 + #6 hit this
 from two directions:
@@ -183,7 +183,7 @@ sink to the gateway.
 Sequence:
 
 1. Plug a real `BudgetEventSink` into the governor in
-   `crates/ironclaw_reborn_composition/src/lib.rs` next to the existing
+   `crates/t3claw_reborn_composition/src/lib.rs` next to the existing
    governor build. Sink writes into a `tokio::sync::broadcast` channel
    keyed by `ResourceScope`.
 2. New projection in `src/bridge/router.rs` consumes the channel and
@@ -193,7 +193,7 @@ Sequence:
 3. Wire-stable enum names: `snake_case` per `.claude/rules/types.md`;
    add an `#[serde(alias = …)]` migration path is not needed (these are
    new variants).
-4. Frontend: subscribe in `crates/ironclaw_gateway/static/js/`; render
+4. Frontend: subscribe in `crates/t3claw_gateway/static/js/`; render
    a banner for warnings, a modal for pause/approval (the modal reuses
    the existing approval-gate UI from #3841 once B1 lands), a toast for
    denied.
@@ -211,13 +211,13 @@ fix: thread the real numbers from each provider response into
 
 Touchpoints:
 
-- `crates/ironclaw_turns/src/run_profile/host.rs:1011-1016` — add
+- `crates/t3claw_turns/src/run_profile/host.rs:1011-1016` — add
   `input_tokens: Option<u64>`, `output_tokens: Option<u64>`,
   `usd: Option<Decimal>` fields to `LoopModelResponse`.
 - All `LoopModelGateway` implementations: have them fill the fields
   when the provider returns them. For providers that don't (NEAR AI
   local, Ollama free), leave `None` and fall back to the estimate.
-- `crates/ironclaw_loop_support/src/budget_accountant.rs::usage_for_response`:
+- `crates/t3claw_loop_support/src/budget_accountant.rs::usage_for_response`:
   prefer response-provided numbers; fall back to estimate only when
   `None`.
 
@@ -236,7 +236,7 @@ spend within provider-reported precision.
 Approach:
 
 1. New file
-   `crates/ironclaw_agent_loop/src/strategies/progress_strategy.rs`
+   `crates/t3claw_agent_loop/src/strategies/progress_strategy.rs`
    (a new strategy axis — see the strategies CLAUDE.md, "one decision
    axis per file"). Implement two sliding-window detectors per the
    `progress.rs` module docs:
@@ -246,14 +246,14 @@ Approach:
    - Repeated-tool-call: deque of recent `(CapabilityId, ParamHash)`;
      `repeat_threshold` identical entries in a row → `StuckLoop`.
 2. Add a typed state slot for the deque + delta history under
-   `crates/ironclaw_agent_loop/src/state/`.
+   `crates/t3claw_agent_loop/src/state/`.
 3. Compose into the default planner
-   (`crates/ironclaw_agent_loop/src/default_planner.rs`). The strategy
+   (`crates/t3claw_agent_loop/src/default_planner.rs`). The strategy
    produces a typed `LoopExit::StuckNoProgress` /
    `LoopExit::StuckLoop` — both already exist in
-   `crates/ironclaw_turns::loop_exit` since #3841.
+   `crates/t3claw_turns::loop_exit` since #3841.
 4. New family-level integration test in
-   `crates/ironclaw_agent_loop/tests/`.
+   `crates/t3claw_agent_loop/tests/`.
 
 Acceptance: a stub family that calls the same tool with the same
 normalized args three times exits as `StuckLoop`; one that produces
@@ -305,22 +305,22 @@ contract in:
 
 | # | Test(s) |
 |---|------|
-| C2 | `ironclaw_loop_support::budget_accountant::tests::post_model_call_reconciles_provider_usage_when_response_threads_real_tokens` + e2e `c1_provider_tokens_reconcile_to_actual_usd` |
-| D1 | `ironclaw_resources::tests::limit_exceeded_carries_warnings_from_other_dimensions` + e2e `d1_agent_deny_preserves_user_warn_event` |
-| C1 | `ironclaw_loop_support::budget_accountant::tests::release_in_flight_drains_orphan_reservation_on_cancellation` |
+| C2 | `t3claw_loop_support::budget_accountant::tests::post_model_call_reconciles_provider_usage_when_response_threads_real_tokens` + e2e `c1_provider_tokens_reconcile_to_actual_usd` |
+| D1 | `t3claw_resources::tests::limit_exceeded_carries_warnings_from_other_dimensions` + e2e `d1_agent_deny_preserves_user_warn_event` |
+| C1 | `t3claw_loop_support::budget_accountant::tests::release_in_flight_drains_orphan_reservation_on_cancellation` |
 | E1 | Covered by removing the dead field + 14 pre-existing accountant tests; `clippy::dead_code` clean. |
-| Cost table | `ironclaw_reborn::model_gateway::LlmModelProfilePolicy::build_cost_table` exercised by the A1 wiring + e2e `c2_unknown_model_in_cost_table_uses_default_cost_fallback`. |
-| B1 | `ironclaw_resources::filesystem_gate_store::tests::pending_gate_survives_restart_via_fresh_handle` + `list_pending_does_not_leak_across_tenants` + `terminal_gates_older_than_retention_are_pruned_on_next_write` (review feedback High #1 + Medium #7). |
-| A1 | `ironclaw_reborn_composition::factory` exposes `local_runtime.{resource_governor, budget_event_sink, budget_gate_store, broadcast_budget_event_sink}`; production-shape helper `build_default_budget_accountant` wires the seeding policy + overestimate factor + gate store; unit test `seeds_compiled_default_user_cap_on_first_touch` + e2e `d3_seeding_policy_installs_default_cap_on_first_touch`. |
-| A2 | `ironclaw_resources::tests::governor_emits_budget_events_through_event_sink` + composition e2e `broadcast_sink_publishes_events_to_subscribers` + bridge unit tests (`account_label_handles_every_cascade_level`, `sse_user_id_resolves_for_user_scoped_events`, `sse_user_id_is_none_for_tenant_scoped_events`, `budget_event_to_app_event_warn_carries_dimension_and_utilization`). The SSE projection ships under `src/bridge/budget_events.rs::spawn_budget_event_projection`; the binary spawns the task against `RebornRuntime::broadcast_budget_event_sink()` at startup. |
-| F1 | `ironclaw_agent_loop::state::signature::tests::capability_call_signature_collapses_calls_that_differ_only_by_request_id` + `…_embedded_uuid`; `strategies::stop::tests::default_stop_condition_strategy::four_consecutive_low_token_turns_trigger_no_progress` + `occasional_low_token_turn_does_not_trip_no_progress`. Executor now populates `LoopExecutionState.recent_output_token_counts` from `LoopModelResponse::usage` after every turn; the default stop strategy reads it for the diminishing-returns escape (`StopKind::NoProgressDetected`). |
-| 13 e2e | `crates/ironclaw_reborn_composition/tests/budget_e2e.rs` + `budget_approval_e2e.rs` cover F1, F2, F3, F4, F5, F6, C1, C2, C3, D1, D3, scripted multi-turn, broadcast subscription. F7 is covered by the unit-level cancellation test; D2 by the existing rolling-24h snapshot anchor test. B-series (background ticks) await G1's scheduler. |
+| Cost table | `t3claw_reborn::model_gateway::LlmModelProfilePolicy::build_cost_table` exercised by the A1 wiring + e2e `c2_unknown_model_in_cost_table_uses_default_cost_fallback`. |
+| B1 | `t3claw_resources::filesystem_gate_store::tests::pending_gate_survives_restart_via_fresh_handle` + `list_pending_does_not_leak_across_tenants` + `terminal_gates_older_than_retention_are_pruned_on_next_write` (review feedback High #1 + Medium #7). |
+| A1 | `t3claw_reborn_composition::factory` exposes `local_runtime.{resource_governor, budget_event_sink, budget_gate_store, broadcast_budget_event_sink}`; production-shape helper `build_default_budget_accountant` wires the seeding policy + overestimate factor + gate store; unit test `seeds_compiled_default_user_cap_on_first_touch` + e2e `d3_seeding_policy_installs_default_cap_on_first_touch`. |
+| A2 | `t3claw_resources::tests::governor_emits_budget_events_through_event_sink` + composition e2e `broadcast_sink_publishes_events_to_subscribers` + bridge unit tests (`account_label_handles_every_cascade_level`, `sse_user_id_resolves_for_user_scoped_events`, `sse_user_id_is_none_for_tenant_scoped_events`, `budget_event_to_app_event_warn_carries_dimension_and_utilization`). The SSE projection ships under `src/bridge/budget_events.rs::spawn_budget_event_projection`; the binary spawns the task against `RebornRuntime::broadcast_budget_event_sink()` at startup. |
+| F1 | `t3claw_agent_loop::state::signature::tests::capability_call_signature_collapses_calls_that_differ_only_by_request_id` + `…_embedded_uuid`; `strategies::stop::tests::default_stop_condition_strategy::four_consecutive_low_token_turns_trigger_no_progress` + `occasional_low_token_turn_does_not_trip_no_progress`. Executor now populates `LoopExecutionState.recent_output_token_counts` from `LoopModelResponse::usage` after every turn; the default stop strategy reads it for the diminishing-returns escape (`StopKind::NoProgressDetected`). |
+| 13 e2e | `crates/t3claw_reborn_composition/tests/budget_e2e.rs` + `budget_approval_e2e.rs` cover F1, F2, F3, F4, F5, F6, C1, C2, C3, D1, D3, scripted multi-turn, broadcast subscription. F7 is covered by the unit-level cancellation test; D2 by the existing rolling-24h snapshot anchor test. B-series (background ticks) await G1's scheduler. |
 
 Two pre-existing test failures are deliberately not in this list: the
-legacy `ironclaw cli::completion::tests::test_run_generates_output`
+legacy `t3claw cli::completion::tests::test_run_generates_output`
 debug-build stack overflow (passes with `RUST_MIN_STACK=16777216`, present
 on `main`), and the `parameters_schema` fixture parse error in
-`ironclaw_capabilities` / `ironclaw_reborn` / `ironclaw_processes`
+`t3claw_capabilities` / `t3claw_reborn` / `t3claw_processes`
 test data (present on `main`). Neither shares a code path with this work.
 
 ### Review-feedback fixes layered on top

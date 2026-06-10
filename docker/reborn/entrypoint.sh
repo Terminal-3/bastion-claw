@@ -22,43 +22,43 @@ if [ -n "${RAILWAY_VOLUME_MOUNT_PATH:-}" ]; then
   fi
 fi
 
-if [ -n "${IRONCLAW_REBORN_HOME:-}" ]; then
-  IRONCLAW_REBORN_HOME="${IRONCLAW_REBORN_HOME%/}"
+if [ -n "${T3CLAW_REBORN_HOME:-}" ]; then
+  T3CLAW_REBORN_HOME="${T3CLAW_REBORN_HOME%/}"
 elif [ -n "$railway_volume_mount" ]; then
   case "$railway_volume_mount" in
-    */ironclaw-reborn) IRONCLAW_REBORN_HOME="$railway_volume_mount" ;;
-    *) IRONCLAW_REBORN_HOME="$railway_volume_mount/ironclaw-reborn" ;;
+    */t3claw-reborn) T3CLAW_REBORN_HOME="$railway_volume_mount" ;;
+    *) T3CLAW_REBORN_HOME="$railway_volume_mount/t3claw-reborn" ;;
   esac
 else
-  IRONCLAW_REBORN_HOME="/data/ironclaw-reborn"
+  T3CLAW_REBORN_HOME="/data/t3claw-reborn"
 fi
-export IRONCLAW_REBORN_HOME
-if [ -n "${IRONCLAW_REBORN_DEFAULT_CONFIG:-}" ]; then
-  default_config="$IRONCLAW_REBORN_DEFAULT_CONFIG"
-elif [ "${IRONCLAW_REBORN_PROFILE:-}" = "production" ] || [ "${IRONCLAW_REBORN_PROFILE:-}" = "migration-dry-run" ]; then
-  default_config="/opt/ironclaw/reborn/config.production.toml"
+export T3CLAW_REBORN_HOME
+if [ -n "${T3CLAW_REBORN_DEFAULT_CONFIG:-}" ]; then
+  default_config="$T3CLAW_REBORN_DEFAULT_CONFIG"
+elif [ "${T3CLAW_REBORN_PROFILE:-}" = "production" ] || [ "${T3CLAW_REBORN_PROFILE:-}" = "migration-dry-run" ]; then
+  default_config="/opt/t3claw/reborn/config.production.toml"
 else
-  default_config="/opt/ironclaw/reborn/config.toml"
+  default_config="/opt/t3claw/reborn/config.toml"
 fi
-config_path="$IRONCLAW_REBORN_HOME/config.toml"
+config_path="$T3CLAW_REBORN_HOME/config.toml"
 
 case "$default_config" in
-  /opt/ironclaw/*) ;;
+  /opt/t3claw/*) ;;
   *)
-    echo "IRONCLAW_REBORN_DEFAULT_CONFIG must be under /opt/ironclaw: $default_config" >&2
+    echo "T3CLAW_REBORN_DEFAULT_CONFIG must be under /opt/t3claw: $default_config" >&2
     exit 1
     ;;
 esac
 
 case "$default_config" in
   *"/../"*|*"/.."|*"../"*|*"/."|*"/./"*)
-    echo "IRONCLAW_REBORN_DEFAULT_CONFIG must not contain relative path segments: $default_config" >&2
+    echo "T3CLAW_REBORN_DEFAULT_CONFIG must not contain relative path segments: $default_config" >&2
     exit 1
     ;;
 esac
 
 if [ ! -f "$config_path" ]; then
-  mkdir -p "$IRONCLAW_REBORN_HOME"
+  mkdir -p "$T3CLAW_REBORN_HOME"
   tmp_config="${config_path}.tmp.$$"
   trap 'rm -f "$tmp_config"' EXIT HUP INT TERM
   cp "$default_config" "$tmp_config"
@@ -70,7 +70,7 @@ if [ ! -f "$config_path" ]; then
   trap - EXIT HUP INT TERM
 fi
 
-effective_profile="${IRONCLAW_REBORN_PROFILE:-}"
+effective_profile="${T3CLAW_REBORN_PROFILE:-}"
 if [ -z "$effective_profile" ]; then
   effective_profile="$(sed -n 's/^[[:space:]]*profile[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$config_path" | sed -n '1p')"
 fi
@@ -83,7 +83,7 @@ case "$effective_profile" in
     if ! grep -q '^[[:space:]]*\[storage\][[:space:]]*$' "$config_path" \
       || ! grep -q '^[[:space:]]*\[policy\][[:space:]]*$' "$config_path"
     then
-      echo "IRONCLAW_REBORN_PROFILE=$effective_profile requires $config_path to contain [storage] and [policy]." >&2
+      echo "T3CLAW_REBORN_PROFILE=$effective_profile requires $config_path to contain [storage] and [policy]." >&2
       echo "The existing config looks like a stale local-dev seed; remove it to let the entrypoint install $default_config, or migrate it manually." >&2
       exit 1
     fi
@@ -91,21 +91,21 @@ case "$effective_profile" in
 esac
 
 if railway_runtime_detected \
-  && ! is_truthy "${IRONCLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY:-}"
+  && ! is_truthy "${T3CLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY:-}"
 then
   case "$effective_profile" in
     local-dev|local-dev-yolo)
       if [ -z "$railway_volume_mount" ]; then
-        echo "Railway deployment using profile=$effective_profile requires a persistent volume for IRONCLAW_REBORN_HOME=$IRONCLAW_REBORN_HOME." >&2
-        echo "Attach a Railway volume mounted at /data (or set IRONCLAW_REBORN_HOME under RAILWAY_VOLUME_MOUNT_PATH)." >&2
-        echo "Set IRONCLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY=true only for disposable test deployments." >&2
+        echo "Railway deployment using profile=$effective_profile requires a persistent volume for T3CLAW_REBORN_HOME=$T3CLAW_REBORN_HOME." >&2
+        echo "Attach a Railway volume mounted at /data (or set T3CLAW_REBORN_HOME under RAILWAY_VOLUME_MOUNT_PATH)." >&2
+        echo "Set T3CLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY=true only for disposable test deployments." >&2
         exit 1
       fi
-      case "$IRONCLAW_REBORN_HOME" in
+      case "$T3CLAW_REBORN_HOME" in
         "$railway_volume_mount"|"$railway_volume_mount"/*) ;;
         *)
-          echo "Railway deployment using profile=$effective_profile requires IRONCLAW_REBORN_HOME=$IRONCLAW_REBORN_HOME to be under RAILWAY_VOLUME_MOUNT_PATH=$railway_volume_mount." >&2
-          echo "Unset IRONCLAW_REBORN_HOME to use $railway_volume_mount/ironclaw-reborn, or set IRONCLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY=true only for disposable tests." >&2
+          echo "Railway deployment using profile=$effective_profile requires T3CLAW_REBORN_HOME=$T3CLAW_REBORN_HOME to be under RAILWAY_VOLUME_MOUNT_PATH=$railway_volume_mount." >&2
+          echo "Unset T3CLAW_REBORN_HOME to use $railway_volume_mount/t3claw-reborn, or set T3CLAW_REBORN_ALLOW_EPHEMERAL_RAILWAY=true only for disposable tests." >&2
           exit 1
           ;;
       esac
@@ -113,15 +113,15 @@ then
   esac
 fi
 
-host="${IRONCLAW_REBORN_SERVE_HOST:-127.0.0.1}"
-port="${PORT:-${IRONCLAW_REBORN_SERVE_PORT:-3000}}"
+host="${T3CLAW_REBORN_SERVE_HOST:-127.0.0.1}"
+port="${PORT:-${T3CLAW_REBORN_SERVE_PORT:-3000}}"
 
 resolve_env_placeholder_arg() {
   case "$1" in
-    '$IRONCLAW_REBORN_SERVE_HOST'|'${IRONCLAW_REBORN_SERVE_HOST}')
+    '$T3CLAW_REBORN_SERVE_HOST'|'${T3CLAW_REBORN_SERVE_HOST}')
       printf '%s\n' "$host"
       ;;
-    '$PORT'|'${PORT}'|'$IRONCLAW_REBORN_SERVE_PORT'|'${IRONCLAW_REBORN_SERVE_PORT}')
+    '$PORT'|'${PORT}'|'$T3CLAW_REBORN_SERVE_PORT'|'${T3CLAW_REBORN_SERVE_PORT}')
       printf '%s\n' "$port"
       ;;
     *)
@@ -138,13 +138,13 @@ if [ "$#" -gt 0 ]; then
     original_arg_count=$((original_arg_count - 1))
     set -- "$@" "$arg"
   done
-  exec ironclaw-reborn "$@"
+  exec t3claw-reborn "$@"
 fi
 
 set -- serve --host "$host" --port "$port"
 
-if is_truthy "${IRONCLAW_REBORN_CONFIRM_HOST_ACCESS:-}"; then
+if is_truthy "${T3CLAW_REBORN_CONFIRM_HOST_ACCESS:-}"; then
   set -- "$@" --confirm-host-access
 fi
 
-exec ironclaw-reborn "$@"
+exec t3claw-reborn "$@"

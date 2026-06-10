@@ -25,7 +25,7 @@ use crate::db::Database;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::tool::{ToolError, ToolOutput};
 use crate::tools::{prepare_tool_params, redact_params};
-use ironclaw_safety::SafetyLayer;
+use t3claw_safety::SafetyLayer;
 
 /// Identifies where a tool dispatch originated.
 ///
@@ -285,8 +285,8 @@ mod integration_tests {
     use crate::db::libsql::LibSqlBackend;
     use crate::tools::tool::{Tool, ToolError, ToolOutput};
     use async_trait::async_trait;
-    use ironclaw_safety::SafetyLayer;
     use std::time::Duration;
+    use t3claw_safety::SafetyLayer;
 
     // ── Stub tools ──────────────────────────────────────────
 
@@ -652,7 +652,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn dispatch_memory_write_blocks_protected_path_when_self_modify_disabled() {
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 
@@ -685,7 +685,7 @@ mod integration_tests {
         // aliases (`orchestrator:*`). Writing directly to the physical
         // workspace path skipped the gate. After the fix, this must be
         // rejected even when self-modify is off.
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 
@@ -712,7 +712,7 @@ mod integration_tests {
         // Reviewer-flagged critical: `engine/./orchestrator/v3.py` resolves
         // to the protected location but the raw `starts_with` check missed
         // it. Normalization must collapse the dot segment before matching.
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 
@@ -736,7 +736,7 @@ mod integration_tests {
 
     #[tokio::test]
     async fn dispatch_memory_write_blocks_double_slash_bypass() {
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 
@@ -763,7 +763,7 @@ mod integration_tests {
         // Reviewer-flagged critical: `engine/knowledge/../orchestrator/v3.py`
         // resolves to the protected location. Normalization rejects the path
         // outright; execute() returns InvalidParameters before the write.
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 
@@ -794,7 +794,7 @@ mod integration_tests {
     async fn dispatch_memory_write_unprotected_path_succeeds() {
         // Sanity: a non-protected target must still flow through dispatch
         // unblocked. If this fails, the guard is over-eager.
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (dispatcher, _backend, _db, _registry, _ws, _dir) =
             dispatcher_with_memory_write().await;
 

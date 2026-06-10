@@ -8,11 +8,11 @@ Calendar prep → Telegram, etc.).
 Architecture mirrors auth-live-canary's runner:
 
 - Reuses ``scripts.live_canary.common.start_gateway_stack`` for the
-  bulk of the work (mock LLM + ironclaw subprocess + drainer threads
+  bulk of the work (mock LLM + t3claw subprocess + drainer threads
   + LLM settings pin via API).
 - Adds a Telegram Bot API mock subprocess (``telegram_mock.py``) and
-  routes IronClaw's outbound calls to it via
-  ``IRONCLAW_TEST_HTTP_REMAP=api.telegram.org=<mock_url>`` so each
+  routes T3Claw's outbound calls to it via
+  ``T3CLAW_TEST_HTTP_REMAP=api.telegram.org=<mock_url>`` so each
   scenario can verify Telegram side-effects without a real bot token.
 
 CLI shape matches ``run_live_canary.py`` so the same lane wrapper
@@ -379,7 +379,7 @@ async def _run_scenarios(
     ]
 
     try:
-        # Comma-separate IRONCLAW_TEST_HTTP_REMAP entries so IronClaw's
+        # Comma-separate T3CLAW_TEST_HTTP_REMAP entries so T3Claw's
         # HostRemapHttpInterceptor builds a multi-host map. Order
         # doesn't matter for the parser — `host=base_url` pairs split on
         # commas. See src/http_intercept.rs:88-118.
@@ -396,19 +396,19 @@ async def _run_scenarios(
         stack = await start_gateway_stack(
             venv_dir=args.venv,
             owner_user_id="workflow-canary-owner",
-            temp_prefix="ironclaw-workflow-canary",
+            temp_prefix="t3claw-workflow-canary",
             gateway_token_prefix="workflow-canary",
             extra_gateway_env={
-                "IRONCLAW_TEST_HTTP_REMAP": remap,
+                "T3CLAW_TEST_HTTP_REMAP": remap,
                 "ROUTINES_ENABLED": "true",
                 "ROUTINES_CRON_INTERVAL": "2",
                 "ROUTINES_DEFAULT_COOLDOWN": "0",
                 # Routes the hardcoded validate_telegram_bot_token getMe
                 # call (in src/extensions/manager.rs) to mock_telegram.
                 # That getMe path bypasses the standard
-                # IRONCLAW_TEST_HTTP_REMAP because it doesn't go through
+                # T3CLAW_TEST_HTTP_REMAP because it doesn't go through
                 # the http_interceptor pipeline.
-                "IRONCLAW_TEST_TELEGRAM_API_BASE_URL": mock_telegram_url,
+                "T3CLAW_TEST_TELEGRAM_API_BASE_URL": mock_telegram_url,
             },
             log_dir=log_dir,
         )

@@ -13,7 +13,7 @@ Phase 3 coverage (this scenario):
 2. Insert a Lightweight cron routine whose prompt carries
    ``[CANARY-WORKFLOW-HN-FETCH]``.
 3. Mock LLM emits a parallel triplet (well, pair): http GET /newest
-   + http POST sendMessage. ``IRONCLAW_TEST_HTTP_REMAP`` routes
+   + http POST sendMessage. ``T3CLAW_TEST_HTTP_REMAP`` routes
    ``news.ycombinator.com`` → ``hn_mock``, ``api.telegram.org`` →
    ``telegram_mock``.
 4. Assert (a) hn_mock /__mock/captured saw the GET /newest fetch,

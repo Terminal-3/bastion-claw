@@ -1,6 +1,6 @@
 # Live Auth Canary
 
-This runner starts a fresh local IronClaw instance, seeds real provider
+This runner starts a fresh local T3Claw instance, seeds real provider
 credentials into a clean database, and verifies provider-backed auth through:
 
 Use [scripts/live-canary/run.sh](../live-canary/run.sh)
@@ -77,7 +77,7 @@ python3 scripts/auth_live_canary/bootstrap_google_storage_state.py
 # log into the dedicated test Google account in the window that opens,
 # solve any challenges, then press Enter
 
-export AUTH_BROWSER_GOOGLE_STORAGE_STATE_PATH=~/.ironclaw/auth-canary/google_storage_state.json
+export AUTH_BROWSER_GOOGLE_STORAGE_STATE_PATH=~/.t3claw/auth-canary/google_storage_state.json
 unset AUTH_BROWSER_GOOGLE_USERNAME AUTH_BROWSER_GOOGLE_PASSWORD
 ```
 
@@ -132,7 +132,7 @@ Browser failures also write screenshots into the same output directory.
 This is the practical high-frequency live canary.
 
 It does **not** automate the provider login UI on every run. Instead it seeds
-known-good test credentials into a fresh local IronClaw instance and then
+known-good test credentials into a fresh local T3Claw instance and then
 verifies that the runtime can still use and refresh them. That is the right
 shape for hourly checks because it catches:
 

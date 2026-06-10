@@ -10,7 +10,7 @@
 //! `test_gateway_state_with_store_and_session_manager` — are scoped to unit
 //! tests and are individually gated with `#[cfg(test)]`. They previously
 //! lived inside `server.rs::tests` where they were unreachable from other
-//! slice test modules; promoting them here (ironclaw#2599 stage-6
+//! slice test modules; promoting them here (t3claw#2599 stage-6
 //! prerequisite) lets caller-level tests migrate out of `server.rs::tests`
 //! and into the feature slice they actually exercise (chat, oauth, pairing,
 //! extensions).
@@ -45,7 +45,7 @@ use crate::tools::ToolRegistry;
 /// [`start`](Self::start) to also bind an Axum server on a random port.
 pub struct TestGatewayBuilder {
     msg_tx: Option<mpsc::Sender<IncomingMessage>>,
-    llm_provider: Option<Arc<dyn ironclaw_llm::LlmProvider>>,
+    llm_provider: Option<Arc<dyn t3claw_llm::LlmProvider>>,
     user_id: String,
     tool_registry: Option<Arc<crate::tools::ToolRegistry>>,
 }
@@ -75,7 +75,7 @@ impl TestGatewayBuilder {
     }
 
     /// Set the LLM provider (needed for OpenAI-compatible API tests).
-    pub fn llm_provider(mut self, provider: Arc<dyn ironclaw_llm::LlmProvider>) -> Self {
+    pub fn llm_provider(mut self, provider: Arc<dyn t3claw_llm::LlmProvider>) -> Self {
         self.llm_provider = Some(provider);
         self
     }
@@ -180,7 +180,7 @@ impl TestGatewayBuilder {
 
 // ---------------------------------------------------------------------------
 // Cross-slice positional builders used by unit tests in `server.rs::tests`
-// and (per the ironclaw#2599 stage-6 plan) the chat / extensions / oauth /
+// and (per the t3claw#2599 stage-6 plan) the chat / extensions / oauth /
 // pairing slice test modules. Kept as `pub(crate)` free functions with
 // the same positional signatures they had when they lived in
 // `server.rs::tests`, so call sites migrate in later PRs without touching
@@ -392,7 +392,7 @@ pub(crate) async fn test_ext_mgr_with_db() -> (
     let (db, db_dir) = crate::testing::test_db().await;
 
     // Pre-seed an empty servers list so the DB-backed loader does not
-    // fall back to `~/.ironclaw/mcp-servers.json` on dev machines.
+    // fall back to `~/.t3claw/mcp-servers.json` on dev machines.
     let empty_servers = crate::tools::mcp::config::McpServersFile::default();
     crate::tools::mcp::config::save_mcp_servers_to_db(db.as_ref(), "test", &empty_servers)
         .await

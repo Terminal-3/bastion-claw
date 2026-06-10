@@ -23,7 +23,7 @@
 //!
 //! Run live (records a trace fixture):
 //! ```bash
-//! IRONCLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_routine -- --ignored
+//! T3CLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_routine -- --ignored
 //! ```
 //!
 //! Replay (deterministic, after a fixture has been recorded):
@@ -60,7 +60,7 @@ mod live_routine_tests {
 
     /// The exact orchestrator failure string the bug reproduces. If this
     /// substring appears anywhere in the captured responses, the regression
-    /// is back. Source: `crates/ironclaw_engine/orchestrator/default.py:1003`.
+    /// is back. Source: `crates/t3claw_engine/orchestrator/default.py:1003`.
     const CONSECUTIVE_ERRORS_MARKER: &str = "consecutive code errors";
 
     fn init_tracing() {
@@ -407,7 +407,7 @@ mod live_routine_tests {
         // run that proved the #2583 fix landed) engine v2 currently runs
         // these administrative tools without firing a gate — the
         // `AUTONOMOUS_TOOL_DENYLIST` classification in
-        // `crates/ironclaw_engine/src/gate/tool_tier.rs` does not appear
+        // `crates/t3claw_engine/src/gate/tool_tier.rs` does not appear
         // to trigger an `ApprovalNeeded` emission on the channel side.
         //
         // That's a real concern (administrative tools running unprompted

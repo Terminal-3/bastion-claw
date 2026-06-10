@@ -1,7 +1,7 @@
 // Telegram API types have fields reserved for future use (entities, reply threading, etc.)
 #![allow(dead_code)]
 
-//! Telegram Bot API channel for IronClaw.
+//! Telegram Bot API channel for T3Claw.
 //!
 //! This WASM component implements the channel interface for handling Telegram
 //! webhooks and sending messages back via the Bot API.
@@ -1273,7 +1273,7 @@ fn send_multipart_upload(
 ) -> Result<(), String> {
     let message_thread_id = normalize_thread_id(message_thread_id);
 
-    let boundary = format!("ironclaw-{}", channel_host::now_millis());
+    let boundary = format!("t3claw-{}", channel_host::now_millis());
     let mut body = Vec::new();
 
     write_multipart_field(&mut body, &boundary, "chat_id", &chat_id.to_string());
@@ -1826,8 +1826,8 @@ fn register_webhook(tunnel_url: &str, webhook_secret: Option<&str>) -> Result<()
 
 /// Send a pairing code message to a chat. Used when an unknown user DMs the bot.
 fn send_pairing_reply(chat_id: i64, code: &str) -> Result<(), String> {
-    // The reply must name the IronClaw surface explicitly. An earlier wording
-    // ("Enter this code in IronClaw…") was ambiguous: users naturally pasted
+    // The reply must name the T3Claw surface explicitly. An earlier wording
+    // ("Enter this code in T3Claw…") was ambiguous: users naturally pasted
     // the code into their TUI/CLI chat, where there was no handler for it.
     // The agent now also accepts `approve telegram <code>` typed in any chat
     // surface, so we surface that path alongside the web/CLI options.
@@ -1836,15 +1836,15 @@ fn send_pairing_reply(chat_id: i64, code: &str) -> Result<(), String> {
     // is by definition unpaired, so their DMs are intercepted by the
     // allowlist gate in `handle_message` *before* the agent parser ever
     // sees `approve telegram <code>`. They'd just get another pairing
-    // reply. Pairing approval requires an already-authenticated IronClaw
+    // reply. Pairing approval requires an already-authenticated T3Claw
     // surface (web / TUI / CLI). Reference: PR review on #3381.
     send_message(
         chat_id,
         &format!(
-            "Pair this Telegram account with IronClaw using one of:\n\
+            "Pair this Telegram account with T3Claw using one of:\n\
              • Web: Settings → Channels → Telegram → paste `{code}`\n\
-             • Any signed-in IronClaw chat (TUI / web): type `approve telegram {code}`\n\
-             • Terminal: `ironclaw pairing approve telegram {code}`",
+             • Any signed-in T3Claw chat (TUI / web): type `approve telegram {code}`\n\
+             • Terminal: `t3claw pairing approve telegram {code}`",
         ),
         None,
         Some("Markdown"),

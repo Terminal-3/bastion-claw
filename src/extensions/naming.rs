@@ -1,4 +1,4 @@
-use ironclaw_common::ExtensionName;
+use t3claw_common::ExtensionName;
 
 use crate::extensions::ExtensionError;
 

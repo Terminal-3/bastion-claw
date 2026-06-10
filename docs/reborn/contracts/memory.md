@@ -2,14 +2,14 @@
 
 **Status:** Contract-freeze draft
 **Date:** 2026-04-25
-**Target crate:** `crates/ironclaw_memory` plus service composition crates
+**Target crate:** `crates/t3claw_memory` plus service composition crates
 **Depends on:** [`host-api.md`](host-api.md), [`filesystem.md`](filesystem.md), [`storage-placement.md`](storage-placement.md), [`network.md`](network.md), [`secrets.md`](secrets.md), [`events-projections.md`](events-projections.md)
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_memory` owns durable memory/workspace document semantics for Reborn.
+`t3claw_memory` owns durable memory/workspace document semantics for Reborn.
 
 It is responsible for:
 
@@ -370,7 +370,7 @@ Rules:
 - chunk replacement is transactional per document;
 - stale index replacement is skipped if document content changed during embedding;
 - embedding provider failures during write-time indexing should not corrupt stored document content;
-- production provider HTTP must go through `ironclaw_network`;
+- production provider HTTP must go through `t3claw_network`;
 - provider credentials must be resolved through secret leases, not direct env leakage, unless the provider contract explicitly marks local no-secret operation.
 
 Backfill contract:
@@ -449,6 +449,6 @@ Delegated memory work must include relevant tests from this list:
 - schema validation rejects before persistence;
 - stale index replacement is skipped on concurrent content changes;
 - full-text/vector/hybrid search ordering;
-- provider HTTP path uses `ironclaw_network`;
+- provider HTTP path uses `t3claw_network`;
 - prompt-injected file sanitizer rejection through the service caller;
 - PostgreSQL/libSQL parity for repository behavior.

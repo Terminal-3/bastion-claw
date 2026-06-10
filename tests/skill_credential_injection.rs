@@ -22,15 +22,15 @@ use std::sync::Arc;
 
 use secrecy::SecretString;
 
-use ironclaw::context::JobContext;
-use ironclaw::secrets::{
+use t3claw::context::JobContext;
+use t3claw::secrets::{
     CreateSecretParams, CredentialLocation, CredentialMapping, InMemorySecretsStore, SecretsCrypto,
     SecretsStore,
 };
-use ironclaw::tools::builtin::HttpTool;
-use ironclaw::tools::wasm::SharedCredentialRegistry;
-use ironclaw::tools::{ApprovalRequirement, Tool, ToolError};
-use ironclaw_skills::types::*;
+use t3claw::tools::builtin::HttpTool;
+use t3claw::tools::wasm::SharedCredentialRegistry;
+use t3claw::tools::{ApprovalRequirement, Tool, ToolError};
+use t3claw_skills::types::*;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -50,15 +50,15 @@ fn make_skill(
     name: &str,
     credentials: Vec<SkillCredentialSpec>,
     prompt: &str,
-) -> ironclaw_skills::LoadedSkill {
-    ironclaw_skills::LoadedSkill {
+) -> t3claw_skills::LoadedSkill {
+    t3claw_skills::LoadedSkill {
         manifest: SkillManifest {
             name: name.to_string(),
             version: "1.0.0".to_string(),
             description: format!("{} skill", name),
             activation: ActivationCriteria::default(),
             credentials,
-            requires: ironclaw_skills::GatingRequirements::default(),
+            requires: t3claw_skills::GatingRequirements::default(),
         },
         prompt_content: prompt.to_string(),
         trust: SkillTrust::Trusted,
@@ -283,7 +283,7 @@ fn test_validation_rejects_insecure_and_malformed_specs() {
         }),
         setup_instructions: None,
     };
-    let errors = ironclaw_skills::validate_credential_spec(&spec);
+    let errors = t3claw_skills::validate_credential_spec(&spec);
     assert!(!errors.is_empty());
     assert!(errors.iter().any(|e| e.contains("HTTPS")));
 
@@ -297,7 +297,7 @@ fn test_validation_rejects_insecure_and_malformed_specs() {
         oauth: None,
         setup_instructions: None,
     };
-    let errors = ironclaw_skills::validate_credential_spec(&spec);
+    let errors = t3claw_skills::validate_credential_spec(&spec);
     assert!(errors.iter().any(|e| e.contains("at least one host")));
 
     // Uppercase name
@@ -310,7 +310,7 @@ fn test_validation_rejects_insecure_and_malformed_specs() {
         oauth: None,
         setup_instructions: None,
     };
-    let errors = ironclaw_skills::validate_credential_spec(&spec);
+    let errors = t3claw_skills::validate_credential_spec(&spec);
     assert!(errors.iter().any(|e| e.contains("lowercase")));
 
     // Empty provider
@@ -323,7 +323,7 @@ fn test_validation_rejects_insecure_and_malformed_specs() {
         oauth: None,
         setup_instructions: None,
     };
-    let errors = ironclaw_skills::validate_credential_spec(&spec);
+    let errors = t3claw_skills::validate_credential_spec(&spec);
     assert!(errors.iter().any(|e| e.contains("provider")));
 
     // Multiple errors accumulate
@@ -336,7 +336,7 @@ fn test_validation_rejects_insecure_and_malformed_specs() {
         oauth: None,
         setup_instructions: None,
     };
-    let errors = ironclaw_skills::validate_credential_spec(&spec);
+    let errors = t3claw_skills::validate_credential_spec(&spec);
     assert_eq!(
         errors.len(),
         3,
@@ -378,7 +378,7 @@ fn test_register_skill_credentials_mixed_valid_invalid() {
     );
 
     let registry = SharedCredentialRegistry::new();
-    ironclaw::skills::register_skill_credentials(&[valid_skill, invalid_skill], &registry);
+    t3claw::skills::register_skill_credentials(&[valid_skill, invalid_skill], &registry);
 
     // Valid should be registered
     assert!(registry.has_credentials_for_host("api.weather.com"));
@@ -420,7 +420,7 @@ fn test_multi_skill_credential_registration() {
     let no_creds_skill = make_skill("writing", vec![], "Just a writing skill, no API access.");
 
     let registry = SharedCredentialRegistry::new();
-    ironclaw::skills::register_skill_credentials(
+    t3claw::skills::register_skill_credentials(
         &[github_skill, slack_skill, no_creds_skill],
         &registry,
     );
@@ -444,11 +444,11 @@ fn test_credential_spec_to_mapping_all_location_types() {
         oauth: None,
         setup_instructions: None,
     };
-    let mapping = ironclaw::skills::credential_spec_to_mapping(&spec);
+    let mapping = t3claw::skills::credential_spec_to_mapping(&spec);
     assert_eq!(mapping.secret_name, "token");
     assert!(matches!(
         mapping.location,
-        ironclaw::secrets::CredentialLocation::AuthorizationBearer
+        t3claw::secrets::CredentialLocation::AuthorizationBearer
     ));
     assert_eq!(mapping.host_patterns, vec!["api.test.com"]);
 
@@ -465,9 +465,9 @@ fn test_credential_spec_to_mapping_all_location_types() {
         oauth: None,
         setup_instructions: None,
     };
-    let mapping = ironclaw::skills::credential_spec_to_mapping(&spec);
+    let mapping = t3claw::skills::credential_spec_to_mapping(&spec);
     match &mapping.location {
-        ironclaw::secrets::CredentialLocation::Header { name, prefix } => {
+        t3claw::secrets::CredentialLocation::Header { name, prefix } => {
             assert_eq!(name, "X-API-Key");
             assert_eq!(prefix.as_deref(), Some("Token"));
         }
@@ -487,9 +487,9 @@ fn test_credential_spec_to_mapping_all_location_types() {
         oauth: None,
         setup_instructions: None,
     };
-    let mapping = ironclaw::skills::credential_spec_to_mapping(&spec);
+    let mapping = t3claw::skills::credential_spec_to_mapping(&spec);
     match &mapping.location {
-        ironclaw::secrets::CredentialLocation::AuthorizationBasic { username } => {
+        t3claw::secrets::CredentialLocation::AuthorizationBasic { username } => {
             assert_eq!(username, "admin");
         }
         _ => panic!("expected AuthorizationBasic location"),
@@ -507,9 +507,9 @@ fn test_credential_spec_to_mapping_all_location_types() {
         oauth: None,
         setup_instructions: None,
     };
-    let mapping = ironclaw::skills::credential_spec_to_mapping(&spec);
+    let mapping = t3claw::skills::credential_spec_to_mapping(&spec);
     match &mapping.location {
-        ironclaw::secrets::CredentialLocation::QueryParam { name } => {
+        t3claw::secrets::CredentialLocation::QueryParam { name } => {
             assert_eq!(name, "api_key");
         }
         _ => panic!("expected QueryParam location"),
@@ -589,7 +589,7 @@ async fn test_per_user_credential_isolation() {
 
 /// Complete scenario: parse skill YAML → validate → register → verify HttpTool behavior.
 ///
-/// Simulates what happens when IronClaw discovers skills at startup:
+/// Simulates what happens when T3Claw discovers skills at startup:
 /// 1. Parse frontmatter with credential specs
 /// 2. Validate specs (reject bad ones)
 /// 3. Register valid specs into SharedCredentialRegistry
@@ -622,7 +622,7 @@ credentials:
 
     // Step 2: Validate
     for spec in &manifest.credentials {
-        let errors = ironclaw_skills::validate_credential_spec(spec);
+        let errors = t3claw_skills::validate_credential_spec(spec);
         assert!(
             errors.is_empty(),
             "valid spec should pass validation: {:?}",
@@ -638,7 +638,7 @@ credentials:
     );
 
     let registry = Arc::new(SharedCredentialRegistry::new());
-    ironclaw::skills::register_skill_credentials(&[skill], &registry);
+    t3claw::skills::register_skill_credentials(&[skill], &registry);
 
     // Step 4: Verify registry state
     assert!(registry.has_credentials_for_host("api.github.com"));

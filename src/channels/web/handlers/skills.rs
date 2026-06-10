@@ -18,8 +18,8 @@ use axum::{
 static SKILL_MUTATION_LOCKS: std::sync::LazyLock<
     std::sync::Mutex<HashMap<String, Weak<tokio::sync::Mutex<()>>>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
-static SKILL_CONTENT_SAFETY: std::sync::LazyLock<ironclaw_safety::Sanitizer> =
-    std::sync::LazyLock::new(ironclaw_safety::Sanitizer::new);
+static SKILL_CONTENT_SAFETY: std::sync::LazyLock<t3claw_safety::Sanitizer> =
+    std::sync::LazyLock::new(t3claw_safety::Sanitizer::new);
 const MAX_SKILL_SEARCH_QUERY_BYTES: usize = 1024;
 
 fn install_requested_identifier<'a>(
@@ -33,7 +33,7 @@ fn install_requested_identifier<'a>(
         .unwrap_or(name)
 }
 
-fn skill_setup_hint(skill: &ironclaw_skills::types::LoadedSkill) -> Option<String> {
+fn skill_setup_hint(skill: &t3claw_skills::types::LoadedSkill) -> Option<String> {
     let mut hints = Vec::new();
     if !skill.manifest.requires.env.is_empty() {
         hints.push(format!(
@@ -50,36 +50,36 @@ fn skill_setup_hint(skill: &ironclaw_skills::types::LoadedSkill) -> Option<Strin
     (!hints.is_empty()).then(|| hints.join(" · "))
 }
 
-fn skill_source_kind(source: &ironclaw_skills::types::SkillSource) -> SkillSourceKind {
+fn skill_source_kind(source: &t3claw_skills::types::SkillSource) -> SkillSourceKind {
     match source {
-        ironclaw_skills::types::SkillSource::Workspace(_) => SkillSourceKind::Workspace,
-        ironclaw_skills::types::SkillSource::User(_) => SkillSourceKind::User,
-        ironclaw_skills::types::SkillSource::Installed(_) => SkillSourceKind::Installed,
-        ironclaw_skills::types::SkillSource::Bundled(_) => SkillSourceKind::System,
+        t3claw_skills::types::SkillSource::Workspace(_) => SkillSourceKind::Workspace,
+        t3claw_skills::types::SkillSource::User(_) => SkillSourceKind::User,
+        t3claw_skills::types::SkillSource::Installed(_) => SkillSourceKind::Installed,
+        t3claw_skills::types::SkillSource::Bundled(_) => SkillSourceKind::System,
     }
 }
 
-fn skill_is_user_managed(source: &ironclaw_skills::types::SkillSource) -> bool {
+fn skill_is_user_managed(source: &t3claw_skills::types::SkillSource) -> bool {
     matches!(
         source,
-        ironclaw_skills::types::SkillSource::User(_)
-            | ironclaw_skills::types::SkillSource::Installed(_)
+        t3claw_skills::types::SkillSource::User(_)
+            | t3claw_skills::types::SkillSource::Installed(_)
     )
 }
 
-fn skill_can_delete(source: &ironclaw_skills::types::SkillSource) -> bool {
+fn skill_can_delete(source: &t3claw_skills::types::SkillSource) -> bool {
     matches!(
         source,
-        ironclaw_skills::types::SkillSource::User(_)
-            | ironclaw_skills::types::SkillSource::Installed(_)
+        t3claw_skills::types::SkillSource::User(_)
+            | t3claw_skills::types::SkillSource::Installed(_)
     )
 }
 
 fn skill_registry_error_response(
     status: StatusCode,
-    error: ironclaw_skills::SkillRegistryError,
+    error: t3claw_skills::SkillRegistryError,
 ) -> (StatusCode, String) {
-    use ironclaw_skills::SkillRegistryError;
+    use t3claw_skills::SkillRegistryError;
 
     match error {
         SkillRegistryError::ReadError { .. }
@@ -103,7 +103,7 @@ fn validate_skill_search_query(query: &str) -> Result<(), (StatusCode, String)> 
 }
 
 fn validate_skill_content_safety(content: &str) -> Result<(), (StatusCode, String)> {
-    ironclaw_safety::validate_trusted_trigger_prompt(&*SKILL_CONTENT_SAFETY, content).map_err(
+    t3claw_safety::validate_trusted_trigger_prompt(&*SKILL_CONTENT_SAFETY, content).map_err(
         |error| {
             tracing::warn!(
                 reason = error.reason(),
@@ -147,17 +147,17 @@ async fn skill_mutation_guard(
 }
 
 async fn skill_info(
-    skill: ironclaw_skills::types::LoadedSkill,
+    skill: t3claw_skills::types::LoadedSkill,
     can_manage_skills: bool,
 ) -> SkillInfo {
     let bundle_dir = match &skill.source {
-        ironclaw_skills::types::SkillSource::Workspace(path)
-        | ironclaw_skills::types::SkillSource::User(path)
-        | ironclaw_skills::types::SkillSource::Installed(path)
-        | ironclaw_skills::types::SkillSource::Bundled(path) => Some(path.clone()),
+        t3claw_skills::types::SkillSource::Workspace(path)
+        | t3claw_skills::types::SkillSource::User(path)
+        | t3claw_skills::types::SkillSource::Installed(path)
+        | t3claw_skills::types::SkillSource::Bundled(path) => Some(path.clone()),
     };
     let install_meta = match &bundle_dir {
-        Some(path) => ironclaw_skills::registry::SkillRegistry::read_install_metadata(path).await,
+        Some(path) => t3claw_skills::registry::SkillRegistry::read_install_metadata(path).await,
         None => None,
     };
     let has_requirements = match &bundle_dir {
@@ -200,7 +200,7 @@ async fn skill_info(
 }
 
 async fn skill_infos(
-    skills: Vec<ironclaw_skills::types::LoadedSkill>,
+    skills: Vec<t3claw_skills::types::LoadedSkill>,
     can_manage_skills: bool,
 ) -> Vec<SkillInfo> {
     let mut infos = Vec::with_capacity(skills.len());
@@ -250,7 +250,7 @@ pub async fn skills_search_handler(
         .iter()
         .map(|s| s.manifest.name.clone())
         .collect();
-    let matching_skills: Vec<ironclaw_skills::types::LoadedSkill> = skill_snapshot
+    let matching_skills: Vec<t3claw_skills::types::LoadedSkill> = skill_snapshot
         .into_iter()
         .filter(|s| {
             s.manifest.name.to_lowercase().contains(&query_lower)
@@ -262,7 +262,7 @@ pub async fn skills_search_handler(
     let catalog_json: Vec<serde_json::Value> = entries
         .into_iter()
         .map(|e| {
-            let is_installed = ironclaw_skills::catalog::catalog_entry_is_installed(
+            let is_installed = t3claw_skills::catalog::catalog_entry_is_installed(
                 &e.slug,
                 &e.name,
                 &installed_names,
@@ -333,10 +333,8 @@ pub async fn skills_install_handler(
             req.name.clone()
         } else {
             let outcome = catalog.search(&req.name).await;
-            match ironclaw_skills::catalog::resolve_catalog_slug_for_name(
-                &req.name,
-                &outcome.results,
-            ) {
+            match t3claw_skills::catalog::resolve_catalog_slug_for_name(&req.name, &outcome.results)
+            {
                 Ok(Some(resolved)) => resolved,
                 Ok(None) => {
                     let reason = outcome
@@ -353,8 +351,7 @@ pub async fn skills_install_handler(
                 Err(e) => return Err((StatusCode::BAD_REQUEST, e.to_string())),
             }
         };
-        let url =
-            ironclaw_skills::catalog::skill_download_url(catalog.registry_url(), &download_key);
+        let url = t3claw_skills::catalog::skill_download_url(catalog.registry_url(), &download_key);
         resolved_download_key = Some(download_key);
         crate::tools::builtin::skill_tools::fetch_skill_payload(&url)
             .await
@@ -365,7 +362,7 @@ pub async fn skills_install_handler(
         )));
     };
 
-    let normalized = ironclaw_skills::normalize_line_endings(&install_payload.skill_md);
+    let normalized = t3claw_skills::normalize_line_endings(&install_payload.skill_md);
     let requested_identifier = install_requested_identifier(
         &req.name,
         req.slug.as_deref(),
@@ -374,7 +371,7 @@ pub async fn skills_install_handler(
 
     // Parse, check duplicates, and get install_dir under a brief read lock.
     let (skill_name_from_parse, install_content) =
-        ironclaw_skills::registry::SkillRegistry::resolve_install_content(
+        t3claw_skills::registry::SkillRegistry::resolve_install_content(
             &normalized,
             Some(requested_identifier),
         )
@@ -392,7 +389,7 @@ pub async fn skills_install_handler(
 
     // Perform async I/O (write to disk, load) with no lock held.
     let (skill_name, loaded_skill) =
-        ironclaw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
+        t3claw_skills::registry::SkillRegistry::prepare_install_bundle_to_disk(
             &user_dir,
             &skill_name_from_parse,
             &install_content,
@@ -446,7 +443,7 @@ pub async fn skills_remove_handler(
         .map_err(|e| skill_registry_error_response(StatusCode::BAD_REQUEST, e))?;
 
     // Delete files from disk (async I/O, no lock held)
-    ironclaw_skills::registry::SkillRegistry::delete_skill_files(&skill_path)
+    t3claw_skills::registry::SkillRegistry::delete_skill_files(&skill_path)
         .await
         .map_err(|e| skill_registry_error_response(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
@@ -476,7 +473,7 @@ pub async fn skills_get_handler(
         .map_err(|e| skill_registry_error_response(StatusCode::BAD_REQUEST, e))?;
 
     let content =
-        ironclaw_skills::registry::SkillRegistry::read_skill_content_for_update(&skill_path, &name)
+        t3claw_skills::registry::SkillRegistry::read_skill_content_for_update(&skill_path, &name)
             .await
             .map_err(|e| skill_registry_error_response(StatusCode::BAD_REQUEST, e))?;
 
@@ -504,13 +501,13 @@ pub async fn skills_update_handler(
 
     tracing::info!(user_id = %user.user_id, skill = %name, "skill update requested");
 
-    if req.content.len() as u64 > ironclaw_skills::MAX_PROMPT_FILE_SIZE {
+    if req.content.len() as u64 > t3claw_skills::MAX_PROMPT_FILE_SIZE {
         return Err(skill_registry_error_response(
             StatusCode::BAD_REQUEST,
-            ironclaw_skills::SkillRegistryError::FileTooLarge {
+            t3claw_skills::SkillRegistryError::FileTooLarge {
                 name: name.clone(),
                 size: req.content.len() as u64,
-                max: ironclaw_skills::MAX_PROMPT_FILE_SIZE,
+                max: t3claw_skills::MAX_PROMPT_FILE_SIZE,
             },
         ));
     }
@@ -525,7 +522,7 @@ pub async fn skills_update_handler(
         .validate_update(&name)?
         .map_err(|e| skill_registry_error_response(StatusCode::BAD_REQUEST, e))?;
 
-    let loaded_skill = ironclaw_skills::registry::SkillRegistry::prepare_update_to_disk(
+    let loaded_skill = t3claw_skills::registry::SkillRegistry::prepare_update_to_disk(
         &skill_path,
         &name,
         &req.content,

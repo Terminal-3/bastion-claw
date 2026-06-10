@@ -14,7 +14,7 @@ Two flows are covered:
 
 2. **Workspace-data widget** — the agent writes a manifest + an
    ``index.js`` for a "Skills" widget that pulls workspace skills from
-   ``/api/skills`` via ``IronClaw.api.fetch`` and renders them in a rich,
+   ``/api/skills`` via ``T3Claw.api.fetch`` and renders them in a rich,
    editable list. The test asserts a new tab button appears, switches to it,
    and verifies the widget actually rendered into a panel marked with a
    stable ``data-testid``.
@@ -55,7 +55,7 @@ _CUSTOM_PATHS = [
 async def _wipe_customizations(base_url: str) -> None:
     """Clear any per-test customization files from the shared workspace.
 
-    The session-scoped ``ironclaw_server`` fixture is shared across every
+    The session-scoped ``t3claw_server`` fixture is shared across every
     test in the run, so anything we write into the workspace must be wiped
     before yielding back to the next test. ``memory_write`` accepts an empty
     body for non-layer paths, and the gateway's widget loader
@@ -111,19 +111,19 @@ async def _stop_proc(proc, *, timeout: float = 10.0) -> None:
 
 
 @pytest.fixture
-async def clean_customizations(ironclaw_server):
+async def clean_customizations(t3claw_server):
     """Wipe layout/widget files before *and* after each test in this module."""
-    await _wipe_customizations(ironclaw_server)
+    await _wipe_customizations(t3claw_server)
     yield
-    await _wipe_customizations(ironclaw_server)
+    await _wipe_customizations(t3claw_server)
 
 
 @pytest.fixture
-async def single_tenant_gateway_server(ironclaw_binary, mock_llm_server):
+async def single_tenant_gateway_server(t3claw_binary, mock_llm_server):
     """Dedicated gateway without a DB so `/style.css` can include custom CSS."""
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-widget-single-tenant-home-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-widget-single-tenant-home-")
     home_dir = home_tmpdir.name
-    os.makedirs(os.path.join(home_dir, ".ironclaw"), exist_ok=True)
+    os.makedirs(os.path.join(home_dir, ".t3claw"), exist_ok=True)
 
     reserved = []
     for _ in range(2):
@@ -138,10 +138,10 @@ async def single_tenant_gateway_server(ironclaw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=info",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
-        "IRONCLAW_OWNER_ID": "e2e-widget-single-tenant",
+        "T3CLAW_OWNER_ID": "e2e-widget-single-tenant",
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
         "GATEWAY_PORT": str(gateway_port),
@@ -165,7 +165,7 @@ async def single_tenant_gateway_server(ironclaw_binary, mock_llm_server):
     }
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary,
+        t3claw_binary,
         "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -201,12 +201,12 @@ async def clean_single_tenant_customizations(single_tenant_gateway_server):
 
 
 @pytest.fixture(scope="session")
-async def multi_tenant_gateway_server(ironclaw_binary, mock_llm_server):
+async def multi_tenant_gateway_server(t3claw_binary, mock_llm_server):
     """Dedicated gateway with AGENT_MULTI_TENANT=true for multi-tenant isolation tests."""
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-widget-multi-tenant-home-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-widget-multi-tenant-home-")
     home_dir = home_tmpdir.name
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-widget-multi-tenant-db-")
-    os.makedirs(os.path.join(home_dir, ".ironclaw"), exist_ok=True)
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-widget-multi-tenant-db-")
+    os.makedirs(os.path.join(home_dir, ".t3claw"), exist_ok=True)
 
     reserved = []
     for _ in range(2):
@@ -221,10 +221,10 @@ async def multi_tenant_gateway_server(ironclaw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=info",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
-        "IRONCLAW_OWNER_ID": "e2e-widget-multi-tenant",
+        "T3CLAW_OWNER_ID": "e2e-widget-multi-tenant",
         "AGENT_MULTI_TENANT": "true",
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
@@ -258,7 +258,7 @@ async def multi_tenant_gateway_server(ironclaw_binary, mock_llm_server):
             env[key] = val
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary,
+        t3claw_binary,
         "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
@@ -484,7 +484,7 @@ async def test_chat_adds_skills_viewer_widget_to_workspace_and_widgets_api(
 
 
 async def test_layout_config_persists_without_mutating_shared_multi_tenant_shell(
-    browser, ironclaw_server, clean_customizations
+    browser, t3claw_server, clean_customizations
 ):
     """Layout writes persist, but the shared shell must not apply them globally."""
     # 1. Write a layout.json that exercises both flags. `tabs.hidden`
@@ -497,7 +497,7 @@ async def test_layout_config_persists_without_mutating_shared_multi_tenant_shell
     }
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(
-            f"{ironclaw_server}/api/memory/write",
+            f"{t3claw_server}/api/memory/write",
             headers=auth_headers(),
             json={
                 "path": ".system/gateway/layout.json",
@@ -514,7 +514,7 @@ async def test_layout_config_persists_without_mutating_shared_multi_tenant_shell
     #    though the shared shell does not auto-apply it.
     async with httpx.AsyncClient(timeout=10) as client:
         layout_resp = await client.get(
-            f"{ironclaw_server}/api/frontend/layout",
+            f"{t3claw_server}/api/frontend/layout",
             headers=auth_headers(),
         )
         assert layout_resp.status_code == 200, layout_resp.text
@@ -524,7 +524,7 @@ async def test_layout_config_persists_without_mutating_shared_multi_tenant_shell
 
     # 3. Reload in a fresh context. The shared multi-tenant shell should keep
     #    its default controls rather than applying one tenant's layout.json.
-    context, pg = await _open_authed_page(browser, ironclaw_server)
+    context, pg = await _open_authed_page(browser, t3claw_server)
     try:
         await pg.locator(".tab-bar").wait_for(state="visible", timeout=10000)
         routines_display = await pg.evaluate(
@@ -650,7 +650,7 @@ async def test_shared_index_keeps_static_csp_when_layout_is_per_user_only(
 
     # 6. Contract C: the nonce placeholder should never leak into the shared
     #    static shell.
-    assert "__IRONCLAW_CSP_NONCE__" not in body, (
+    assert "__T3CLAW_CSP_NONCE__" not in body, (
         "NONCE_PLACEHOLDER sentinel must be substituted before serving — "
         "found unmodified placeholder in response body"
     )

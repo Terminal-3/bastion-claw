@@ -1,30 +1,30 @@
 //! Per-project host workspace directory resolution.
 //!
 //! Each engine v2 project gets a real directory on the host filesystem at
-//! `~/.ironclaw/projects/<user_id>/<project_id>/`. That's the directory the
+//! `~/.t3claw/projects/<user_id>/<project_id>/`. That's the directory the
 //! user can see, edit, and back up. It's also the bind-mount source for the
 //! per-project sandbox container's `/project/` mount.
 //!
 //! [`Project::workspace_path`] can override the default; otherwise the helpers
 //! in this module compute and create the standard path. The engine crate
-//! intentionally doesn't know about `~/.ironclaw` — that's a host-side concept
+//! intentionally doesn't know about `~/.t3claw` — that's a host-side concept
 //! kept here so the engine stays portable.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use ironclaw_engine::Project;
+use t3claw_engine::Project;
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 
-/// Subdirectory under [`ironclaw_base_dir`] that holds per-project workspaces.
+/// Subdirectory under [`t3claw_base_dir`] that holds per-project workspaces.
 pub const PROJECTS_SUBDIR: &str = "projects";
 
 /// Resolve the host-filesystem workspace path for a project.
 ///
 /// If the project has an explicit `workspace_path` override, that is returned
 /// verbatim. Otherwise the default is
-/// `~/.ironclaw/projects/<user_id>/<project_id>/` — namespaced by user so
+/// `~/.t3claw/projects/<user_id>/<project_id>/` — namespaced by user so
 /// multi-tenant deployments never collide on disk.
 pub fn project_workspace_path(project: &Project) -> PathBuf {
     if let Some(ref explicit) = project.workspace_path {
@@ -37,7 +37,7 @@ pub fn project_workspace_path(project: &Project) -> PathBuf {
 /// override on the [`Project`] record. Namespaced by `user_id` for
 /// multi-tenant safety.
 pub fn default_project_workspace_path(user_id: &str, project_id: uuid::Uuid) -> PathBuf {
-    ironclaw_base_dir()
+    t3claw_base_dir()
         .join(PROJECTS_SUBDIR)
         .join(sanitize_path_component(user_id))
         .join(project_id.to_string())
@@ -110,7 +110,7 @@ fn ensure_dir(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_engine::Project;
+    use t3claw_engine::Project;
 
     #[test]
     fn override_path_is_returned_verbatim() {
@@ -123,7 +123,7 @@ mod tests {
     fn default_path_is_namespaced_by_user_and_project() {
         let project = Project::new("alice", "test", "");
         let path = project_workspace_path(&project);
-        let base = ironclaw_base_dir();
+        let base = t3claw_base_dir();
         assert!(path.starts_with(&base));
         // Path is `<base>/projects/alice/<project_id>`
         let relative = path.strip_prefix(&base).unwrap();
@@ -140,7 +140,7 @@ mod tests {
     fn empty_user_id_does_not_drop_namespace() {
         let id = uuid::Uuid::new_v4();
         let path = default_project_workspace_path("", id);
-        let base = ironclaw_base_dir().join(PROJECTS_SUBDIR);
+        let base = t3claw_base_dir().join(PROJECTS_SUBDIR);
         // Must have a non-empty component between projects/ and <project_id>.
         let relative = path.strip_prefix(&base).unwrap();
         let components: Vec<_> = relative.components().collect();
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn adversarial_user_id_does_not_escape_projects_dir() {
-        let base = ironclaw_base_dir().join(PROJECTS_SUBDIR);
+        let base = t3claw_base_dir().join(PROJECTS_SUBDIR);
         for adversarial in ["../../etc", "../root", "a/../../b", "foo/bar"] {
             let path = default_project_workspace_path(adversarial, uuid::Uuid::new_v4());
             assert!(
@@ -164,7 +164,7 @@ mod tests {
 
     #[test]
     fn different_users_get_different_paths() {
-        let id = ironclaw_engine::ProjectId::new();
+        let id = t3claw_engine::ProjectId::new();
         let p1 = default_project_workspace_path("alice", id.0);
         let p2 = default_project_workspace_path("bob", id.0);
         assert_ne!(p1, p2);

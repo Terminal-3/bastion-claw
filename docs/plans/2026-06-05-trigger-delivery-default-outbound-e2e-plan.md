@@ -160,13 +160,13 @@ tracked follow-up.
   - trusted trigger authority stays on worker-minted
     `TrustedTriggerSubmitRequest`;
   - raw `TrustedInboundTurnRequest` construction stays private inside
-    `ironclaw_conversations`;
+    `t3claw_conversations`;
   - composition receives only the narrow trigger-fire submission operation it
     needs;
   - product adapters, product workflow, first-party capabilities, and generic
     WebUI/API handlers must not mint or submit host-trusted trigger requests;
   - architecture or negative tests must keep any reusable
-    `ironclaw_trusted_ingress`-style facade out of production dependency paths.
+    `t3claw_trusted_ingress`-style facade out of production dependency paths.
 - Fire-time creator authorization means:
   - the authorization request carries `tenant_id`, `creator_user_id`,
     `agent_id`, `project_id`, `trigger_id`, and `fire_slot`;
@@ -225,7 +225,7 @@ tracked follow-up.
   `Version` expectations; unconditional `Any` writes are not acceptable for
   preferences.
 - Preserve outbound ownership: target choice and validation stay under
-  `ironclaw_outbound` / `OutboundPolicyService`; product adapters render only
+  `t3claw_outbound` / `OutboundPolicyService`; product adapters render only
   after policy approval.
 - Implement in a separate worktree off `origin/main`; leave the dirty main
   checkout alone.
@@ -358,21 +358,21 @@ Not defaultable in the first E2E:
 - `docs/reborn/contracts/product-adapters.md`
   - adapter outbound rendering boundary and Slack-like external channel
     capability model.
-- `crates/ironclaw_outbound/src/communication_preferences.rs`
+- `crates/t3claw_outbound/src/communication_preferences.rs`
   - current tenant/user-scoped preference baseline; Phase 2 should add or
     replace this with the scoped default model and versioned repository
     contract described below.
-- `crates/ironclaw_outbound/src/resolution_engine.rs`
+- `crates/t3claw_outbound/src/resolution_engine.rs`
   - triggered notification preference lookup and fail-closed behavior.
-- `crates/ironclaw_product_workflow/src/outbound_delivery.rs`
+- `crates/t3claw_product_workflow/src/outbound_delivery.rs`
   - `prepare_and_render_product_outbound` validation-before-render path.
-- `crates/ironclaw_reborn_composition/src/slack_delivery.rs`
+- `crates/t3claw_reborn_composition/src/slack_delivery.rs`
   - Slack final-reply observer and observed reply-target authority.
-- `crates/ironclaw_reborn_composition/src/slack_personal_binding_pairing_serve.rs`
+- `crates/t3claw_reborn_composition/src/slack_personal_binding_pairing_serve.rs`
   - pairing-code redeem route; identity-only today.
-- `crates/ironclaw_webui_v2/src/handlers.rs`
+- `crates/t3claw_webui_v2/src/handlers.rs`
   - WebUI handlers must delegate through `RebornServicesApi`.
-- `crates/ironclaw_webui_v2_static/static/js/pages/automations/automations-page.js`
+- `crates/t3claw_webui_v2_static/static/js/pages/automations/automations-page.js`
   - Automations page composition point.
 
 ## Phase Breakdown
@@ -761,13 +761,13 @@ Add a standalone Delivery panel under Automations:
 
 Expected WebUI starting points:
 
-- `crates/ironclaw_webui_v2_static/static/js/lib/api.js`
-- `crates/ironclaw_webui_v2_static/static/js/lib/api.test.mjs`
-- `crates/ironclaw_webui_v2_static/static/js/pages/automations/automations-page.js`
+- `crates/t3claw_webui_v2_static/static/js/lib/api.js`
+- `crates/t3claw_webui_v2_static/static/js/lib/api.test.mjs`
+- `crates/t3claw_webui_v2_static/static/js/pages/automations/automations-page.js`
 - new `pages/automations/hooks/useDeliveryDefaults.js`
 - new `pages/automations/components/delivery-defaults-panel.js`
-- `crates/ironclaw_webui_v2_static/static/js/i18n/en.js`
-- `crates/ironclaw_webui_v2_static/src/assets.rs`
+- `crates/t3claw_webui_v2_static/static/js/i18n/en.js`
+- `crates/t3claw_webui_v2_static/src/assets.rs`
 
 ### 6. Trigger Completion Delivery
 

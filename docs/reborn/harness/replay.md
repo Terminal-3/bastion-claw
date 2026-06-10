@@ -1,6 +1,6 @@
 # Reborn Replay Harness
 
-Reborn should reuse IronClaw's existing replay harness and extend it for Reborn compatibility evidence.
+Reborn should reuse T3Claw's existing replay harness and extend it for Reborn compatibility evidence.
 
 This document describes the target shape. It does not mean every Reborn-specific fixture exists today.
 

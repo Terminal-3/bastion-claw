@@ -1,4 +1,4 @@
-# IronClaw Reborn agent loop protocol contract
+# T3Claw Reborn agent loop protocol contract
 
 **Date:** 2026-04-25
 **Status:** Draft contract

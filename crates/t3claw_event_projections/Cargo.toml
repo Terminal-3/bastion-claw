@@ -1,0 +1,24 @@
+[package]
+name = "t3claw_event_projections"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+t3claw_events = { path = "../t3claw_events" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_memory = { path = "../t3claw_memory" }
+t3claw_turns = { path = "../t3claw_turns" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+t3claw_extensions = { path = "../t3claw_extensions" }
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_memory = { path = "../t3claw_memory" }
+t3claw_reborn_event_store = { path = "../t3claw_reborn_event_store" }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

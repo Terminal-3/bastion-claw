@@ -3,11 +3,11 @@
 Mirrors `telegram_mock.py` / `sheets_mock.py`: single-port aiohttp,
 ``MOCK_CALENDAR_PORT=<n>`` on stdout, test hooks under ``/__mock/``.
 Routes via
-``IRONCLAW_TEST_HTTP_REMAP=www.googleapis.com=<mock_url>``
+``T3CLAW_TEST_HTTP_REMAP=www.googleapis.com=<mock_url>``
 (comma-joined with the other mocks' entries) set in
 ``run_workflow_canary.py``.
 
-Surface (subset of Calendar v3 actually exercised by IronClaw's
+Surface (subset of Calendar v3 actually exercised by T3Claw's
 google_calendar tool):
 
 - ``GET /calendar/v3/calendars/{calendarId}/events`` — events.list
@@ -250,7 +250,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock Google Calendar API v3 for IronClaw workflow-canary."
+        description="Mock Google Calendar API v3 for T3Claw workflow-canary."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

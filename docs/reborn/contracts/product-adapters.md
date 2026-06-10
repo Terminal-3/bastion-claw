@@ -1,9 +1,9 @@
 # Reborn ProductAdapter contract
 
 **Status:** Draft (first slice landing for #3285).
-**Owner crate:** `ironclaw_product_adapters`.
-**Host runtime:** `ironclaw_wasm_product_adapters`.
-**First concrete adapter:** `ironclaw_telegram_v2_adapter`.
+**Owner crate:** `t3claw_product_adapters`.
+**Host runtime:** `t3claw_wasm_product_adapters`.
+**First concrete adapter:** `t3claw_telegram_v2_adapter`.
 **Related issues:** #3269 (this contract), #3285 (Telegram tracer bullet),
 #3266 (outbound policy), #3193 (conversation binding), #3094 (gate UX).
 
@@ -58,12 +58,12 @@ projection update
   `ProductAttachmentDescriptor`. No raw bytes, source URLs, host paths, raw
   prompts, raw tool input, or backend diagnostics.
 - `ProtocolAuthEvidence::Verified` is sealed. Only the host-glue helpers in
-  `ironclaw_product_adapters::auth` (which take a crate-private
+  `t3claw_product_adapters::auth` (which take a crate-private
   `HostAuthSeal`) can construct one. WASM components and downstream adapters
   cannot fabricate verification.
 - Product adapters must not construct host-trusted trigger ingress markers or
   witnesses. Trigger and scheduler fires use the host-trusted ingress seam in
-  `ironclaw_conversations`, not a public adapter payload or a reserved string
+  `t3claw_conversations`, not a public adapter payload or a reserved string
   in adapter-controlled DTOs. PR18 enforces this with dependency-boundary tests;
   trigger delivery must harden the seam with a compile-time host facade or
   equivalent sealed factory before launch.
@@ -72,11 +72,11 @@ projection update
   opaque handles (`EgressCredentialHandle`). The host resolves credential
   material at request time and scans response bodies for leaks before
   returning them.
-- Adapters MUST NOT depend on `ironclaw_dispatcher`, `ironclaw_capabilities`,
-  `ironclaw_host_runtime`, `ironclaw_network`, `ironclaw_secrets`,
-  `ironclaw_filesystem`, raw process spawning, or
-  `ironclaw_turns::runner`. Boundary tests in
-  `crates/ironclaw_product_adapters/tests/product_adapter_contract.rs`
+- Adapters MUST NOT depend on `t3claw_dispatcher`, `t3claw_capabilities`,
+  `t3claw_host_runtime`, `t3claw_network`, `t3claw_secrets`,
+  `t3claw_filesystem`, raw process spawning, or
+  `t3claw_turns::runner`. Boundary tests in
+  `crates/t3claw_product_adapters/tests/product_adapter_contract.rs`
   enforce this.
 - Delivery failures are best-effort. They record a separate
   `DeliveryStatus` and never mutate canonical transcript/projection/turn
@@ -126,7 +126,7 @@ ingress. Synthetic trusted trigger ingress is handled by the conversation-owned
 trusted trigger submitter returned to host composition as a
 `TrustedTriggerFireSubmitter` trait object; the raw `TrustedInboundTurnRequest`
 constructor, concrete submitter type, and trusted scope mapping stay private
-inside `ironclaw_conversations` and are not constructible by product adapters.
+inside `t3claw_conversations` and are not constructible by product adapters.
 
 `ProductInboundAck` outcomes:
 
@@ -176,7 +176,7 @@ reply push + delivery status reporting, without progress or gate push.
 
 ## Authentication evidence
 
-Verifiers in `ironclaw_wasm_product_adapters::auth_verifier` provide
+Verifiers in `t3claw_wasm_product_adapters::auth_verifier` provide
 constant-time HMAC and shared-secret-header verification. The host calls a
 verifier first and only constructs a `Verified` evidence (via one of the
 public `mark_*_verified` helpers) when the digest matches.
@@ -217,19 +217,19 @@ explicit feature flag (`REBORN_TELEGRAM_V2_ENABLED=true` for Telegram).
 Default is off; legacy v1 Telegram (`channels-src/telegram`) runs
 unchanged. The host fails closed at startup when v1 and v2 are both
 configured for the same installation; see
-`ironclaw::config::validate_telegram_v1_v2_exclusivity`.
+`t3claw::config::validate_telegram_v1_v2_exclusivity`.
 
 ## Status
 
 | Item | Status |
 |------|--------|
-| Contract types | `[implemented slice]` (`ironclaw_product_adapters`) |
+| Contract types | `[implemented slice]` (`t3claw_product_adapters`) |
 | In-memory fakes | `[implemented slice]` (`FakeProductWorkflow`, `FakeProtocolHttpEgress`, `FakeOutboundDeliverySink`, `FakeProjectionStream`) |
 | Boundary / redaction tests | `[implemented slice]` |
 | Webhook auth verifiers (HMAC, shared-secret-header) | `[implemented slice]` |
 | Egress policy enforcement | `[implemented slice]` |
 | `NativeProductAdapterRunner` | `[implemented slice]` |
-| Telegram v2 native adapter | `[implemented slice]` (`ironclaw_telegram_v2_adapter`) |
-| wasmtime component-model glue | `[implemented slice]` (`ProductAdapterComponentRuntime` loads `crates/ironclaw_wasm_product_adapters/wit/product_adapter.wit`; parse/render-only, component `http-egress` import fails closed until production egress wiring lands) |
+| Telegram v2 native adapter | `[implemented slice]` (`t3claw_telegram_v2_adapter`) |
+| wasmtime component-model glue | `[implemented slice]` (`ProductAdapterComponentRuntime` loads `crates/t3claw_wasm_product_adapters/wit/product_adapter.wit`; parse/render-only, component `http-egress` import fails closed until production egress wiring lands) |
 | Web / Slack / Discord / WhatsApp / Feishu / Signal v2 adapters | `[not implemented]` |
 | Production wiring of v2 webhook route | `[not implemented]` (default-off flag exists; route registration is a follow-up) |

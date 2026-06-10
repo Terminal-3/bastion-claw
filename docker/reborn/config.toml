@@ -1,4 +1,4 @@
-api_version = "ironclaw.runtime/v1"
+api_version = "t3claw.runtime/v1"
 
 [boot]
 profile = "local-dev"
@@ -16,8 +16,8 @@ poll_interval_ms = 200
 regex_activation_enabled = true
 
 [webui]
-env_token_var = "IRONCLAW_REBORN_WEBUI_TOKEN"
-env_user_id_var = "IRONCLAW_REBORN_WEBUI_USER_ID"
+env_token_var = "T3CLAW_REBORN_WEBUI_TOKEN"
+env_user_id_var = "T3CLAW_REBORN_WEBUI_USER_ID"
 
 [llm.default]
 provider_id = "nearai"
@@ -26,5 +26,5 @@ api_key_env = "NEARAI_API_KEY"
 
 [slack]
 enabled = false
-signing_secret_env = "IRONCLAW_REBORN_SLACK_SIGNING_SECRET"
-bot_token_env = "IRONCLAW_REBORN_SLACK_BOT_TOKEN"
+signing_secret_env = "T3CLAW_REBORN_SLACK_SIGNING_SECRET"
+bot_token_env = "T3CLAW_REBORN_SLACK_BOT_TOKEN"

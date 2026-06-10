@@ -1,15 +1,15 @@
-# IronClaw Reborn capability access contract
+# T3Claw Reborn capability access contract
 
 **Date:** 2026-04-25
 **Status:** V1 contract slice
-**Crate:** `crates/ironclaw_authorization`
+**Crate:** `crates/t3claw_authorization`
 **Depends on:** `docs/reborn/contracts/host-api.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_authorization` evaluates authority-bearing host API contracts before runtime execution.
+`t3claw_authorization` evaluates authority-bearing host API contracts before runtime execution.
 
 The first slices add grant- and lease-backed capability dispatch/spawn gates:
 
@@ -119,7 +119,7 @@ See `docs/reborn/contracts/approvals.md` for how approval resolution issues leas
 
 ## 5. Capability host integration
 
-`ironclaw_authorization` is consumed by the caller-facing capability invocation service, not by the dispatcher.
+`t3claw_authorization` is consumed by the caller-facing capability invocation service, not by the dispatcher.
 
 ```text
 CapabilityHost::invoke_json(...)

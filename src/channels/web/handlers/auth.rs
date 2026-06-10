@@ -357,12 +357,12 @@ pub async fn near_challenge_handler(
     ))?;
 
     let nonce = nonce_store.generate().await;
-    let message = format!("Sign in to IronClaw\nNonce: {nonce}");
+    let message = format!("Sign in to T3Claw\nNonce: {nonce}");
 
     Ok(Json(serde_json::json!({
         "nonce": nonce,
         "message": message,
-        "recipient": "ironclaw",
+        "recipient": "t3claw",
     })))
 }
 
@@ -442,7 +442,7 @@ pub async fn near_verify_handler(
         }
         _ => return (StatusCode::BAD_REQUEST, "Invalid nonce format").into_response(),
     };
-    let message_str = format!("Sign in to IronClaw\nNonce: {}", body.nonce);
+    let message_str = format!("Sign in to T3Claw\nNonce: {}", body.nonce);
 
     // Try multiple payload formats — different wallets implement NEP-413 differently.
     if let Err(e) = crate::channels::web::oauth::near::verify_near_signature(
@@ -450,7 +450,7 @@ pub async fn near_verify_handler(
         &sig_bytes,
         &message_str,
         &nonce_bytes,
-        "ironclaw",
+        "t3claw",
     ) {
         tracing::warn!(
             account_id = %body.account_id,
@@ -837,7 +837,7 @@ mod tests {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert(
             axum::http::header::COOKIE,
-            HeaderValue::from_static("other=\"quoted;value\"; ironclaw_session=abc123"),
+            HeaderValue::from_static("other=\"quoted;value\"; t3claw_session=abc123"),
         );
 
         assert_eq!(extract_session_cookie(&headers), Some("abc123".to_string()));

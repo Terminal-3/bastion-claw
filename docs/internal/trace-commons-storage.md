@@ -1,12 +1,12 @@
 # Trace Commons Production Storage Plan
 
-This document tracks the migration path from the file-backed Trace Commons ingest MVP to production storage. It assumes the existing `ironclaw.trace_contribution.v1` envelope remains the upload contract, while production ingest moves trust, authorization, retention, review, export, and credit accounting into durable services.
+This document tracks the migration path from the file-backed Trace Commons ingest MVP to production storage. It assumes the existing `t3claw.trace_contribution.v1` envelope remains the upload contract, while production ingest moves trust, authorization, retention, review, export, and credit accounting into durable services.
 
 ## Current State
 
 The MVP ingestion service still serves tenant-scoped JSON files under `TRACE_COMMONS_DATA_DIR` and derives lightweight records for review, analytics, credit, and replay export. That remains appropriate for local development and controlled pilots.
 
-TraceDAO server storage has moved out of Ironclaw. Ironclaw keeps the local
+TraceDAO server storage has moved out of T3Claw. T3Claw keeps the local
 trace contribution envelope/client surfaces; the hosted DB/object-store control
 plane now lives in the public `zmanian/tracedao-server` repository:
 
@@ -22,14 +22,14 @@ plane now lives in the public `zmanian/tracedao-server` repository:
 - Optional fail-closed benchmark/ranker source object-ref validation behind `TRACE_COMMONS_DERIVED_EXPORT_REQUIRE_OBJECT_REFS=true`.
 - Admin-token tenant policy management through `/v1/admin/tenant-policy`, with hash-chained file audit events and safe DB audit metadata for policy version, allow-list counts, and the policy projection hash.
 - Admin-token config inspection through `/v1/admin/config-status`, returning only safe schema, DB cutover, object-primary, guardrail, max export item cap, submission quota, legal hold, and object-store-provider status fields with a read audit event.
-- Admin-token operational inspection through `/v1/admin/operational-summary` and `ironclaw traces operational-summary`, returning only safe tenant-scoped aggregate counts for submission status/risk, review SLA pressure, DB export manifests/jobs, retention jobs, vector coverage, and delayed credit totals with a read audit event.
+- Admin-token operational inspection through `/v1/admin/operational-summary` and `t3claw traces operational-summary`, returning only safe tenant-scoped aggregate counts for submission status/risk, review SLA pressure, DB export manifests/jobs, retention jobs, vector coverage, and delayed credit totals with a read audit event.
 - Optional encrypted local artifact storage behind `TRACE_COMMONS_ARTIFACT_KEY_HEX`, with `TRACE_COMMONS_OBJECT_STORE=local_service` selecting the service-owned local encrypted backend used for production-shaped object refs.
 - Optional object-primary submit/review mode behind `TRACE_COMMONS_OBJECT_PRIMARY_SUBMIT_REVIEW=true`, which requires the DB/object-ref cutover guards and skips plaintext submitted/reviewed envelope body files while retaining compatibility metadata, derived records, and file audit rows. Object-primary envelope writes use unique encrypted artifact object ids per logical snapshot so review/process-evaluation writes do not overwrite ciphertext behind older submitted-envelope object refs.
 - Optional object-primary replay export mode behind `TRACE_COMMONS_OBJECT_PRIMARY_REPLAY_EXPORT=true`, which requires DB replay selection, required replay object refs, required DB mirror writes, and the service-local encrypted object store.
 - Optional object-primary benchmark/ranker export mode behind `TRACE_COMMONS_OBJECT_PRIMARY_DERIVED_EXPORTS=true`, which requires DB reviewer reads, required source object refs, export guardrails, required DB mirror writes, and the service-local encrypted object store before skipping plaintext benchmark artifact and ranker provenance files.
 - `TRACE_COMMONS_OBJECT_STORE=remote_service` now parses provider, bucket, KMS key, and service credential references and advertises a safe disabled remote object-store alias without accepting plaintext compatibility fallback. This is a fail-closed production configuration scaffold for the eventual service-owned remote object-store provider, not a remote object-store implementation yet.
 - Optional legal-hold retention policy IDs behind `TRACE_COMMONS_LEGAL_HOLD_RETENTION_POLICIES`, preventing maintenance from newly expiring or purging matching policy classes.
-- Optional DB-backed review leases behind `TRACE_COMMONS_DB_REVIEWER_READS=true`, scoped by tenant and reviewer/admin principal for concurrent privacy review coordination. The reviewer/admin `POST /v1/review/leases/claim-next` and `POST /v1/review/leases/claim-batch` routes plus `ironclaw traces review-lease-claim-next` and `ironclaw traces review-lease-claim-batch` helpers select only available quarantined traces in tenant scope using review escalation/SLA ordering before persisting lease state and typed safe claim audit rows.
+- Optional DB-backed review leases behind `TRACE_COMMONS_DB_REVIEWER_READS=true`, scoped by tenant and reviewer/admin principal for concurrent privacy review coordination. The reviewer/admin `POST /v1/review/leases/claim-next` and `POST /v1/review/leases/claim-batch` routes plus `t3claw traces review-lease-claim-next` and `t3claw traces review-lease-claim-batch` helpers select only available quarantined traces in tenant scope using review escalation/SLA ordering before persisting lease state and typed safe claim audit rows.
 - Durable DB revocation-propagation item rows track tenant-scoped downstream invalidation or retry work for object refs, export manifests/items, vectors, derived artifacts, benchmark/ranker artifacts, credit settlement reversals, and physical delete receipts.
 - Replay dataset, benchmark conversion, and ranker export paths persist durable access-grant and export-job lifecycle rows; already-started jobs are terminalized as `failed` if DB metadata reads, source collection, source object-ref revalidation, source-read audit mirroring, or required object-ref body reads fail before export artifacts or manifests can be published.
 - Durable tenant access grant rows can store issuer-authorized principal, role, consent-scope, allowed-use, issuer/audience/subject, expiry, revocation, and safe metadata for hosted-agent multitenant permissioning. Admin routes and CLI helpers can create, list, and revoke the current tenant's grant rows while writing safe grant-update audit metadata. `TRACE_COMMONS_REQUIRE_TENANT_ACCESS_GRANTS=true` makes trace submission, contributor credit/status readback, reviewer/audit reads, review mutations, dataset/export paths, non-revocation worker mutations, maintenance, and admin ledger/observability reads fail closed unless the authenticated tenant/principal has an active exact-role grant. Signed EdDSA/Ed25519 claims must additionally match any configured grant issuer, audience, and JWT `sub` subject binding; static-token bridge grants keep exact-principal matching and ignore those signed-claim-only fields. Grant scope/use allow-lists are intersected with static or EdDSA claim allow-lists before the existing submission policy checks run; revocation/self-delete, revocation propagation, config-status, tenant-policy admin, and grant-management routes remain available for deprovisioning and recovery.
@@ -83,24 +83,24 @@ Historical local state when this slice was first drafted:
 
 Current guidance after the server split:
 
-- Ironclaw no longer lands Trace Commons relational migrations. Keep
-  `migrations/V25__wasm_fuel_limit_bump.sql` as the next Ironclaw migration and
-  do not add TraceDAO server tables to Ironclaw's refinery/libSQL migration
+- T3Claw no longer lands Trace Commons relational migrations. Keep
+  `migrations/V25__wasm_fuel_limit_bump.sql` as the next T3Claw migration and
+  do not add TraceDAO server tables to T3Claw's refinery/libSQL migration
   streams.
 - The TraceDAO server repo owns the storage landing schema as
   `migrations/V1__trace_commons_schema.sql` plus the matching libSQL schema
   file. Re-check the server repo's migration stream before adding future server
   storage migrations.
-- Before creating any future Ironclaw migration, refresh refs with
+- Before creating any future T3Claw migration, refresh refs with
   `git fetch origin` and re-check:
   - `git ls-tree --name-only origin/staging:migrations`
   - `git ls-tree --name-only origin/main:migrations`
   - `git show origin/staging:src/db/libsql_migrations.rs | rg '"[a-z_]+",|\\([[:space:]]*[0-9]+,'`
   - `git show origin/main:src/db/libsql_migrations.rs | rg '"[a-z_]+",|\\([[:space:]]*[0-9]+,'`
-- Do not add `IF NOT EXISTS` to Ironclaw PostgreSQL migration DDL unless the
+- Do not add `IF NOT EXISTS` to T3Claw PostgreSQL migration DDL unless the
   repo's refinery policy changes. PostgreSQL migrations should be one-shot and
   checksum-stable.
-- After adding a real Ironclaw PostgreSQL migration, update
+- After adding a real T3Claw PostgreSQL migration, update
   `migrations/checksums.lock` using the repo's migration checksum workflow.
 
 ### PostgreSQL DDL Sketch
@@ -769,7 +769,7 @@ CREATE INDEX IF NOT EXISTS idx_trace_retention_job_items_submission ON trace_ret
 
 The Rust storage contract now lives in
 `zmanian/tracedao-server:crates/tracedao-server/src/trace_corpus_storage.rs`.
-It is no longer part of Ironclaw's shared `Database` trait. The
+It is no longer part of T3Claw's shared `Database` trait. The
 `tracedao-ingest` service still serves file-backed responses by default, but it
 can mirror submit/review/credit/revoke mutations into its configured DB for
 dark-launch verification, including reasoned privileged revocation tombstones
@@ -1225,7 +1225,7 @@ This is a finish-line checklist for canary tenants. It documents the current bra
 
 Common preflight:
 
-- Start with `GET /v1/admin/config-status` and confirm DB dual-write, required DB mirror writes, object-store mode, tenant rollout gates, RLS readiness, and issuer/keyset health without relying on raw tenant ids, key ids, PEMs, hosts, or credentials in logs. Then read `GET /v1/admin/operational-summary` or run `ironclaw traces operational-summary` for safe aggregate submission, review SLA, export, retention, vector, and delayed-credit rollout signals.
+- Start with `GET /v1/admin/config-status` and confirm DB dual-write, required DB mirror writes, object-store mode, tenant rollout gates, RLS readiness, and issuer/keyset health without relying on raw tenant ids, key ids, PEMs, hosts, or credentials in logs. Then read `GET /v1/admin/operational-summary` or run `t3claw traces operational-summary` for safe aggregate submission, review SLA, export, retention, vector, and delayed-credit rollout signals.
 - Require active tenant access grants for the exact tenant/principal/role combinations being tested. With `TRACE_COMMONS_REQUIRE_TENANT_ACCESS_GRANTS=true`, submission, contributor status, reviewer/audit reads, review mutations, dataset/export paths, non-revocation worker mutations, maintenance, and admin ledger/observability reads fail closed without matching grants.
 - Run `POST /v1/admin/maintenance` with `dry_run: true`, `reconcile_db_mirror: true`, and `verify_audit_chain: true`. If `TRACE_COMMONS_REQUIRE_DB_RECONCILIATION_CLEAN=true` is enabled, requests that omit `reconcile_db_mirror` are expected to fail closed.
 - Treat any `blocking_gaps`, object-ref readability/hash failures, key-ref mismatches, projection drift, audit-chain mismatches, RLS readiness failures, signed-claim failures, or unexpected worker skips as promotion blockers.
@@ -1282,13 +1282,13 @@ Promotion-gate smoke checks:
 
 Implementation checklist for the server-owned storage migration:
 
-- Keep Ironclaw free of TraceDAO server DB/object-store migrations and storage
+- Keep T3Claw free of TraceDAO server DB/object-store migrations and storage
   backend modules. Completed by pruning the TraceCorpusStore bridge from
-  Ironclaw.
+  T3Claw.
 - Add the PostgreSQL and libSQL Trace Commons landing schema in
   `zmanian/tracedao-server`. Completed as server repo `V1` schema files.
 - Keep `TraceCorpusStore` inside the server crate's DB facade rather than
-  Ironclaw's shared `Database` trait. Completed.
+  T3Claw's shared `Database` trait. Completed.
 - Keep DB writes behind a dark-launch or dual-write flag until parity checks pass. Completed with `TRACE_COMMONS_DB_DUAL_WRITE=true`.
 - After parity checks pass, promote critical writes with `TRACE_COMMONS_REQUIRE_DB_MIRROR_WRITES=true` so DB mirror failures fail closed instead of creating file-only accepted submissions, credit events, export provenance, or audit/content-read rows.
 - Keep DB reads behind surface-specific rollout flags until parity checks pass. Contributor credit/status reads are gated by `TRACE_COMMONS_DB_CONTRIBUTOR_READS=true`, reviewer metadata reads by `TRACE_COMMONS_DB_REVIEWER_READS=true`, replay export selection by `TRACE_COMMONS_DB_REPLAY_EXPORT_READS=true`, and audit event reads by `TRACE_COMMONS_DB_AUDIT_READS=true`.

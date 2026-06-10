@@ -18,11 +18,11 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ironclaw::channels::IncomingMessage;
-use ironclaw::channels::web::auth::MultiAuthState;
-use ironclaw::channels::web::platform::router::start_server;
-use ironclaw::channels::web::platform::state::GatewayState;
-use ironclaw::channels::web::test_helpers::TestGatewayBuilder;
+use t3claw::channels::IncomingMessage;
+use t3claw::channels::web::auth::MultiAuthState;
+use t3claw::channels::web::platform::router::start_server;
+use t3claw::channels::web::platform::state::GatewayState;
+use t3claw::channels::web::test_helpers::TestGatewayBuilder;
 use tokio::sync::{mpsc, oneshot};
 
 const AUTH_TOKEN: &str = "test-responses-api-temperature-token";

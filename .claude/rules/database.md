@@ -9,12 +9,12 @@ paths:
 ## Status & Direction
 
 The repo is migrating off per-crate `Store`/`Repository` traits onto a
-single universal `RootFilesystem` mount table (`crates/ironclaw_filesystem/`).
+single universal `RootFilesystem` mount table (`crates/t3claw_filesystem/`).
 Under the new model, every persistence concern is a mount path
 (`/system/secrets`, `/system/processes`, `/engine/threads`, …) backed by
 exactly one `RootFilesystem` implementation — typed stores become thin
 wrappers around `ScopedFilesystem` and own no backend dispatch of their
-own. See `crates/ironclaw_filesystem/CLAUDE.md` and the
+own. See `crates/t3claw_filesystem/CLAUDE.md` and the
 `2026-05-14-universal-fs-dispatch.md` plan/ADR.
 
 **New persistence features go on `ScopedFilesystem`, not into `src/db/`.**
@@ -25,9 +25,9 @@ new sub-traits or per-domain backends.
 
 This file is `paths`-scoped to those legacy directories so the rule
 loads when (and only when) you're inside them. New code under
-`crates/ironclaw_filesystem/`, consumer crates routing through it, or
+`crates/t3claw_filesystem/`, consumer crates routing through it, or
 any new mount-backed store should follow the unified-surface contract
-in `crates/ironclaw_filesystem/CLAUDE.md` instead.
+in `crates/t3claw_filesystem/CLAUDE.md` instead.
 
 ---
 

@@ -1,4 +1,4 @@
-# GitHub Tool for IronClaw
+# GitHub Tool for T3Claw
 
 WASM tool for GitHub integration. It covers repositories, issues, pull requests,
 search, branches, file reads and writes, releases, and workflows.
@@ -20,7 +20,7 @@ search, branches, file reads and writes, releases, and workflows.
 Preferred: configure GitHub OAuth app credentials for browser auth:
 
 1. Create a GitHub OAuth app at <https://github.com/settings/apps>
-2. Set the callback URL to your IronClaw OAuth callback URL
+2. Set the callback URL to your T3Claw OAuth callback URL
 3. Export:
 
    ```bash
@@ -31,10 +31,10 @@ Preferred: configure GitHub OAuth app credentials for browser auth:
 4. Run:
 
    ```bash
-   ironclaw tool auth github
+   t3claw tool auth github
    ```
 
-IronClaw will open the browser OAuth flow and store the resulting `github_token`.
+T3Claw will open the browser OAuth flow and store the resulting `github_token`.
 
 Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 
@@ -43,7 +43,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 3. Store the token:
 
    ```
-   ironclaw secret set github_token YOUR_TOKEN
+   t3claw secret set github_token YOUR_TOKEN
    ```
 
 ## Usage Examples
@@ -54,7 +54,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "get_repo",
   "owner": "nearai",
-  "repo": "ironclaw"
+  "repo": "t3claw"
 }
 ```
 
@@ -76,7 +76,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "list_issues",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "state": "open",
   "limit": 10
 }
@@ -88,7 +88,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "create_issue",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "title": "Bug: Something is broken",
   "body": "Detailed description...",
   "labels": ["bug", "help wanted"]
@@ -101,7 +101,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "list_pull_requests",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "state": "open",
   "limit": 5
 }
@@ -133,7 +133,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "create_pr_review",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "pr_number": 42,
   "body": "LGTM! Great work.",
   "event": "APPROVE"
@@ -146,7 +146,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "create_pull_request",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "title": "feat: add event-driven routines",
   "head": "feat/event-routines",
   "base": "main",
@@ -160,7 +160,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "merge_pull_request",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "pr_number": 42,
   "merge_method": "squash"
 }
@@ -172,7 +172,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "list_issue_comments",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "issue_number": 42,
   "limit": 10
 }
@@ -184,7 +184,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "create_issue_comment",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "issue_number": 42,
   "body": "Thanks for reporting this!"
 }
@@ -196,7 +196,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "list_pull_request_comments",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "pr_number": 42,
   "limit": 30
 }
@@ -208,7 +208,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "reply_pull_request_comment",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "comment_id": 123456789,
   "body": "Fixed in the latest commit."
 }
@@ -220,7 +220,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "get_pull_request_reviews",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "pr_number": 42
 }
 ```
@@ -231,7 +231,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "get_combined_status",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "ref": "main"
 }
 ```
@@ -242,7 +242,7 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "get_file_content",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "path": "README.md",
   "ref": "main"
 }
@@ -254,10 +254,10 @@ Fallback: use a Personal Access Token if you do not want to run an OAuth app:
 {
   "action": "create_or_update_file",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "path": "docs/example.txt",
   "message": "docs: add example",
-  "content": "Hello from IronClaw"
+  "content": "Hello from T3Claw"
 }
 ```
 
@@ -269,7 +269,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "delete_file",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "path": "docs/example.txt",
   "message": "docs: remove example",
   "sha": "0123456789abcdef0123456789abcdef01234567"
@@ -282,7 +282,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "list_branches",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "limit": 20
 }
 ```
@@ -293,9 +293,9 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "fork_repo",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "organization": "my-org",
-  "name": "ironclaw-fork",
+  "name": "t3claw-fork",
   "default_branch_only": true
 }
 ```
@@ -308,7 +308,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "create_branch",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "branch": "feature/github-tool-audit",
   "from_ref": "main"
 }
@@ -320,7 +320,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "list_releases",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "limit": 10
 }
 ```
@@ -331,7 +331,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "create_release",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "tag_name": "v1.2.3",
   "name": "v1.2.3",
   "generate_release_notes": true
@@ -344,7 +344,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "trigger_workflow",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "workflow_id": "ci.yml",
   "ref": "main",
   "inputs": {
@@ -359,7 +359,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "get_workflow_runs",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "limit": 5
 }
 ```
@@ -370,7 +370,7 @@ When updating an existing file, include the current blob `sha`.
 {
   "action": "get_workflow_runs",
   "owner": "nearai",
-  "repo": "ironclaw",
+  "repo": "t3claw",
   "limit": 5,
   "page": 2
 }
@@ -399,7 +399,7 @@ Invalid event: 'INVALID'. Must be one of: APPROVE, REQUEST_CHANGES, COMMENT
 ### Missing Token
 
 ```text
-GitHub token not found in secret store. Set it with: ironclaw secret set github_token <token>...
+GitHub token not found in secret store. Set it with: t3claw secret set github_token <token>...
 ```
 
 ## Troubleshooting
@@ -413,7 +413,7 @@ GitHub token not found in secret store. Set it with: ironclaw secret set github_
 ### "GitHub API error 401: Bad credentials"
 
 - The token might be invalid or expired.
-- Update the token: `ironclaw secret set github_token NEW_TOKEN`.
+- Update the token: `t3claw secret set github_token NEW_TOKEN`.
 
 ### Rate Limiting
 

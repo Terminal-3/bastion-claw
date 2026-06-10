@@ -9,13 +9,13 @@ use crate::config::INJECTED_VARS;
 ///
 /// Acquire the workspace-wide env-var mutex, recovering from poison.
 ///
-/// Delegates to [`ironclaw_common::env_helpers::lock_env`] so tests across
-/// every crate (`ironclaw`, `ironclaw_llm`, `ironclaw_common`) serialize on
+/// Delegates to [`t3claw_common::env_helpers::lock_env`] so tests across
+/// every crate (`t3claw`, `t3claw_llm`, `t3claw_common`) serialize on
 /// the same `Mutex`. Per-module mutexes would not prevent races between
 /// modules running in parallel.
 #[cfg(test)]
 pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
-    ironclaw_common::env_helpers::lock_env()
+    t3claw_common::env_helpers::lock_env()
 }
 
 /// Thread-safe mutable overlay for env vars set at runtime.
@@ -28,11 +28,11 @@ pub(crate) fn lock_env() -> std::sync::MutexGuard<'static, ()> {
 /// Priority: real env vars > `RUNTIME_ENV_OVERRIDES` > `INJECTED_VARS`.
 /// Set a runtime environment override (thread-safe alternative to `std::env::set_var`).
 ///
-/// Delegates to `ironclaw_common::env_helpers::set_runtime_env` so the
-/// override is visible to both this crate and `ironclaw_llm` (which reads
-/// the same overlay through `ironclaw_common::env_helpers::env_or_override`).
+/// Delegates to `t3claw_common::env_helpers::set_runtime_env` so the
+/// override is visible to both this crate and `t3claw_llm` (which reads
+/// the same overlay through `t3claw_common::env_helpers::env_or_override`).
 pub fn set_runtime_env(key: &str, value: &str) {
-    ironclaw_common::env_helpers::set_runtime_env(key, value);
+    t3claw_common::env_helpers::set_runtime_env(key, value);
 }
 
 /// Read an env var, checking real env first, then the shared runtime
@@ -41,8 +41,8 @@ pub fn set_runtime_env(key: &str, value: &str) {
 /// Priority: real env vars > runtime overrides > `INJECTED_VARS`.
 /// Empty values are treated as unset at every layer.
 pub fn env_or_override(key: &str) -> Option<String> {
-    // Real env + runtime overlay (shared with `ironclaw_llm`)
-    if let Some(val) = ironclaw_common::env_helpers::env_or_override(key) {
+    // Real env + runtime overlay (shared with `t3claw_llm`)
+    if let Some(val) = t3claw_common::env_helpers::env_or_override(key) {
         return Some(val);
     }
 
@@ -74,8 +74,8 @@ pub(crate) fn optional_env(key: &str) -> Result<Option<String>, ConfigError> {
     }
 
     // Fall back to the shared runtime overrides (set via set_runtime_env;
-    // also reachable from `ironclaw_llm` via `ironclaw_common::env_helpers`).
-    if let Some(val) = ironclaw_common::env_helpers::env_or_override(key) {
+    // also reachable from `t3claw_llm` via `t3claw_common::env_helpers`).
+    if let Some(val) = t3claw_common::env_helpers::env_or_override(key) {
         return Ok(Some(val));
     }
 
@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn runtime_env_override_is_visible_to_env_or_override() {
         // Use a unique key that won't collide with real env vars.
-        let key = "IRONCLAW_TEST_RUNTIME_OVERRIDE_42";
+        let key = "T3CLAW_TEST_RUNTIME_OVERRIDE_42";
 
         // Not set initially
         assert!(env_or_override(key).is_none());
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn runtime_env_override_is_visible_to_optional_env() {
-        let key = "IRONCLAW_TEST_OPTIONAL_ENV_OVERRIDE_42";
+        let key = "T3CLAW_TEST_OPTIONAL_ENV_OVERRIDE_42";
 
         assert_eq!(optional_env(key).unwrap(), None);
 
@@ -653,7 +653,7 @@ mod tests {
     #[test]
     fn real_env_var_takes_priority_over_runtime_override() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_ENV_PRIORITY_42";
+        let key = "T3CLAW_TEST_ENV_PRIORITY_42";
 
         // Set runtime override
         set_runtime_env(key, "override_value");
@@ -675,7 +675,7 @@ mod tests {
 
     #[test]
     fn lock_env_recovers_from_poisoned_mutex() {
-        use ironclaw_common::env_helpers::ENV_MUTEX;
+        use t3claw_common::env_helpers::ENV_MUTEX;
 
         // Simulate a poisoned mutex: spawn a thread that panics while holding the lock.
         let _ = std::thread::spawn(|| {
@@ -820,7 +820,7 @@ mod tests {
     /// "DNS resolution failure" unreliable. Detect that case and skip the test.
     fn invalid_tld_resolves_locally() -> bool {
         use std::net::ToSocketAddrs;
-        ("ironclaw-dns-hijack-probe.invalid", 443u16)
+        ("t3claw-dns-hijack-probe.invalid", 443u16)
             .to_socket_addrs()
             .is_ok()
     }
@@ -881,7 +881,7 @@ mod tests {
     #[test]
     fn db_first_or_default_prefers_settings_over_env() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_1";
+        let key = "T3CLAW_TEST_DB_FIRST_1";
         // SAFETY: under ENV_MUTEX
         unsafe { std::env::set_var(key, "from-env") };
 
@@ -896,7 +896,7 @@ mod tests {
     #[test]
     fn db_first_or_default_falls_back_to_env() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_2";
+        let key = "T3CLAW_TEST_DB_FIRST_2";
         unsafe { std::env::set_var(key, "from-env") };
 
         // settings_val == default_val → treated as "unset"
@@ -914,7 +914,7 @@ mod tests {
     #[test]
     fn db_first_or_default_uses_default_when_neither_set() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_3";
+        let key = "T3CLAW_TEST_DB_FIRST_3";
         unsafe { std::env::remove_var(key) };
 
         let result: String =
@@ -926,7 +926,7 @@ mod tests {
     #[test]
     fn db_first_bool_prefers_settings() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_BOOL_1";
+        let key = "T3CLAW_TEST_DB_FIRST_BOOL_1";
         unsafe { std::env::set_var(key, "false") };
 
         let result = db_first_bool(true, false, key).expect("should resolve");
@@ -938,7 +938,7 @@ mod tests {
     #[test]
     fn db_first_bool_falls_back_to_env() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_BOOL_2";
+        let key = "T3CLAW_TEST_DB_FIRST_BOOL_2";
         unsafe { std::env::set_var(key, "true") };
 
         // settings == default → falls back to env
@@ -951,7 +951,7 @@ mod tests {
     #[test]
     fn db_first_optional_string_prefers_settings() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_OPT_1";
+        let key = "T3CLAW_TEST_DB_FIRST_OPT_1";
         unsafe { std::env::set_var(key, "from-env") };
 
         let val = Some("from-db".to_string());
@@ -964,7 +964,7 @@ mod tests {
     #[test]
     fn db_first_optional_string_falls_back_to_env() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_OPT_2";
+        let key = "T3CLAW_TEST_DB_FIRST_OPT_2";
         unsafe { std::env::set_var(key, "from-env") };
 
         let result = db_first_optional_string(&None, key).expect("should resolve");
@@ -976,7 +976,7 @@ mod tests {
     #[test]
     fn db_first_optional_string_empty_treated_as_unset() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_OPT_3";
+        let key = "T3CLAW_TEST_DB_FIRST_OPT_3";
         unsafe { std::env::set_var(key, "from-env") };
 
         let val = Some(String::new());
@@ -993,7 +993,7 @@ mod tests {
     #[test]
     fn db_first_option_prefers_settings() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_OPT_T_1";
+        let key = "T3CLAW_TEST_DB_FIRST_OPT_T_1";
         unsafe { std::env::set_var(key, "99") };
 
         let val: Option<u64> = Some(42);
@@ -1006,7 +1006,7 @@ mod tests {
     #[test]
     fn db_first_option_falls_back_to_env() {
         let _guard = lock_env();
-        let key = "IRONCLAW_TEST_DB_FIRST_OPT_T_2";
+        let key = "T3CLAW_TEST_DB_FIRST_OPT_T_2";
         unsafe { std::env::set_var(key, "99") };
 
         let val: Option<u64> = None;

@@ -1,6 +1,6 @@
 # Setup / Onboarding Specification
 
-This document is the authoritative specification for IronClaw's onboarding
+This document is the authoritative specification for T3Claw's onboarding
 wizard. Any code change to `src/setup/` **must** keep this document in sync.
 If a future contributor or coding agent modifies setup behavior, update this
 file first, then adjust the code to match.
@@ -10,21 +10,21 @@ file first, then adjust the code to match.
 ## Entry Points
 
 ```
-ironclaw onboard [--skip-auth] [--channels-only] [--provider-only] [--quick]
+t3claw onboard [--skip-auth] [--channels-only] [--provider-only] [--quick]
 ```
 
 Explicit invocation. Loads `.env` files, runs the wizard, exits.
 
 ```
-ironclaw          (first run, no database configured)
+t3claw          (first run, no database configured)
 ```
 
 Auto-detection via `check_onboard_needed()` in `main.rs`. Skips onboarding
-when `ONBOARD_COMPLETED` env var is set (written to `~/.ironclaw/.env` by
+when `ONBOARD_COMPLETED` env var is set (written to `~/.t3claw/.env` by
 the wizard). Otherwise triggers when no database is configured:
 - `DATABASE_URL` env var is set
 - `LIBSQL_PATH` env var is set
-- `~/.ironclaw/ironclaw.db` exists on disk
+- `~/.t3claw/t3claw.db` exists on disk
 
 Auto-triggered onboarding uses **quick mode** by default.
 
@@ -33,15 +33,15 @@ The `--no-onboard` CLI flag suppresses auto-detection.
 ### Reborn Standalone Onboarding
 
 ```
-ironclaw-reborn onboard [--force] [--dry-run] [--import-history]
+t3claw-reborn onboard [--force] [--dry-run] [--import-history]
 ```
 
 This command is owned by the standalone Reborn binary, not by `src/setup`.
-It initializes `IRONCLAW_REBORN_HOME` / `~/.ironclaw/reborn`, creates or
+It initializes `T3CLAW_REBORN_HOME` / `~/.t3claw/reborn`, creates or
 preserves Reborn `config.toml` and `providers.json`, and writes the Reborn
 `.onboard-completed.json` marker without reading or mutating v1 database,
 channel, settings, or setup state. The detailed Reborn-specific contract lives
-in `docs/reborn/onboarding.md`; changes to `ironclaw-reborn onboard` should keep
+in `docs/reborn/onboarding.md`; changes to `t3claw-reborn onboard` should keep
 that document and this boundary note in sync.
 
 ---
@@ -52,7 +52,7 @@ that document and this boundary note in sync.
 1. Parse CLI args
 2. If Command::Onboard  → load .env, run wizard, exit
 3. If Command::Run or no command:
-   a. Load .env files (dotenvy::dotenv() then load_ironclaw_env())
+   a. Load .env files (dotenvy::dotenv() then load_t3claw_env())
    b. check_onboard_needed() → run wizard if needed
    c. Config::from_env()     → build config from env vars
    d. Create SessionManager  → load session token
@@ -62,7 +62,7 @@ that document and this boundary note in sync.
 
 **Critical ordering:** `.env` files must be loaded (step 3a) before
 `Config::from_env()` (step 3c) because bootstrap vars like
-`DATABASE_BACKEND` live in `~/.ironclaw/.env`.
+`DATABASE_BACKEND` live in `~/.t3claw/.env`.
 
 ---
 
@@ -74,27 +74,27 @@ the local deployment profile, LLM provider, and model selection.
 
 ```
 Local Usage Profile     ← choose local or local-sandbox when unset
-auto_setup_database()    → libsql at ~/.ironclaw/ironclaw.db (zero prompts)
+auto_setup_database()    → libsql at ~/.t3claw/t3claw.db (zero prompts)
 auto_setup_security()    → keychain or env var (zero prompts)
 Step 1/2: Inference Provider  ← interactive unless provider env is detected
 Step 2/2: Model Selection     ← interactive unless defaulted by detected provider
        ↓
-   save_and_summarize()      → includes tip to run `ironclaw onboard`
+   save_and_summarize()      → includes tip to run `t3claw onboard`
 ```
 
-**Local usage profile:** If `IRONCLAW_PROFILE` is already set, quick mode
+**Local usage profile:** If `T3CLAW_PROFILE` is already set, quick mode
 respects it and does not prompt. On a true first run with no profile and no
 existing DB settings, quick mode asks whether the user wants:
 - `local`: TUI, local libSQL, background tasks enabled, no Docker sandbox
 - `local-sandbox`: TUI, local libSQL, background tasks enabled, Docker sandbox enabled with read-only policy
 
-The selected profile is written to `~/.ironclaw/.env` as `IRONCLAW_PROFILE`
+The selected profile is written to `~/.t3claw/.env` as `T3CLAW_PROFILE`
 so subsequent startups apply the same built-in profile before database-backed
 settings are loaded.
 
 **`auto_setup_database()`:** Uses existing env vars if set (`DATABASE_URL`
 for postgres, `LIBSQL_PATH` for libsql) without prompting. Otherwise
-defaults to libsql at `~/.ironclaw/ironclaw.db`, creates the database,
+defaults to libsql at `~/.t3claw/t3claw.db`, creates the database,
 and runs migrations silently. Falls back to interactive mode only when
 just the postgres feature is compiled and no `DATABASE_URL` is set.
 
@@ -107,7 +107,7 @@ except unavoidable macOS keychain dialogs.
 `upsert_bootstrap_vars()` instead of `save_bootstrap_env()`, preserving
 user-added variables like `HTTP_HOST` across re-onboarding.
 
-The full 9-step wizard remains available via `ironclaw onboard`.
+The full 9-step wizard remains available via `t3claw onboard`.
 
 ---
 
@@ -173,7 +173,7 @@ Both features compiled?
 3. Optionally run migrations
 
 **libSQL path:**
-1. Offer local path (default: `~/.ironclaw/ironclaw.db`)
+1. Offer local path (default: `~/.t3claw/t3claw.db`)
 2. Optional Turso cloud sync (URL + auth token)
 3. Test connection via `connect_without_migrations()`
 4. Always run migrations (idempotent CREATE IF NOT EXISTS)
@@ -209,7 +209,7 @@ SECRETS_MASTER_KEY env var set?
 On macOS, `security_framework::get_generic_password()` can trigger TWO
 system dialogs:
 1. "Enter your password to unlock the keychain" (keychain locked)
-2. "Allow ironclaw to access this keychain item" (per-app authorization)
+2. "Allow t3claw to access this keychain item" (per-app authorization)
 
 This is OS-level behavior we cannot prevent. To minimize pain:
 
@@ -223,7 +223,7 @@ This is OS-level behavior we cannot prevent. To minimize pain:
   Later calls to `init_secrets_context()` check this field first, avoiding
   redundant keychain probes.
 
-- **Never probe the keychain in read-only commands** (e.g., `ironclaw status`).
+- **Never probe the keychain in read-only commands** (e.g., `t3claw status`).
   The status command reports "env not set (keychain may be configured)"
   rather than triggering system dialogs.
 
@@ -282,10 +282,10 @@ with its own secret name and env var. It is **not** stored as `openai_compatible
     (Responses API at `private.near.ai`, session token auth)
   - Option 4: NEAR AI Cloud API key → **NEAR AI Cloud** mode
     (Chat Completions API at `cloud-api.near.ai`, API key auth)
-- **NEAR AI Chat** path: session token saved to `~/.ironclaw/session.json`.
+- **NEAR AI Chat** path: session token saved to `~/.t3claw/session.json`.
   Hosting providers can set `NEARAI_SESSION_TOKEN` env var directly (takes
   precedence over file-based tokens).
-- **NEAR AI Cloud** path: `NEARAI_API_KEY` saved to `~/.ironclaw/.env`
+- **NEAR AI Cloud** path: `NEARAI_API_KEY` saved to `~/.t3claw/.env`
   (bootstrap) and encrypted secrets store (`llm_nearai_api_key`).
   `LlmConfig::resolve()` auto-selects `ChatCompletions` mode when the
   API key is present.
@@ -351,7 +351,7 @@ key first, then falls back to the standard env var.
 
 ```
 6a. Tunnel setup (if webhook channels needed)
-6b. Discover WASM channels from ~/.ironclaw/channels/
+6b. Discover WASM channels from ~/.t3claw/channels/
 6c. Build channel options: discovered + bundled + registry catalog
 6d. Multi-select: CLI/TUI, HTTP, all available channels
 6e. Install missing bundled channels (copy WASM binaries)
@@ -362,7 +362,7 @@ key first, then falls back to the standard env var.
 ```
 
 **Channel sources** (priority order for installation):
-1. Already installed in `~/.ironclaw/channels/`
+1. Already installed in `~/.t3claw/channels/`
 2. Bundled channels (pre-compiled in `channels-src/`)
 3. Registry channels (`registry/channels/*.json`, download-first with source fallback)
 
@@ -412,7 +412,7 @@ key first, then falls back to the standard env var.
 1. Load `RegistryCatalog` from `registry/` directory
 2. If registry not found, print info and skip
 3. List all tool manifests from the catalog
-4. Discover already-installed tools in `~/.ironclaw/tools/`
+4. Discover already-installed tools in `~/.t3claw/tools/`
 5. Multi-select: show all registry tools with display name, auth method,
    and description. Pre-check tools tagged `"default"` and already installed.
 6. For each selected tool not yet installed, install via
@@ -454,30 +454,30 @@ Searches for `registry/` directory in order:
 
 Settings are persisted in two places:
 
-**Layer 1: `~/.ironclaw/.env`** (bootstrap vars)
+**Layer 1: `~/.t3claw/.env`** (bootstrap vars)
 
 Contains only the settings needed BEFORE database connection. Written by
 `write_bootstrap_env()` in `wizard.rs` via `upsert_bootstrap_vars()`.
 
 ```env
-IRONCLAW_PROFILE="local"
+T3CLAW_PROFILE="local"
 DATABASE_BACKEND="libsql"
-LIBSQL_PATH="/Users/name/.ironclaw/ironclaw.db"
+LIBSQL_PATH="/Users/name/.t3claw/t3claw.db"
 SECRETS_MASTER_KEY="..."   # only if env key source selected
 ONBOARD_COMPLETED="true"
 ```
 
 Or for PostgreSQL:
 ```env
-IRONCLAW_PROFILE="local"
+T3CLAW_PROFILE="local"
 DATABASE_BACKEND="postgres"
-DATABASE_URL="postgres://user:pass@localhost/ironclaw"
+DATABASE_URL="postgres://user:pass@localhost/t3claw"
 SECRETS_MASTER_KEY="..."
 ONBOARD_COMPLETED="true"
 ```
 
 **Why separate?** Chicken-and-egg: you need `DATABASE_BACKEND` to know
-which database to connect to, `IRONCLAW_PROFILE` to apply built-in defaults
+which database to connect to, `T3CLAW_PROFILE` to apply built-in defaults
 before DB overlays, and `SECRETS_MASTER_KEY` to decrypt the
 secrets store; none of these can rely on database settings. LLM settings
 (`LLM_BACKEND`, base URLs, model names) are persisted to the DB via
@@ -508,7 +508,7 @@ This prevents data loss if a later step fails (e.g., the user enters an
 API key in step 3 but step 5 crashes — they won't need to re-enter it).
 
 **`persist_after_step()`** is called after each step in `run()` and:
-1. Writes bootstrap vars to `~/.ironclaw/.env` via `write_bootstrap_env()`
+1. Writes bootstrap vars to `~/.t3claw/.env` via `write_bootstrap_env()`
 2. Writes all current settings to the database via `persist_settings()`
 3. Silently ignores errors (e.g., if called before Step 1 establishes a DB)
 
@@ -544,9 +544,9 @@ Final step of the wizard:
 4. Print configuration summary
 ```
 
-Bootstrap vars written to `~/.ironclaw/.env` (only true chicken-and-egg vars
+Bootstrap vars written to `~/.t3claw/.env` (only true chicken-and-egg vars
 that are needed before the DB is connected):
-- `IRONCLAW_PROFILE` (when quick first-run setup selected a profile)
+- `T3CLAW_PROFILE` (when quick first-run setup selected a profile)
 - `DATABASE_BACKEND` (always)
 - `DATABASE_URL` (if postgres)
 - `LIBSQL_PATH` (if libsql)
@@ -607,7 +607,7 @@ pub struct Settings {
     // Step 7: Heartbeat
     pub heartbeat: HeartbeatSettings,        // enabled, interval, notify
 
-    // Advanced (not in wizard, set via `ironclaw config set`)
+    // Advanced (not in wizard, set via `t3claw config set`)
     pub agent: AgentSettings,
     pub wasm: WasmSettings,
     pub sandbox: SandboxSettings,
@@ -684,7 +684,7 @@ Must properly restore terminal state on all exit paths.
 - Two dialogs per call is normal, not a bug
 - Cache the result after first access to avoid repeat prompts
 - Never probe keychain in read-only commands (`status`, `--help`)
-- Service name: `"ironclaw"`, account: `"master_key"`
+- Service name: `"t3claw"`, account: `"master_key"`
 
 ### Linux Secret Service
 
@@ -702,15 +702,15 @@ local browser.
 
 1. **NEAR AI Cloud API key (option 4 in auth menu):** Get an API key
    from `https://cloud.near.ai` and paste it into the terminal. No
-   local listener is needed. The key is saved to `~/.ironclaw/.env`
+   local listener is needed. The key is saved to `~/.t3claw/.env`
    and the encrypted secrets store. Uses the OpenAI-compatible
    ChatCompletions API mode.
 
-2. **Custom callback URL:** Set `IRONCLAW_OAUTH_CALLBACK_URL` to a
+2. **Custom callback URL:** Set `T3CLAW_OAUTH_CALLBACK_URL` to a
    publicly accessible URL (e.g., via SSH tunnel or reverse proxy) that
    forwards to port 9876 on the server:
    ```bash
-   export IRONCLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
+   export T3CLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
    ```
 
 The `callback_url()` function in `src/auth/oauth.rs` checks this env var
@@ -778,4 +778,4 @@ When changing the onboarding flow:
    cargo clippy --all --benches --tests --examples --all-features -- -D warnings
    cargo test --lib -- setup bootstrap
    ```
-7. Test a fresh onboarding: `rm -rf ~/.ironclaw && cargo run`
+7. Test a fresh onboarding: `rm -rf ~/.t3claw && cargo run`

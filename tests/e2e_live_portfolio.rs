@@ -7,7 +7,7 @@
 //!
 //! **Live mode** (real LLM + real APIs, records trace fixture):
 //! ```bash
-//! IRONCLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_portfolio -- --ignored --test-threads=1
+//! T3CLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_portfolio -- --ignored --test-threads=1
 //! ```
 //!
 //! **Note:** `--test-threads=1` is required. Engine v2 has a thread-registry
@@ -64,7 +64,7 @@ mod live_tests {
 
         if harness.mode() == TestMode::Replay {
             eprintln!(
-                "[PortfolioScan] Live-only test — skipping outside IRONCLAW_LIVE_TEST=1. \
+                "[PortfolioScan] Live-only test — skipping outside T3CLAW_LIVE_TEST=1. \
                  WASM tool HTTP calls can't be replayed from LLM traces. \
                  Deterministic coverage lives in e2e_wasm_portfolio.rs."
             );
@@ -147,7 +147,7 @@ mod live_tests {
 
         if harness.mode() == TestMode::Replay {
             eprintln!(
-                "[PortfolioPipeline] Live-only test — skipping outside IRONCLAW_LIVE_TEST=1. \
+                "[PortfolioPipeline] Live-only test — skipping outside T3CLAW_LIVE_TEST=1. \
                  Deterministic coverage lives in e2e_wasm_portfolio.rs."
             );
             return;

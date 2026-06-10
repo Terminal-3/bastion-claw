@@ -32,8 +32,8 @@ on:
     - cron: '0 * * * *'
 
 env:
-  IMAGE_NAME: nearaidev/ironclaw
-  WORKER_IMAGE_NAME: nearaidev/ironclaw-worker
+  IMAGE_NAME: nearaidev/t3claw
+  WORKER_IMAGE_NAME: nearaidev/t3claw-worker
 
 jobs:
   build:
@@ -136,14 +136,14 @@ jobs:
           WORKER_BUILT_SHA=""
 
           if docker pull "${IMAGE_NAME}:staging" > /dev/null 2>&1; then
-            CURRENT_BUILT_SHA=$(docker inspect --format='{{index .Config.Labels "ironclaw.git.sha"}}' "${IMAGE_NAME}:staging" 2>/dev/null || echo "")
+            CURRENT_BUILT_SHA=$(docker inspect --format='{{index .Config.Labels "t3claw.git.sha"}}' "${IMAGE_NAME}:staging" 2>/dev/null || echo "")
           fi
           if docker pull "${WORKER_IMAGE_NAME}:staging" > /dev/null 2>&1; then
-            WORKER_BUILT_SHA=$(docker inspect --format='{{index .Config.Labels "ironclaw.git.sha"}}' "${WORKER_IMAGE_NAME}:staging" 2>/dev/null || echo "")
+            WORKER_BUILT_SHA=$(docker inspect --format='{{index .Config.Labels "t3claw.git.sha"}}' "${WORKER_IMAGE_NAME}:staging" 2>/dev/null || echo "")
           fi
 
-          echo "Current built commit (ironclaw): ${CURRENT_BUILT_SHA:-<none>}"
-          echo "Current built commit (ironclaw-worker): ${WORKER_BUILT_SHA:-<none>}"
+          echo "Current built commit (t3claw): ${CURRENT_BUILT_SHA:-<none>}"
+          echo "Current built commit (t3claw-worker): ${WORKER_BUILT_SHA:-<none>}"
           echo "Current source commit: ${SOURCE_SHA}"
 
           if [[ -n "${CURRENT_BUILT_SHA}" && "${CURRENT_BUILT_SHA}" == "${SOURCE_SHA}" && -n "${WORKER_BUILT_SHA}" && "${WORKER_BUILT_SHA}" == "${SOURCE_SHA}" ]]; then
@@ -158,7 +158,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Build and push (ironclaw)
+      - name: Build and push (t3claw)
         if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -167,12 +167,12 @@ jobs:
           tags: ${{ steps.tags.outputs.tags }}
           target: ${{ steps.tags.outputs.target }}
           labels: |
-            ironclaw.git.sha=${{ steps.source_sha.outputs.sha }}
+            t3claw.git.sha=${{ steps.source_sha.outputs.sha }}
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push (ironclaw-worker)
+      - name: Build and push (t3claw-worker)
         if: steps.check.outputs.skip != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -181,7 +181,7 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.worker_tags }}
           labels: |
-            ironclaw.git.sha=${{ steps.source_sha.outputs.sha }}
+            t3claw.git.sha=${{ steps.source_sha.outputs.sha }}
           platforms: linux/amd64
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
@@ -195,9 +195,9 @@ jobs:
           app-id: ${{ secrets.GH_RELEASES_MANAGER_APP_ID }}
           private-key: ${{ secrets.GH_RELEASES_MANAGER_APP_PRIVATE_KEY }}
           owner: nearai
-          repositories: ironclaw-dind
+          repositories: t3claw-dind
 
-      - name: Trigger ironclaw-dind Build & Push
+      - name: Trigger t3claw-dind Build & Push
         if: steps.app-token.outcome == 'success' && steps.check.outputs.skip != 'true'
         continue-on-error: true
         env:
@@ -210,12 +210,12 @@ jobs:
           if [[ "${IS_RELEASE_BUILD}" == "true" && -n "${VERSION}" ]]; then
             gh api repos/nearai/ironclaw-dind/dispatches \
               --method POST \
-              -f event_type="ironclaw_image_published" \
+              -f event_type="t3claw_image_published" \
               -f client_payload[version]="${VERSION}"
           elif [[ "${EVENT_NAME}" == "schedule" ]] || [[ "${INPUT_TAG}" == "staging" ]]; then
             gh api repos/nearai/ironclaw-dind/dispatches \
               --method POST \
-              -f event_type="ironclaw_image_published"
+              -f event_type="t3claw_image_published"
           fi
 
       - name: Summary
@@ -229,12 +229,12 @@ jobs:
           {
             echo "## Docker Images"
             echo ""
-            echo "**ironclaw:**"
+            echo "**t3claw:**"
             echo '```'
             echo "${TAGS}" | tr ',' '\n'
             echo '```'
             echo ""
-            echo "**ironclaw-worker:**"
+            echo "**t3claw-worker:**"
             echo '```'
             echo "${WORKER_TAGS}" | tr ',' '\n'
             echo '```'

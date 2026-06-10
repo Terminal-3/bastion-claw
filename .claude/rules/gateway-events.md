@@ -30,7 +30,7 @@ Every `AppEvent` projects from exactly one of:
 
 | Source log | Projection function | Typical variants |
 |---|---|---|
-| `ironclaw_engine::EventKind` | `src/bridge/router.rs::thread_event_to_app_events` | Turn progression, tool execution, gates, leases, child threads, skills |
+| `t3claw_engine::EventKind` | `src/bridge/router.rs::thread_event_to_app_events` | Turn progression, tool execution, gates, leases, child threads, skills |
 | Sandbox `JobEvent` | `src/worker/job.rs` (currently inline; extract under #2792 Phase 1 PR 3) | `JobStarted`, `JobMessage`, `JobToolUse`, `JobToolResult`, `JobStatus`, `JobResult` |
 | Channel-lifecycle logs | `src/channels/web/features/oauth/`, `features/pairing/`, `features/extensions/`, `extensions/manager.rs` | `OnboardingState`, `ExtensionStatus` |
 

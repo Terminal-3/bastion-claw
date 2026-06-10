@@ -1,6 +1,6 @@
-//! Effect bridge adapter — wraps `ToolRegistry` + `SafetyLayer` as `ironclaw_engine::EffectExecutor`.
+//! Effect bridge adapter — wraps `ToolRegistry` + `SafetyLayer` as `t3claw_engine::EffectExecutor`.
 //!
-//! This is the security boundary between the engine and existing IronClaw
+//! This is the security boundary between the engine and existing T3Claw
 //! infrastructure. All v1 security controls are enforced here:
 //! - Tool approval (requires_approval, auto-approve tracking)
 //! - Output sanitization (sanitize_tool_output + wrap_for_llm)
@@ -15,13 +15,13 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 #[cfg(test)]
-use ironclaw_engine::ModelToolSurface;
-use ironclaw_engine::{
+use t3claw_engine::ModelToolSurface;
+use t3claw_engine::{
     ActionDef, ActionInventory, ActionResult, CapabilityLease, CapabilityRegistry,
     CapabilitySummary, EffectExecutor, EngineError, MountError, Store, ThreadExecutionContext,
     WorkspaceMounts,
 };
-use ironclaw_skills::SkillRegistry;
+use t3claw_skills::SkillRegistry;
 
 use crate::auth::extension::{AuthCheckResult, AuthManager, LatentActionExecution, ToolReadiness};
 use crate::auth::oauth::sanitize_auth_url;
@@ -38,7 +38,7 @@ use crate::tools::ToolRegistry;
 use crate::tools::permissions::PermissionState;
 use crate::tools::rate_limiter::RateLimiter;
 use crate::tools::{ApprovalRequirement, Tool};
-use ironclaw_safety::SafetyLayer;
+use t3claw_safety::SafetyLayer;
 
 /// Wraps the existing tool pipeline to implement the engine's `EffectExecutor`.
 ///
@@ -57,7 +57,7 @@ pub struct EffectBridgeAdapter {
     /// Per-user per-tool sliding window rate limiter.
     rate_limiter: RateLimiter,
     /// Mission manager for handling mission_* function calls.
-    mission_manager: RwLock<Option<Arc<ironclaw_engine::MissionManager>>>,
+    mission_manager: RwLock<Option<Arc<t3claw_engine::MissionManager>>>,
     /// Centralized auth manager for pre-flight credential checks.
     auth_manager: RwLock<Option<Arc<AuthManager>>>,
     /// Optional HTTP interceptor for trace recording / replay. When set, every
@@ -66,7 +66,7 @@ pub struct EffectBridgeAdapter {
     /// outbound requests through the interceptor. Without this, engine v2 tool
     /// calls bypass the recorder entirely — recorded traces end up with zero
     /// `http_exchanges` and replay can't substitute responses.
-    http_interceptor: RwLock<Option<Arc<dyn ironclaw_llm::recording::HttpInterceptor>>>,
+    http_interceptor: RwLock<Option<Arc<dyn t3claw_llm::recording::HttpInterceptor>>>,
     /// Engine v2 store used to mirror live-installed v1 skills into `DocType::Skill`.
     engine_store: RwLock<Option<Arc<dyn Store>>>,
     /// V1 skill registry used to load the just-installed skill for v2 sync.
@@ -160,11 +160,11 @@ impl EffectBridgeAdapter {
     /// registered under, used as a race-window fallback.
     fn external_tool_catalog_keys(
         context: &ThreadExecutionContext,
-    ) -> impl Iterator<Item = ironclaw_engine::ThreadId> {
+    ) -> impl Iterator<Item = t3claw_engine::ThreadId> {
         let scope = context
             .conversation_scope
             .filter(|uuid| *uuid != context.thread_id.0)
-            .map(ironclaw_engine::ThreadId);
+            .map(t3claw_engine::ThreadId);
         std::iter::once(context.thread_id).chain(scope)
     }
 
@@ -192,7 +192,7 @@ impl EffectBridgeAdapter {
     /// interceptor, so http-aware tools will record/replay through it.
     pub async fn set_http_interceptor(
         &self,
-        interceptor: Arc<dyn ironclaw_llm::recording::HttpInterceptor>,
+        interceptor: Arc<dyn t3claw_llm::recording::HttpInterceptor>,
     ) {
         *self.http_interceptor.write().await = Some(interceptor);
     }
@@ -238,7 +238,7 @@ impl EffectBridgeAdapter {
     /// The bridge router uses this to redact verbose-only observability
     /// events (notably `CodeExecuted`) through the leak detector before
     /// broadcasting them on SSE. The engine crate emits those events
-    /// raw because it has no dependency on `ironclaw_safety`; the
+    /// raw because it has no dependency on `t3claw_safety`; the
     /// scrubbing therefore happens at this adapter boundary.
     pub fn safety(&self) -> &Arc<SafetyLayer> {
         &self.safety
@@ -250,12 +250,12 @@ impl EffectBridgeAdapter {
     }
 
     /// Set the mission manager (called after engine init).
-    pub async fn set_mission_manager(&self, mgr: Arc<ironclaw_engine::MissionManager>) {
+    pub async fn set_mission_manager(&self, mgr: Arc<t3claw_engine::MissionManager>) {
         *self.mission_manager.write().await = Some(mgr);
     }
 
     /// Get the mission manager if available.
-    pub async fn mission_manager(&self) -> Option<Arc<ironclaw_engine::MissionManager>> {
+    pub async fn mission_manager(&self) -> Option<Arc<t3claw_engine::MissionManager>> {
         self.mission_manager.read().await.clone()
     }
 
@@ -358,7 +358,7 @@ impl EffectBridgeAdapter {
                 approval.action_name,
                 approval.context.current_call_id.as_deref(),
                 approval.parameters.clone(),
-                ironclaw_engine::ResumeKind::Approval {
+                t3claw_engine::ResumeKind::Approval {
                     allow_always: false,
                 },
                 None,
@@ -388,7 +388,7 @@ impl EffectBridgeAdapter {
                 approval.action_name,
                 approval.context.current_call_id.as_deref(),
                 approval.parameters.clone(),
-                ironclaw_engine::ResumeKind::Approval { allow_always: true },
+                t3claw_engine::ResumeKind::Approval { allow_always: true },
                 None,
                 Some(approval.lease.clone()),
             ));
@@ -504,7 +504,7 @@ impl EffectBridgeAdapter {
     async fn sync_skill_install_result(
         &self,
         output_value: &serde_json::Value,
-        project_id: ironclaw_engine::ProjectId,
+        project_id: t3claw_engine::ProjectId,
     ) -> Result<(), EngineError> {
         let Some(skill_name) = output_value.get("name").and_then(|value| value.as_str()) else {
             return Ok(());
@@ -549,7 +549,7 @@ impl EffectBridgeAdapter {
         &self,
         target: &str,
         user_id: &str,
-    ) -> Result<Option<ironclaw_engine::ProjectId>, EngineError> {
+    ) -> Result<Option<t3claw_engine::ProjectId>, EngineError> {
         let Some(slug) = extract_project_slug_from_target(target) else {
             return Ok(None);
         };
@@ -570,7 +570,7 @@ impl EffectBridgeAdapter {
         let slug_lower = slug.to_ascii_lowercase();
         let matched = existing.iter().find(|p| {
             p.user_id == user_id
-                && (ironclaw_engine::types::slugify_simple(&p.name) == slug_lower
+                && (t3claw_engine::types::slugify_simple(&p.name) == slug_lower
                     || p.name.to_ascii_lowercase() == slug_lower)
         });
         if let Some(p) = matched {
@@ -579,7 +579,7 @@ impl EffectBridgeAdapter {
         // Create a fresh project named after the slug. The model can
         // rename it later by writing a different `name` into
         // `projects/<slug>/.project.json` — slug (directory) stays fixed.
-        let project = ironclaw_engine::Project::new(user_id, slug, "");
+        let project = t3claw_engine::Project::new(user_id, slug, "");
         let pid = project.id;
         store
             .save_project(&project)
@@ -595,7 +595,7 @@ impl EffectBridgeAdapter {
         action_name: &str,
         call_id: Option<&str>,
         parameters: serde_json::Value,
-        resume_kind: ironclaw_engine::ResumeKind,
+        resume_kind: t3claw_engine::ResumeKind,
         resume_output: Option<serde_json::Value>,
         paused_lease: Option<CapabilityLease>,
     ) -> EngineError {
@@ -626,7 +626,7 @@ impl EffectBridgeAdapter {
                 action_name,
                 context.current_call_id.as_deref(),
                 parameters,
-                ironclaw_engine::ResumeKind::Authentication {
+                t3claw_engine::ResumeKind::Authentication {
                     // Validate the tool-declared credential name — it is
                     // external/untrusted input. Fall back to the tool's
                     // own name (structurally trusted, from the registry)
@@ -637,10 +637,10 @@ impl EffectBridgeAdapter {
                     credential_name: output_value
                         .get("credential_name")
                         .and_then(|v| v.as_str())
-                        .and_then(|raw| ironclaw_common::CredentialName::new(raw).ok())
-                        .or_else(|| ironclaw_common::CredentialName::new(name).ok())
+                        .and_then(|raw| t3claw_common::CredentialName::new(raw).ok())
+                        .or_else(|| t3claw_common::CredentialName::new(name).ok())
                         .unwrap_or_else(|| {
-                            ironclaw_common::CredentialName::from_trusted(name.to_string())
+                            t3claw_common::CredentialName::from_trusted(name.to_string())
                         }),
                     instructions: output_value
                         .get("instructions")
@@ -745,7 +745,7 @@ impl EffectBridgeAdapter {
                 let timezone = params
                     .get("timezone")
                     .and_then(|v| v.as_str())
-                    .and_then(ironclaw_engine::ValidTimezone::parse)
+                    .and_then(t3claw_engine::ValidTimezone::parse)
                     .or(context.user_timezone);
                 let cadence = match parse_cadence(cadence_str, timezone) {
                     Ok(c) => c,
@@ -870,7 +870,7 @@ impl EffectBridgeAdapter {
                         .iter()
                         .map(|m| {
                             let timezone =
-                                if let ironclaw_engine::types::mission::MissionCadence::Cron {
+                                if let t3claw_engine::types::mission::MissionCadence::Cron {
                                     timezone: Some(tz),
                                     ..
                                 } = &m.cadence
@@ -938,7 +938,7 @@ impl EffectBridgeAdapter {
                                         .messages
                                         .iter()
                                         .rev()
-                                        .find(|m| m.role == ironclaw_engine::MessageRole::Assistant)
+                                        .find(|m| m.role == t3claw_engine::MessageRole::Assistant)
                                         .map(|m| m.content.clone());
                                     thread_summaries.push(serde_json::json!({
                                         "thread_id": tid.to_string(),
@@ -1068,7 +1068,7 @@ impl EffectBridgeAdapter {
                 .await;
                 match id {
                     Ok(id) => {
-                        let mut updates = ironclaw_engine::MissionUpdate::default();
+                        let mut updates = t3claw_engine::MissionUpdate::default();
                         // Rename target priority:
                         //   1. `new_name` (canonical post-PR field).
                         //   2. Legacy `{id, name}` shape — `name` was the
@@ -1086,7 +1086,7 @@ impl EffectBridgeAdapter {
                             let tz = params
                                 .get("timezone")
                                 .and_then(|v| v.as_str())
-                                .and_then(ironclaw_engine::ValidTimezone::parse)
+                                .and_then(t3claw_engine::ValidTimezone::parse)
                                 .or(context.user_timezone);
                             match parse_cadence(cadence, tz) {
                                 Ok(c) => updates.cadence = Some(c),
@@ -1340,7 +1340,7 @@ impl EffectBridgeAdapter {
                         action_name,
                         context.current_call_id.as_deref(),
                         parameters,
-                        ironclaw_engine::ResumeKind::Authentication {
+                        t3claw_engine::ResumeKind::Authentication {
                             credential_name,
                             instructions,
                             auth_url: sanitize_auth_url(auth_url.as_deref()),
@@ -1417,7 +1417,7 @@ impl EffectBridgeAdapter {
                         action_name,
                         context.current_call_id.as_deref(),
                         parameters,
-                        ironclaw_engine::ResumeKind::Authentication {
+                        t3claw_engine::ResumeKind::Authentication {
                             credential_name: cred.credential_name.clone(),
                             instructions: cred.setup_instructions.clone().unwrap_or_else(|| {
                                 format!("Provide your {} token", cred.credential_name)
@@ -1458,7 +1458,7 @@ impl EffectBridgeAdapter {
                         action_name,
                         context.current_call_id.as_deref(),
                         parameters,
-                        ironclaw_engine::ResumeKind::Authentication {
+                        t3claw_engine::ResumeKind::Authentication {
                             credential_name,
                             instructions: instructions.unwrap_or_else(|| {
                                 format!("Authenticate '{}' to continue.", provider_extension)
@@ -1665,7 +1665,7 @@ impl EffectBridgeAdapter {
                                 action_name,
                                 context.current_call_id.as_deref(),
                                 parameters,
-                                ironclaw_engine::ResumeKind::Authentication {
+                                t3claw_engine::ResumeKind::Authentication {
                                     credential_name: credential_name.clone(),
                                     instructions: instructions.unwrap_or_else(|| {
                                         auth_mgr.get_setup_instructions_or_default(
@@ -1767,8 +1767,8 @@ impl EffectBridgeAdapter {
                         action_name,
                         context.current_call_id.as_deref(),
                         parameters,
-                        ironclaw_engine::ResumeKind::Authentication {
-                            credential_name: ironclaw_common::CredentialName::from_trusted(
+                        t3claw_engine::ResumeKind::Authentication {
+                            credential_name: t3claw_common::CredentialName::from_trusted(
                                 cred_name.clone(),
                             ),
                             instructions: format!("Provide your {} token", cred_name),
@@ -1868,7 +1868,7 @@ impl EffectExecutor for EffectBridgeAdapter {
                     action_name,
                     Some(call_id.as_str()),
                     parameters,
-                    ironclaw_engine::ResumeKind::External {
+                    t3claw_engine::ResumeKind::External {
                         callback_id: crate::bridge::external_tool_callback_id(&call_id),
                     },
                     None,
@@ -2017,7 +2017,7 @@ const SCHEDULE_PHRASES: &[&str] = &[
 ];
 
 fn should_reject_immediate_mission_create(context: &ThreadExecutionContext) -> bool {
-    if context.thread_type != ironclaw_engine::types::thread::ThreadType::Foreground {
+    if context.thread_type != t3claw_engine::types::thread::ThreadType::Foreground {
         return false;
     }
 
@@ -2064,7 +2064,7 @@ fn strict_u64(params: &serde_json::Value, key: &str) -> Result<Option<u64>, Stri
 /// Extract guardrail overrides from params, failing on type mismatches.
 fn extract_guardrails(
     params: &serde_json::Value,
-    base: &mut ironclaw_engine::MissionUpdate,
+    base: &mut t3claw_engine::MissionUpdate,
 ) -> Result<(), String> {
     if let Some(v) = strict_u64(params, "cooldown_secs")? {
         base.cooldown_secs = Some(v);
@@ -2122,10 +2122,10 @@ async fn resolve_project_ref(
     store: &dyn Store,
     pid_str: &str,
     context: &ThreadExecutionContext,
-) -> Result<ironclaw_engine::ProjectId, EngineError> {
+) -> Result<t3claw_engine::ProjectId, EngineError> {
     match uuid::Uuid::parse_str(pid_str) {
         Ok(uuid) => {
-            let pid = ironclaw_engine::ProjectId(uuid);
+            let pid = t3claw_engine::ProjectId(uuid);
             if pid == context.project_id {
                 return Ok(pid);
             }
@@ -2153,7 +2153,7 @@ async fn resolve_project_ref(
             let needle = pid_str.to_lowercase();
             let matched = projects.iter().find(|p| {
                 let name_lower = p.name.to_lowercase();
-                let name_slug = ironclaw_engine::types::slugify_simple(&p.name);
+                let name_slug = t3claw_engine::types::slugify_simple(&p.name);
                 name_lower == needle || name_slug == needle
             });
             match matched {
@@ -2179,9 +2179,9 @@ async fn resolve_project_ref(
 /// the call instead of silently falling back to Manual.
 fn parse_cadence(
     s: &str,
-    timezone: Option<ironclaw_engine::ValidTimezone>,
-) -> Result<ironclaw_engine::types::mission::MissionCadence, String> {
-    use ironclaw_engine::types::mission::MissionCadence;
+    timezone: Option<t3claw_engine::ValidTimezone>,
+) -> Result<t3claw_engine::types::mission::MissionCadence, String> {
+    use t3claw_engine::types::mission::MissionCadence;
     let trimmed = s.trim();
     let lower = trimmed.to_lowercase();
     // Check explicit prefixes BEFORE the cron heuristic. Otherwise an input
@@ -2209,7 +2209,7 @@ fn parse_cadence(
         };
         // Validate with the same size limit the engine uses at runtime.
         if let Err(e) = regex::RegexBuilder::new(pattern)
-            .size_limit(ironclaw_engine::runtime::mission::MAX_EVENT_REGEX_SIZE)
+            .size_limit(t3claw_engine::runtime::mission::MAX_EVENT_REGEX_SIZE)
             .build()
         {
             return Err(format!(
@@ -2301,18 +2301,18 @@ fn parse_cadence(
 /// (the previous behaviour) was a foot-gun: a mistyped name would
 /// rename the wrong mission.
 async fn resolve_mission_id(
-    mgr: &ironclaw_engine::MissionManager,
-    project_id: ironclaw_engine::ProjectId,
+    mgr: &t3claw_engine::MissionManager,
+    project_id: t3claw_engine::ProjectId,
     user_id: &str,
     params: &serde_json::Value,
-) -> Result<ironclaw_engine::MissionId, EngineError> {
+) -> Result<t3claw_engine::MissionId, EngineError> {
     // Pull out the explicit id (only if it parses as a UUID).
-    let id_uuid: Option<ironclaw_engine::MissionId> = params
+    let id_uuid: Option<t3claw_engine::MissionId> = params
         .get("id")
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .and_then(|s| uuid::Uuid::parse_str(s).ok())
-        .map(ironclaw_engine::MissionId);
+        .map(t3claw_engine::MissionId);
 
     // Collect candidate name strings in resolution order. We retain
     // each candidate so we can emit a useful "tried these names" error
@@ -2357,7 +2357,7 @@ async fn resolve_mission_id(
     }
 
     // (2/3/4) Name(s) provided. Resolve via the typed helper.
-    let mut resolved_by_name: Option<ironclaw_engine::MissionId> = None;
+    let mut resolved_by_name: Option<t3claw_engine::MissionId> = None;
     for candidate in &name_candidates {
         if let Some(m) = mgr.find_by_name(project_id, user_id, candidate).await? {
             resolved_by_name = Some(m.id);
@@ -2422,7 +2422,7 @@ async fn resolve_mission_id(
 struct RoutineMissionAlias {
     mission_action: &'static str,
     mission_params: serde_json::Value,
-    post_create_update: Option<ironclaw_engine::MissionUpdate>,
+    post_create_update: Option<t3claw_engine::MissionUpdate>,
 }
 
 /// Translate a `routine_*` action call into mission_* parameters. Returns
@@ -2460,7 +2460,7 @@ fn routine_to_mission_alias(
             let cadence = parse_routine_request(params);
             // We carry cadence + the new fields via the update path so we
             // don't need to change mission_create's flat-args contract.
-            let mut updates = ironclaw_engine::MissionUpdate {
+            let mut updates = t3claw_engine::MissionUpdate {
                 description: description.clone(),
                 ..Default::default()
             };
@@ -2678,8 +2678,8 @@ fn routine_to_mission_alias(
 /// Falls back to `Manual` when the kind is missing or unrecognized.
 fn parse_routine_request(
     params: &serde_json::Value,
-) -> ironclaw_engine::types::mission::MissionCadence {
-    use ironclaw_engine::types::mission::MissionCadence;
+) -> t3claw_engine::types::mission::MissionCadence {
+    use t3claw_engine::types::mission::MissionCadence;
 
     let request = params.get("request");
     let kind = request
@@ -2702,7 +2702,7 @@ fn parse_routine_request(
             timezone: request
                 .and_then(|r| r.get("timezone"))
                 .and_then(|v| v.as_str())
-                .and_then(ironclaw_common::ValidTimezone::parse),
+                .and_then(t3claw_common::ValidTimezone::parse),
         },
         "message_event" => MissionCadence::OnEvent {
             event_pattern: request
@@ -2758,10 +2758,8 @@ fn parse_routine_request(
 /// Structured features (channel filter, system event filters, webhook secret)
 /// are lossy through this path; callers that need full fidelity should use
 /// `update_mission` with a typed `MissionUpdate` instead.
-fn cadence_to_round_trip_string(
-    cadence: &ironclaw_engine::types::mission::MissionCadence,
-) -> String {
-    use ironclaw_engine::types::mission::MissionCadence;
+fn cadence_to_round_trip_string(cadence: &t3claw_engine::types::mission::MissionCadence) -> String {
+    use t3claw_engine::types::mission::MissionCadence;
     match cadence {
         MissionCadence::Cron { expression, .. } => expression.clone(),
         MissionCadence::OnEvent {
@@ -2857,7 +2855,7 @@ mod tests {
     use async_trait::async_trait;
 
     fn make_adapter() -> EffectBridgeAdapter {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
         let config = SafetyConfig {
             max_output_length: 10_000,
             injection_check_enabled: false,
@@ -2910,7 +2908,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_auto_approve_skips_unless_auto_approved_gates() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(ApprovalTestTool)).await;
@@ -2931,7 +2929,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve"),
                 ),
             )
@@ -2943,7 +2941,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_auto_approve_does_not_bypass_always_gates() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(AlwaysApprovalTestTool)).await;
@@ -2964,7 +2962,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_always"),
                 ),
             )
@@ -2978,7 +2976,7 @@ mod tests {
             }) => {
                 assert_eq!(gate_name, "approval");
                 match *resume_kind {
-                    ironclaw_engine::ResumeKind::Approval { allow_always } => {
+                    t3claw_engine::ResumeKind::Approval { allow_always } => {
                         assert!(
                             !allow_always,
                             "Always gate must set allow_always=false to prevent sticky session approval"
@@ -3148,12 +3146,12 @@ mod tests {
         }
     }
 
-    fn lease() -> ironclaw_engine::CapabilityLease {
-        ironclaw_engine::CapabilityLease {
-            id: ironclaw_engine::types::capability::LeaseId::new(),
-            thread_id: ironclaw_engine::ThreadId::new(),
+    fn lease() -> t3claw_engine::CapabilityLease {
+        t3claw_engine::CapabilityLease {
+            id: t3claw_engine::types::capability::LeaseId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
             capability_name: "tools".into(),
-            granted_actions: ironclaw_engine::GrantedActions::All,
+            granted_actions: t3claw_engine::GrantedActions::All,
             granted_at: chrono::Utc::now(),
             expires_at: None,
             max_uses: None,
@@ -3164,15 +3162,15 @@ mod tests {
     }
 
     fn exec_ctx(
-        thread_id: ironclaw_engine::ThreadId,
+        thread_id: t3claw_engine::ThreadId,
         call_id: Option<&str>,
-    ) -> ironclaw_engine::ThreadExecutionContext {
-        ironclaw_engine::ThreadExecutionContext {
+    ) -> t3claw_engine::ThreadExecutionContext {
+        t3claw_engine::ThreadExecutionContext {
             thread_id,
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: call_id.map(str::to_string),
             source_channel: None,
             user_timezone: None,
@@ -3180,7 +3178,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         }
@@ -3190,7 +3188,7 @@ mod tests {
         permission: crate::tools::permissions::PermissionState,
     ) -> EffectBridgeAdapter {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-tool-info-permissions-{}.db",
+            "t3claw-tool-info-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -3212,7 +3210,7 @@ mod tests {
         tools.register_tool_info();
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3224,7 +3222,7 @@ mod tests {
         permission: Option<crate::tools::permissions::PermissionState>,
     ) -> EffectBridgeAdapter {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-approval-test-permissions-{}.db",
+            "t3claw-approval-test-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -3248,7 +3246,7 @@ mod tests {
         tools.register(Arc::new(ApprovalTestTool)).await;
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3260,7 +3258,7 @@ mod tests {
         permission: Option<crate::tools::permissions::PermissionState>,
     ) -> EffectBridgeAdapter {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-always-approval-test-permissions-{}.db",
+            "t3claw-always-approval-test-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -3284,7 +3282,7 @@ mod tests {
         tools.register(Arc::new(AlwaysApprovalTestTool)).await;
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3298,7 +3296,7 @@ mod tests {
         tools.register(Arc::new(ApprovalTestTool)).await;
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3313,7 +3311,7 @@ mod tests {
             .await;
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3325,7 +3323,7 @@ mod tests {
         permission: Option<crate::tools::permissions::PermissionState>,
     ) -> EffectBridgeAdapter {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-restart-permissions-{}.db",
+            "t3claw-restart-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -3351,7 +3349,7 @@ mod tests {
             .await;
         EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -3362,7 +3360,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_reads_callable_action_snapshot_for_engine_native_actions() {
         let adapter = make_adapter();
-        let mut ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_tool_info"));
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
         ctx.available_actions_snapshot = Some(
             vec![ActionDef {
                 name: "mission_create".to_string(),
@@ -3379,9 +3377,9 @@ mod tests {
                 effects: vec![],
                 requires_approval: false,
                 model_tool_surface: ModelToolSurface::FullSchema,
-                discovery: Some(ironclaw_engine::ActionDiscoveryMetadata {
+                discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
                     name: "mission_create".to_string(),
-                    summary: Some(ironclaw_engine::ActionDiscoverySummary {
+                    summary: Some(t3claw_engine::ActionDiscoverySummary {
                         always_required: vec![
                             "name".to_string(),
                             "goal".to_string(),
@@ -3421,7 +3419,7 @@ mod tests {
     async fn tool_info_schema_reads_action_inventory_for_engine_native_actions() {
         let adapter = make_adapter();
         let mut ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_tool_info_schema"),
         );
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
@@ -3478,7 +3476,7 @@ mod tests {
     async fn tool_info_reads_non_registry_action_from_current_inventory() {
         let adapter = make_adapter();
         let mut ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_tool_info_custom_action"),
         );
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
@@ -3537,7 +3535,7 @@ mod tests {
     async fn tool_info_rejects_actions_outside_callable_snapshot() {
         let adapter = make_adapter();
         let mut ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_tool_info_registry"),
         );
         ctx.available_actions_snapshot = Some(
@@ -3579,7 +3577,7 @@ mod tests {
     async fn tool_info_does_not_fall_back_to_registry_when_snapshot_omits_tool() {
         let adapter = make_tool_info_registry_adapter().await;
         let mut ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_tool_info_registry_fallback_guard"),
         );
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
@@ -3622,7 +3620,7 @@ mod tests {
     async fn tool_info_rejects_registered_tools_when_snapshots_are_missing() {
         let adapter = make_tool_info_registry_adapter().await;
         let ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_tool_info_without_snapshot"),
         );
 
@@ -3651,7 +3649,7 @@ mod tests {
     #[tokio::test]
     async fn tool_info_reads_action_inventory_snapshot() {
         let adapter = make_adapter();
-        let mut ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_tool_info"));
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
             inline: vec![ActionDef {
                 name: "github_search".to_string(),
@@ -3666,9 +3664,9 @@ mod tests {
                 effects: vec![],
                 requires_approval: false,
                 model_tool_surface: ModelToolSurface::FullSchema,
-                discovery: Some(ironclaw_engine::ActionDiscoveryMetadata {
+                discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
                     name: "github_search".to_string(),
-                    summary: Some(ironclaw_engine::ActionDiscoverySummary {
+                    summary: Some(t3claw_engine::ActionDiscoverySummary {
                         always_required: vec!["query".to_string()],
                         conditional_requirements: vec![],
                         notes: vec!["Schema available through tool_info".to_string()],
@@ -3704,7 +3702,7 @@ mod tests {
             crate::tools::permissions::PermissionState::Disabled,
         )
         .await;
-        let mut ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_tool_info"));
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
             inline: vec![ActionDef {
                 name: "github_search".to_string(),
@@ -3742,7 +3740,7 @@ mod tests {
             crate::tools::permissions::PermissionState::AskEachTime,
         )
         .await;
-        let mut ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_tool_info"));
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
         ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
             inline: vec![ActionDef {
                 name: "github_search".to_string(),
@@ -3786,7 +3784,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_db_default"),
                 ),
             )
@@ -3808,7 +3806,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_default_allow"),
                 ),
             )
@@ -3840,7 +3838,7 @@ mod tests {
                 serde_json::json!({"delay_secs": 1}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_restart_default_floor"),
                 ),
             )
@@ -3892,7 +3890,7 @@ mod tests {
                 serde_json::json!({"delay_secs": 1}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_restart_explicit_allow_floor"),
                 ),
             )
@@ -3929,7 +3927,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_explicit_always_allow_intrinsic_always"),
                 ),
             )
@@ -3946,7 +3944,7 @@ mod tests {
                 assert_eq!(gate_name, "approval");
                 assert_eq!(action_name, "always_approval_test");
                 match *resume_kind {
-                    ironclaw_engine::ResumeKind::Approval { allow_always } => {
+                    t3claw_engine::ResumeKind::Approval { allow_always } => {
                         assert!(!allow_always);
                     }
                     other => panic!("expected approval resume kind, got {other:?}"),
@@ -3970,7 +3968,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_db_always_allow"),
                 ),
             )
@@ -3994,7 +3992,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_db_override"),
                 ),
             )
@@ -4027,7 +4025,7 @@ mod tests {
     #[tokio::test]
     async fn explicit_ask_each_time_for_seeded_default_tool_still_gates() {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-seeded-ask-each-time-{}.db",
+            "t3claw-seeded-ask-each-time-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -4060,7 +4058,7 @@ mod tests {
         tools.register(Arc::new(SeededAskEachTimeTestTool)).await;
         let adapter = EffectBridgeAdapter::new(
             tools,
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -4074,7 +4072,7 @@ mod tests {
                 serde_json::json!({"name": "gmail"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_seeded_ask_each_time"),
                 ),
             )
@@ -4109,7 +4107,7 @@ mod tests {
                 serde_json::json!({"value": "x"}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_global_auto_approve_db_disabled"),
                 ),
             )
@@ -4127,7 +4125,7 @@ mod tests {
     #[tokio::test]
     async fn hyphenated_engine_native_action_uses_snapshot_canonical_name() {
         let adapter = make_adapter_with_missions().await;
-        let mut ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_mission_alias"));
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_mission_alias"));
         ctx.available_actions_snapshot =
             Some(crate::bridge::engine_actions::mission_capability_actions().into());
 
@@ -4155,7 +4153,7 @@ mod tests {
 
     #[tokio::test]
     async fn need_approval_preserves_current_call_id() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(ApprovalTestTool)).await;
@@ -4169,7 +4167,7 @@ mod tests {
             Arc::new(HookRegistry::default()),
         );
 
-        let thread_id = ironclaw_engine::ThreadId::new();
+        let thread_id = t3claw_engine::ThreadId::new();
         let result = adapter
             .execute_action(
                 "approval_test",
@@ -4192,7 +4190,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolved_pending_action_bypasses_approval_once() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(ApprovalTestTool)).await;
@@ -4206,7 +4204,7 @@ mod tests {
             Arc::new(HookRegistry::default()),
         );
 
-        let thread_id = ironclaw_engine::ThreadId::new();
+        let thread_id = t3claw_engine::ThreadId::new();
         let first = adapter
             .execute_action(
                 "approval_test",
@@ -4252,9 +4250,9 @@ mod tests {
         use crate::db::libsql::LibSqlBackend;
         use crate::tools::builtin::memory::MemoryWriteTool;
         use crate::workspace::Workspace;
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("gate.db"))
@@ -4278,7 +4276,7 @@ mod tests {
             Arc::new(HookRegistry::default()),
         );
 
-        let thread_id = ironclaw_engine::ThreadId::new();
+        let thread_id = t3claw_engine::ThreadId::new();
         let result = adapter
             .execute_action(
                 "memory_write",
@@ -4301,7 +4299,7 @@ mod tests {
                 assert_eq!(gate_name, "approval");
                 assert_eq!(action_name, "memory_write");
                 match *resume_kind {
-                    ironclaw_engine::ResumeKind::Approval { allow_always } => {
+                    t3claw_engine::ResumeKind::Approval { allow_always } => {
                         assert!(!allow_always);
                     }
                     other => panic!("expected approval resume kind, got {other:?}"),
@@ -4322,9 +4320,9 @@ mod tests {
         use crate::db::libsql::LibSqlBackend;
         use crate::tools::builtin::memory::MemoryWriteTool;
         use crate::workspace::Workspace;
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("gate.db"))
@@ -4348,7 +4346,7 @@ mod tests {
             Arc::new(HookRegistry::default()),
         );
 
-        let thread_id = ironclaw_engine::ThreadId::new();
+        let thread_id = t3claw_engine::ThreadId::new();
         let result = adapter
             .execute_action(
                 "memory_write",
@@ -4398,7 +4396,7 @@ mod tests {
     /// rule in `.claude/rules/testing.md`.
     #[tokio::test]
     async fn auth_gate_strips_non_https_auth_url_from_tool_install_output() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         struct OAuthPromptTool;
 
@@ -4459,7 +4457,7 @@ mod tests {
                 serde_json::json!({}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_auth_url_sanitize"),
                 ),
             )
@@ -4473,7 +4471,7 @@ mod tests {
             }) => {
                 assert_eq!(gate_name, "authentication");
                 match *resume_kind {
-                    ironclaw_engine::ResumeKind::Authentication { auth_url, .. } => {
+                    t3claw_engine::ResumeKind::Authentication { auth_url, .. } => {
                         assert!(
                             auth_url.is_none(),
                             "javascript: auth_url must be stripped before reaching ResumeKind, got {auth_url:?}"
@@ -4492,7 +4490,7 @@ mod tests {
     /// flow through unmodified. Guards against an over-eager sanitizer.
     #[tokio::test]
     async fn auth_gate_preserves_https_auth_url_from_tool_install_output() {
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         struct OAuthPromptTool;
 
@@ -4553,7 +4551,7 @@ mod tests {
                 serde_json::json!({}),
                 &lease(),
                 &exec_ctx(
-                    ironclaw_engine::ThreadId::new(),
+                    t3claw_engine::ThreadId::new(),
                     Some("call_auth_url_passthrough"),
                 ),
             )
@@ -4561,7 +4559,7 @@ mod tests {
 
         match result {
             Err(EngineError::GatePaused { resume_kind, .. }) => match *resume_kind {
-                ironclaw_engine::ResumeKind::Authentication { auth_url, .. } => {
+                t3claw_engine::ResumeKind::Authentication { auth_url, .. } => {
                     assert_eq!(
                         auth_url.as_deref(),
                         Some("https://accounts.google.com/o/oauth2/auth"),
@@ -4645,7 +4643,7 @@ mod tests {
         assert_eq!(updates.max_concurrent, Some(1));
         assert_eq!(updates.dedup_window_secs, Some(60));
         match updates.cadence.as_ref().expect("cadence in updates") {
-            ironclaw_engine::types::mission::MissionCadence::Cron {
+            t3claw_engine::types::mission::MissionCadence::Cron {
                 expression,
                 timezone,
             } => {
@@ -4674,7 +4672,7 @@ mod tests {
             routine_to_mission_alias("routine_create", &params).expect("alias for message_event");
         let updates = alias.post_create_update.expect("updates");
         match updates.cadence.as_ref().expect("cadence") {
-            ironclaw_engine::types::mission::MissionCadence::OnEvent {
+            t3claw_engine::types::mission::MissionCadence::OnEvent {
                 event_pattern,
                 channel,
             } => {
@@ -4703,7 +4701,7 @@ mod tests {
         let alias = routine_to_mission_alias("routine_create", &params).expect("alias");
         let updates = alias.post_create_update.expect("updates");
         match updates.cadence.as_ref().expect("cadence") {
-            ironclaw_engine::types::mission::MissionCadence::OnSystemEvent {
+            t3claw_engine::types::mission::MissionCadence::OnSystemEvent {
                 source,
                 event_type,
                 filters,
@@ -4738,7 +4736,7 @@ mod tests {
         let alias = routine_to_mission_alias("routine_create", &params).expect("alias");
         let updates = alias.post_create_update.expect("updates");
         match updates.cadence.as_ref().expect("cadence") {
-            ironclaw_engine::types::mission::MissionCadence::Webhook { path, secret } => {
+            t3claw_engine::types::mission::MissionCadence::Webhook { path, secret } => {
                 assert_eq!(path, "github");
                 assert_eq!(secret.as_deref(), Some("shh"));
             }
@@ -4751,7 +4749,7 @@ mod tests {
         // event:<channel>:<pattern> should populate both fields.
         let cadence = parse_cadence("event:telegram:.*", None).expect("should parse");
         match cadence {
-            ironclaw_engine::types::mission::MissionCadence::OnEvent {
+            t3claw_engine::types::mission::MissionCadence::OnEvent {
                 event_pattern,
                 channel,
             } => {
@@ -4764,7 +4762,7 @@ mod tests {
         // Pattern with special regex chars.
         let cadence = parse_cadence("event:github:review requested", None).expect("should parse");
         match cadence {
-            ironclaw_engine::types::mission::MissionCadence::OnEvent {
+            t3claw_engine::types::mission::MissionCadence::OnEvent {
                 event_pattern,
                 channel,
             } => {
@@ -4777,7 +4775,7 @@ mod tests {
         // Pattern containing colons (split on first colon only).
         let cadence = parse_cadence("event:slack:error:.*fatal", None).expect("should parse");
         match cadence {
-            ironclaw_engine::types::mission::MissionCadence::OnEvent {
+            t3claw_engine::types::mission::MissionCadence::OnEvent {
                 event_pattern,
                 channel,
             } => {
@@ -4817,21 +4815,21 @@ mod tests {
             parse_cadence("event:slack:a]b c d e f", None).expect("should parse as event");
         assert!(matches!(
             cadence,
-            ironclaw_engine::types::mission::MissionCadence::OnEvent { .. }
+            t3claw_engine::types::mission::MissionCadence::OnEvent { .. }
         ));
 
         // Same hazard for `webhook:` — verify the prefix wins.
         let cadence = parse_cadence("webhook: a b c d e", None).expect("should parse");
         assert!(matches!(
             cadence,
-            ironclaw_engine::types::mission::MissionCadence::Webhook { .. }
+            t3claw_engine::types::mission::MissionCadence::Webhook { .. }
         ));
 
         // Sanity: a real cron expression still parses as cron.
         let cadence = parse_cadence("0 9 * * *", None).expect("should parse");
         assert!(matches!(
             cadence,
-            ironclaw_engine::types::mission::MissionCadence::Cron { .. }
+            t3claw_engine::types::mission::MissionCadence::Cron { .. }
         ));
     }
 
@@ -4844,7 +4842,7 @@ mod tests {
         let alias = routine_to_mission_alias("routine_create", &params).expect("alias");
         let updates = alias.post_create_update.expect("updates");
         match updates.cadence.as_ref().expect("cadence") {
-            ironclaw_engine::types::mission::MissionCadence::Manual => {}
+            t3claw_engine::types::mission::MissionCadence::Manual => {}
             other => panic!("expected Manual cadence, got {:?}", other),
         }
     }
@@ -4930,13 +4928,13 @@ mod tests {
         // End-to-end coercion of `cooldown_secs="120"` is covered by
         // `mission_create_string_guardrails_coerced_via_execute_action`.
         let params = serde_json::json!({"cooldown_secs": "0", "max_concurrent": "2"});
-        let mut updates = ironclaw_engine::MissionUpdate::default();
+        let mut updates = t3claw_engine::MissionUpdate::default();
         let err = extract_guardrails(&params, &mut updates).unwrap_err();
         assert!(err.contains("must be an integer"), "got: {err}");
 
         // Integer values must succeed.
         let params = serde_json::json!({"cooldown_secs": 0, "max_concurrent": 2});
-        let mut updates = ironclaw_engine::MissionUpdate::default();
+        let mut updates = t3claw_engine::MissionUpdate::default();
         extract_guardrails(&params, &mut updates).expect("should succeed");
         assert_eq!(updates.cooldown_secs, Some(0));
         assert_eq!(updates.max_concurrent, Some(2));
@@ -4968,7 +4966,7 @@ mod tests {
             .expect("should parse system_event cadence");
         assert!(matches!(
             cadence,
-            ironclaw_engine::types::mission::MissionCadence::OnSystemEvent {
+            t3claw_engine::types::mission::MissionCadence::OnSystemEvent {
                 ref source,
                 ref event_type,
                 ..
@@ -5002,7 +5000,7 @@ mod tests {
         let cadence = parse_cadence("manual", None).expect("should parse");
         assert!(matches!(
             cadence,
-            ironclaw_engine::types::mission::MissionCadence::Manual
+            t3claw_engine::types::mission::MissionCadence::Manual
         ));
     }
 
@@ -5016,12 +5014,12 @@ mod tests {
 
     #[test]
     fn foreground_immediate_one_shot_goal_rejects_mission_create() {
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
@@ -5031,7 +5029,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5041,12 +5039,12 @@ mod tests {
 
     #[test]
     fn foreground_explicit_schedule_allows_mission_create_even_if_run_now() {
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
@@ -5056,7 +5054,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5066,12 +5064,12 @@ mod tests {
 
     #[test]
     fn foreground_immediate_every_quantifier_still_rejects_mission_create() {
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
@@ -5079,7 +5077,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5089,12 +5087,12 @@ mod tests {
 
     #[test]
     fn foreground_immediate_set_up_without_schedule_still_rejects_mission_create() {
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
@@ -5102,7 +5100,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5115,12 +5113,12 @@ mod tests {
         // Regression: "monitoring" must match the "monitor" stem so that
         // "set up monitoring now" is recognised as scheduling intent and
         // NOT incorrectly rejected.
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
@@ -5128,7 +5126,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5139,12 +5137,12 @@ mod tests {
 
     #[test]
     fn background_mission_threads_can_create_follow_up_missions() {
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Mission,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Mission,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: None,
             user_timezone: None,
@@ -5152,7 +5150,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5178,124 +5176,124 @@ mod tests {
         struct StubStore;
 
         #[async_trait]
-        impl ironclaw_engine::Store for StubStore {
+        impl t3claw_engine::Store for StubStore {
             async fn save_thread(
                 &self,
-                _: &ironclaw_engine::types::thread::Thread,
+                _: &t3claw_engine::types::thread::Thread,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_thread(
                 &self,
-                _: ironclaw_engine::ThreadId,
-            ) -> Result<Option<ironclaw_engine::types::thread::Thread>, EngineError> {
+                _: t3claw_engine::ThreadId,
+            ) -> Result<Option<t3claw_engine::types::thread::Thread>, EngineError> {
                 Ok(None)
             }
             async fn list_threads(
                 &self,
-                _: ironclaw_engine::ProjectId,
+                _: t3claw_engine::ProjectId,
                 _: &str,
-            ) -> Result<Vec<ironclaw_engine::types::thread::Thread>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::types::thread::Thread>, EngineError> {
                 Ok(vec![])
             }
             async fn update_thread_state(
                 &self,
-                _: ironclaw_engine::ThreadId,
-                _: ironclaw_engine::types::thread::ThreadState,
+                _: t3claw_engine::ThreadId,
+                _: t3claw_engine::types::thread::ThreadState,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn save_step(
                 &self,
-                _: &ironclaw_engine::types::step::Step,
+                _: &t3claw_engine::types::step::Step,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_steps(
                 &self,
-                _: ironclaw_engine::ThreadId,
-            ) -> Result<Vec<ironclaw_engine::types::step::Step>, EngineError> {
+                _: t3claw_engine::ThreadId,
+            ) -> Result<Vec<t3claw_engine::types::step::Step>, EngineError> {
                 Ok(vec![])
             }
             async fn append_events(
                 &self,
-                _: &[ironclaw_engine::ThreadEvent],
+                _: &[t3claw_engine::ThreadEvent],
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_events(
                 &self,
-                _: ironclaw_engine::ThreadId,
-            ) -> Result<Vec<ironclaw_engine::ThreadEvent>, EngineError> {
+                _: t3claw_engine::ThreadId,
+            ) -> Result<Vec<t3claw_engine::ThreadEvent>, EngineError> {
                 Ok(vec![])
             }
-            async fn save_project(&self, _: &ironclaw_engine::Project) -> Result<(), EngineError> {
+            async fn save_project(&self, _: &t3claw_engine::Project) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_project(
                 &self,
-                _: ironclaw_engine::ProjectId,
-            ) -> Result<Option<ironclaw_engine::Project>, EngineError> {
+                _: t3claw_engine::ProjectId,
+            ) -> Result<Option<t3claw_engine::Project>, EngineError> {
                 Ok(None)
             }
             async fn save_memory_doc(
                 &self,
-                _: &ironclaw_engine::MemoryDoc,
+                _: &t3claw_engine::MemoryDoc,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_memory_doc(
                 &self,
-                _: ironclaw_engine::DocId,
-            ) -> Result<Option<ironclaw_engine::MemoryDoc>, EngineError> {
+                _: t3claw_engine::DocId,
+            ) -> Result<Option<t3claw_engine::MemoryDoc>, EngineError> {
                 Ok(None)
             }
             async fn list_memory_docs(
                 &self,
-                _: ironclaw_engine::ProjectId,
+                _: t3claw_engine::ProjectId,
                 _: &str,
-            ) -> Result<Vec<ironclaw_engine::MemoryDoc>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::MemoryDoc>, EngineError> {
                 Ok(vec![])
             }
             async fn save_lease(
                 &self,
-                _: &ironclaw_engine::CapabilityLease,
+                _: &t3claw_engine::CapabilityLease,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_active_leases(
                 &self,
-                _: ironclaw_engine::ThreadId,
-            ) -> Result<Vec<ironclaw_engine::CapabilityLease>, EngineError> {
+                _: t3claw_engine::ThreadId,
+            ) -> Result<Vec<t3claw_engine::CapabilityLease>, EngineError> {
                 Ok(vec![])
             }
             async fn revoke_lease(
                 &self,
-                _: ironclaw_engine::types::capability::LeaseId,
+                _: t3claw_engine::types::capability::LeaseId,
                 _: &str,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
-            async fn save_mission(&self, _: &ironclaw_engine::Mission) -> Result<(), EngineError> {
+            async fn save_mission(&self, _: &t3claw_engine::Mission) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_mission(
                 &self,
-                _: ironclaw_engine::MissionId,
-            ) -> Result<Option<ironclaw_engine::Mission>, EngineError> {
+                _: t3claw_engine::MissionId,
+            ) -> Result<Option<t3claw_engine::Mission>, EngineError> {
                 Ok(None)
             }
             async fn list_missions(
                 &self,
-                _: ironclaw_engine::ProjectId,
+                _: t3claw_engine::ProjectId,
                 _: &str,
-            ) -> Result<Vec<ironclaw_engine::Mission>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::Mission>, EngineError> {
                 Ok(vec![])
             }
             async fn update_mission_status(
                 &self,
-                _: ironclaw_engine::MissionId,
-                _: ironclaw_engine::MissionStatus,
+                _: t3claw_engine::MissionId,
+                _: t3claw_engine::MissionStatus,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
@@ -5304,13 +5302,13 @@ mod tests {
         struct StubLlm;
 
         #[async_trait]
-        impl ironclaw_engine::LlmBackend for StubLlm {
+        impl t3claw_engine::LlmBackend for StubLlm {
             async fn complete(
                 &self,
-                _: &[ironclaw_engine::types::message::ThreadMessage],
-                _: &[ironclaw_engine::ActionDef],
-                _: &ironclaw_engine::LlmCallConfig,
-            ) -> Result<ironclaw_engine::LlmOutput, EngineError> {
+                _: &[t3claw_engine::types::message::ThreadMessage],
+                _: &[t3claw_engine::ActionDef],
+                _: &t3claw_engine::LlmCallConfig,
+            ) -> Result<t3claw_engine::LlmOutput, EngineError> {
                 unimplemented!("StubLlm — not called in mission create path")
             }
             fn model_name(&self) -> &str {
@@ -5321,29 +5319,29 @@ mod tests {
         struct StubEffects;
 
         #[async_trait]
-        impl ironclaw_engine::EffectExecutor for StubEffects {
+        impl t3claw_engine::EffectExecutor for StubEffects {
             async fn execute_action(
                 &self,
                 _: &str,
                 _: serde_json::Value,
-                _: &ironclaw_engine::CapabilityLease,
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<ironclaw_engine::ActionResult, EngineError> {
+                _: &t3claw_engine::CapabilityLease,
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<t3claw_engine::ActionResult, EngineError> {
                 unimplemented!("StubEffects — not called in mission create path")
             }
             async fn available_actions(
                 &self,
-                _: &[ironclaw_engine::CapabilityLease],
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<Vec<ironclaw_engine::ActionDef>, EngineError> {
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::ActionDef>, EngineError> {
                 Ok(vec![])
             }
 
             async fn available_capabilities(
                 &self,
-                _: &[ironclaw_engine::CapabilityLease],
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<Vec<ironclaw_engine::CapabilitySummary>, EngineError> {
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, EngineError> {
                 Ok(vec![])
             }
         }
@@ -5351,28 +5349,28 @@ mod tests {
         // ── Helpers ──────────────────────────────────────────
 
         async fn make_adapter_with_mission_manager() -> EffectBridgeAdapter {
-            let store: Arc<dyn ironclaw_engine::Store> = Arc::new(StubStore);
-            let thread_manager = Arc::new(ironclaw_engine::ThreadManager::new(
-                Arc::new(StubLlm) as Arc<dyn ironclaw_engine::LlmBackend>,
-                Arc::new(StubEffects) as Arc<dyn ironclaw_engine::EffectExecutor>,
+            let store: Arc<dyn t3claw_engine::Store> = Arc::new(StubStore);
+            let thread_manager = Arc::new(t3claw_engine::ThreadManager::new(
+                Arc::new(StubLlm) as Arc<dyn t3claw_engine::LlmBackend>,
+                Arc::new(StubEffects) as Arc<dyn t3claw_engine::EffectExecutor>,
                 Arc::clone(&store),
-                Arc::new(ironclaw_engine::CapabilityRegistry::new()),
-                Arc::new(ironclaw_engine::LeaseManager::new()),
-                Arc::new(ironclaw_engine::PolicyEngine::new()),
+                Arc::new(t3claw_engine::CapabilityRegistry::new()),
+                Arc::new(t3claw_engine::LeaseManager::new()),
+                Arc::new(t3claw_engine::PolicyEngine::new()),
             ));
-            let mgr = Arc::new(ironclaw_engine::MissionManager::new(store, thread_manager));
+            let mgr = Arc::new(t3claw_engine::MissionManager::new(store, thread_manager));
             let adapter = make_adapter();
             adapter.set_mission_manager(mgr).await;
             adapter
         }
 
-        fn foreground_ctx(goal: &str) -> ironclaw_engine::ThreadExecutionContext {
-            ironclaw_engine::ThreadExecutionContext {
-                thread_id: ironclaw_engine::ThreadId::new(),
-                thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-                project_id: ironclaw_engine::ProjectId::new(),
+        fn foreground_ctx(goal: &str) -> t3claw_engine::ThreadExecutionContext {
+            t3claw_engine::ThreadExecutionContext {
+                thread_id: t3claw_engine::ThreadId::new(),
+                thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+                project_id: t3claw_engine::ProjectId::new(),
                 user_id: "test_user".to_string(),
-                step_id: ironclaw_engine::StepId::new(),
+                step_id: t3claw_engine::StepId::new(),
                 current_call_id: None,
                 source_channel: Some("gateway".to_string()),
                 user_timezone: None,
@@ -5380,7 +5378,7 @@ mod tests {
                 available_actions_snapshot: None,
                 available_action_inventory_snapshot: None,
                 conversation_scope: None,
-                gate_controller: ironclaw_engine::CancellingGateController::arc(),
+                gate_controller: t3claw_engine::CancellingGateController::arc(),
                 call_approval_granted: false,
                 conversation_id: None,
             }
@@ -5606,7 +5604,7 @@ mod tests {
             Arc::new(ToolRegistry::new().with_credentials(Arc::clone(&cred_reg), secrets.clone()));
         tools.register_builtin_tools();
 
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
             Arc::new(SafetyLayer::new(&SafetyConfig {
@@ -5640,11 +5638,11 @@ mod tests {
             "url": "https://api.github.com/repos/nearai/ironclaw/issues",
             "method": "GET"
         });
-        let lease = ironclaw_engine::CapabilityLease {
-            id: ironclaw_engine::types::capability::LeaseId::new(),
-            thread_id: ironclaw_engine::ThreadId::new(),
+        let lease = t3claw_engine::CapabilityLease {
+            id: t3claw_engine::types::capability::LeaseId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
             capability_name: "tools".into(),
-            granted_actions: ironclaw_engine::GrantedActions::All,
+            granted_actions: t3claw_engine::GrantedActions::All,
             granted_at: chrono::Utc::now(),
             expires_at: None,
             max_uses: None,
@@ -5652,12 +5650,12 @@ mod tests {
             revoked: false,
             revoked_reason: None,
         };
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: None,
             user_timezone: None,
@@ -5665,7 +5663,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5678,7 +5676,7 @@ mod tests {
         // HTTP call surfaces an Authentication gate before any approval gate.
         match result {
             Err(EngineError::GatePaused { resume_kind, .. }) => match *resume_kind {
-                ironclaw_engine::ResumeKind::Authentication {
+                t3claw_engine::ResumeKind::Authentication {
                     credential_name, ..
                 } => {
                     assert_eq!(credential_name, "github_token");
@@ -5736,7 +5734,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -5744,11 +5742,11 @@ mod tests {
         )
         .with_global_auto_approve(true);
 
-        let lease = ironclaw_engine::CapabilityLease {
-            id: ironclaw_engine::types::capability::LeaseId::new(),
-            thread_id: ironclaw_engine::ThreadId::new(),
+        let lease = t3claw_engine::CapabilityLease {
+            id: t3claw_engine::types::capability::LeaseId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
             capability_name: "tools".into(),
-            granted_actions: ironclaw_engine::GrantedActions::All,
+            granted_actions: t3claw_engine::GrantedActions::All,
             granted_at: chrono::Utc::now(),
             expires_at: None,
             max_uses: None,
@@ -5756,12 +5754,12 @@ mod tests {
             revoked: false,
             revoked_reason: None,
         };
-        let ctx = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let ctx = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: Some("call_install".to_string()),
             source_channel: None,
             user_timezone: None,
@@ -5769,7 +5767,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -5785,7 +5783,7 @@ mod tests {
 
         match result {
             Err(EngineError::GatePaused { resume_kind, .. }) => match *resume_kind {
-                ironclaw_engine::ResumeKind::Authentication {
+                t3claw_engine::ResumeKind::Authentication {
                     credential_name, ..
                 } => {
                     assert_eq!(credential_name, "telegram_bot_token");
@@ -5841,7 +5839,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -5857,7 +5855,7 @@ mod tests {
             .await;
 
         let actions = adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("actions");
         assert!(
@@ -5912,7 +5910,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -5928,7 +5926,7 @@ mod tests {
             .await;
 
         let result = adapter
-            .available_capabilities(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_capabilities(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await;
 
         match result {
@@ -5939,8 +5937,8 @@ mod tests {
                     .expect("latent tool should surface as an activatable capability");
                 assert!(matches!(
                     latent.status,
-                    ironclaw_engine::CapabilityStatus::Inactive
-                        | ironclaw_engine::CapabilityStatus::AvailableNotInstalled
+                    t3claw_engine::CapabilityStatus::Inactive
+                        | t3claw_engine::CapabilityStatus::AvailableNotInstalled
                 ));
                 assert_eq!(latent.action_preview, vec!["latent_tool".to_string()]);
             }
@@ -6021,7 +6019,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -6037,7 +6035,7 @@ mod tests {
             .await;
 
         let actions = adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("actions");
         assert!(!actions.iter().any(|action| action.name == "linear_search"));
@@ -6144,7 +6142,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -6198,7 +6196,7 @@ mod tests {
 
         let actions = fixture
             .adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("actions");
         assert!(
@@ -6229,7 +6227,7 @@ mod tests {
 
         let actions = fixture
             .adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("actions");
         assert!(!actions.iter().any(|action| action.name == "notion_search"));
@@ -6249,7 +6247,7 @@ mod tests {
 
         let actions = fixture
             .adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("actions");
         assert!(!actions.iter().any(|action| action.name == "github_search"));
@@ -6271,7 +6269,7 @@ mod tests {
         )
         .await;
 
-        let base_ctx = exec_ctx(ironclaw_engine::ThreadId::new(), None);
+        let base_ctx = exec_ctx(t3claw_engine::ThreadId::new(), None);
         let inventory = fixture
             .adapter
             .available_action_inventory(&[], &base_ctx)
@@ -6353,7 +6351,7 @@ mod tests {
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -6368,12 +6366,12 @@ mod tests {
             )))
             .await;
 
-        let context = ironclaw_engine::ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+        let context = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: None,
             user_timezone: None,
@@ -6381,7 +6379,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         };
@@ -6401,7 +6399,7 @@ mod tests {
 
     #[tokio::test]
     async fn skill_install_syncs_installed_skill_into_v2_store() {
-        use ironclaw_skills::v2::V2SkillMetadata;
+        use t3claw_skills::v2::V2SkillMetadata;
 
         struct SkillInstallStub;
 
@@ -6460,7 +6458,7 @@ Use this skill to set up a Pika meeting.
 
         let adapter = EffectBridgeAdapter::new(
             Arc::clone(&tools),
-            Arc::new(SafetyLayer::new(&ironclaw_safety::SafetyConfig {
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
                 max_output_length: 10_000,
                 injection_check_enabled: false,
             })),
@@ -6474,7 +6472,7 @@ Use this skill to set up a Pika meeting.
             .await;
 
         let ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
+            t3claw_engine::ThreadId::new(),
             Some("call_skill_install_sync"),
         );
         let result = adapter
@@ -6491,7 +6489,7 @@ Use this skill to set up a Pika meeting.
             .into_iter()
             .find(|doc| doc.title == "skill:pikastream-video-meeting")
             .expect("synced v2 skill doc");
-        assert_eq!(doc.doc_type, ironclaw_engine::DocType::Skill);
+        assert_eq!(doc.doc_type, t3claw_engine::DocType::Skill);
         assert!(
             doc.content.contains("Pika Skill"),
             "doc content: {}",
@@ -6587,18 +6585,18 @@ Use this skill to set up a Pika meeting.
         // the invariant that makes workspace-backed projects idempotent:
         // writing `projects/commitments/AGENTS.md` twice never creates a
         // duplicate project entity.
-        let a = ironclaw_engine::Project::new("alice", "Commitments", "desc");
-        let b = ironclaw_engine::Project::new("alice", "Commitments", "different desc");
+        let a = t3claw_engine::Project::new("alice", "Commitments", "desc");
+        let b = t3claw_engine::Project::new("alice", "Commitments", "different desc");
         assert_eq!(a.id, b.id, "same user+name must produce same ID");
 
         // Different users still get different IDs for the same slug —
         // projects are per-user.
-        let c = ironclaw_engine::Project::new("bob", "Commitments", "");
+        let c = t3claw_engine::Project::new("bob", "Commitments", "");
         assert_ne!(a.id, c.id, "different users must produce different IDs");
 
         // Slug derivation means `Commitments` and `commitments` land on
         // the same project, which matches the workspace directory name.
-        let d = ironclaw_engine::Project::new("alice", "commitments", "");
+        let d = t3claw_engine::Project::new("alice", "commitments", "");
         assert_eq!(a.id, d.id, "case-different names with same slug match");
     }
 
@@ -6642,14 +6640,14 @@ Use this skill to set up a Pika meeting.
     async fn run_memory_write(
         target: &str,
         user_id: &str,
-    ) -> (serde_json::Value, Vec<ironclaw_engine::Project>) {
+    ) -> (serde_json::Value, Vec<t3claw_engine::Project>) {
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(MemoryWriteStub)).await;
         let (adapter, store, _dyn_store) = make_adapter_with_missions_and_store(tools).await;
 
-        let ctx = ironclaw_engine::ThreadExecutionContext {
+        let ctx = t3claw_engine::ThreadExecutionContext {
             user_id: user_id.to_string(),
-            ..exec_ctx(ironclaw_engine::ThreadId::new(), Some("call_1"))
+            ..exec_ctx(t3claw_engine::ThreadId::new(), Some("call_1"))
         };
         let result = adapter
             .execute_action(
@@ -6681,7 +6679,7 @@ Use this skill to set up a Pika meeting.
         let (output, projects) = run_memory_write("projects/commitments/AGENTS.md", user).await;
 
         assert_eq!(projects.len(), 1, "exactly one project should exist");
-        let expected_id = ironclaw_engine::Project::new(user, "commitments", "").id;
+        let expected_id = t3claw_engine::Project::new(user, "commitments", "").id;
         assert_eq!(projects[0].id, expected_id);
         assert_eq!(projects[0].name, "commitments");
         assert_eq!(
@@ -6699,9 +6697,9 @@ Use this skill to set up a Pika meeting.
         tools.register(Arc::new(MemoryWriteStub)).await;
         let (adapter, store, _) = make_adapter_with_missions_and_store(tools).await;
         let user = "alice";
-        let ctx = ironclaw_engine::ThreadExecutionContext {
+        let ctx = t3claw_engine::ThreadExecutionContext {
             user_id: user.to_string(),
-            ..exec_ctx(ironclaw_engine::ThreadId::new(), Some("c1"))
+            ..exec_ctx(t3claw_engine::ThreadId::new(), Some("c1"))
         };
 
         for path in [
@@ -6757,7 +6755,7 @@ Use this skill to set up a Pika meeting.
         assert_eq!(projects.len(), 1);
         assert_eq!(
             projects[0].id,
-            ironclaw_engine::Project::new(user, "commitments", "").id,
+            t3claw_engine::Project::new(user, "commitments", "").id,
             "nested writes must register the top-level project, not a sub-project"
         );
     }
@@ -6778,9 +6776,9 @@ Use this skill to set up a Pika meeting.
             let tools = Arc::new(ToolRegistry::new());
             tools.register(Arc::new(MemoryWriteStub)).await;
             let (adapter, store, _) = make_adapter_with_missions_and_store(tools).await;
-            let ctx = ironclaw_engine::ThreadExecutionContext {
+            let ctx = t3claw_engine::ThreadExecutionContext {
                 user_id: user.to_string(),
-                ..exec_ctx(ironclaw_engine::ThreadId::new(), Some("c1"))
+                ..exec_ctx(t3claw_engine::ThreadId::new(), Some("c1"))
             };
             let r = adapter
                 .execute_action(
@@ -6799,7 +6797,7 @@ Use this skill to set up a Pika meeting.
                 1,
                 "path={path}: expected exactly one project"
             );
-            let expected = ironclaw_engine::Project::new(user, "my-project", "").id;
+            let expected = t3claw_engine::Project::new(user, "my-project", "").id;
             assert_eq!(
                 projects[0].id, expected,
                 "path={path}: auto-registered ID must equal Project::new(_, \"my-project\", _) \
@@ -6817,9 +6815,9 @@ Use this skill to set up a Pika meeting.
         let (adapter, store, _) = make_adapter_with_missions_and_store(tools).await;
 
         for user in ["alice", "bob"] {
-            let ctx = ironclaw_engine::ThreadExecutionContext {
+            let ctx = t3claw_engine::ThreadExecutionContext {
                 user_id: user.to_string(),
-                ..exec_ctx(ironclaw_engine::ThreadId::new(), Some("c1"))
+                ..exec_ctx(t3claw_engine::ThreadId::new(), Some("c1"))
             };
             let r = adapter
                 .execute_action(
@@ -6874,17 +6872,17 @@ Use this skill to set up a Pika meeting.
     // handle_mission_call path, per .claude/rules/testing.md.
 
     mod mission_store {
-        use ironclaw_engine::types::mission::{Mission, MissionId, MissionStatus};
-        use ironclaw_engine::types::thread::{Thread, ThreadId, ThreadState};
-        use ironclaw_engine::{EngineError, ProjectId};
         use std::collections::HashMap;
+        use t3claw_engine::types::mission::{Mission, MissionId, MissionStatus};
+        use t3claw_engine::types::thread::{Thread, ThreadId, ThreadState};
+        use t3claw_engine::{EngineError, ProjectId};
         use tokio::sync::RwLock;
 
         pub(super) struct TestStore {
             threads: RwLock<HashMap<ThreadId, Thread>>,
             missions: RwLock<HashMap<MissionId, Mission>>,
             pub(in crate::bridge::effect_adapter) projects:
-                RwLock<HashMap<ProjectId, ironclaw_engine::Project>>,
+                RwLock<HashMap<ProjectId, t3claw_engine::Project>>,
         }
 
         impl TestStore {
@@ -6898,7 +6896,7 @@ Use this skill to set up a Pika meeting.
         }
 
         #[async_trait::async_trait]
-        impl ironclaw_engine::Store for TestStore {
+        impl t3claw_engine::Store for TestStore {
             async fn save_thread(&self, thread: &Thread) -> Result<(), EngineError> {
                 self.threads.write().await.insert(thread.id, thread.clone());
                 Ok(())
@@ -6920,30 +6918,30 @@ Use this skill to set up a Pika meeting.
             ) -> Result<(), EngineError> {
                 Ok(())
             }
-            async fn save_step(&self, _: &ironclaw_engine::Step) -> Result<(), EngineError> {
+            async fn save_step(&self, _: &t3claw_engine::Step) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_steps(
                 &self,
                 _: ThreadId,
-            ) -> Result<Vec<ironclaw_engine::Step>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::Step>, EngineError> {
                 Ok(vec![])
             }
             async fn append_events(
                 &self,
-                _: &[ironclaw_engine::ThreadEvent],
+                _: &[t3claw_engine::ThreadEvent],
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_events(
                 &self,
                 _: ThreadId,
-            ) -> Result<Vec<ironclaw_engine::ThreadEvent>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::ThreadEvent>, EngineError> {
                 Ok(vec![])
             }
             async fn save_project(
                 &self,
-                project: &ironclaw_engine::Project,
+                project: &t3claw_engine::Project,
             ) -> Result<(), EngineError> {
                 self.projects
                     .write()
@@ -6954,13 +6952,13 @@ Use this skill to set up a Pika meeting.
             async fn load_project(
                 &self,
                 id: ProjectId,
-            ) -> Result<Option<ironclaw_engine::Project>, EngineError> {
+            ) -> Result<Option<t3claw_engine::Project>, EngineError> {
                 Ok(self.projects.read().await.get(&id).cloned())
             }
             async fn list_projects(
                 &self,
                 user_id: &str,
-            ) -> Result<Vec<ironclaw_engine::Project>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::Project>, EngineError> {
                 Ok(self
                     .projects
                     .read()
@@ -6972,38 +6970,38 @@ Use this skill to set up a Pika meeting.
             }
             async fn save_memory_doc(
                 &self,
-                _: &ironclaw_engine::MemoryDoc,
+                _: &t3claw_engine::MemoryDoc,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_memory_doc(
                 &self,
-                _: ironclaw_engine::DocId,
-            ) -> Result<Option<ironclaw_engine::MemoryDoc>, EngineError> {
+                _: t3claw_engine::DocId,
+            ) -> Result<Option<t3claw_engine::MemoryDoc>, EngineError> {
                 Ok(None)
             }
             async fn list_memory_docs(
                 &self,
                 _: ProjectId,
                 _: &str,
-            ) -> Result<Vec<ironclaw_engine::MemoryDoc>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::MemoryDoc>, EngineError> {
                 Ok(vec![])
             }
             async fn save_lease(
                 &self,
-                _: &ironclaw_engine::CapabilityLease,
+                _: &t3claw_engine::CapabilityLease,
             ) -> Result<(), EngineError> {
                 Ok(())
             }
             async fn load_active_leases(
                 &self,
                 _: ThreadId,
-            ) -> Result<Vec<ironclaw_engine::CapabilityLease>, EngineError> {
+            ) -> Result<Vec<t3claw_engine::CapabilityLease>, EngineError> {
                 Ok(vec![])
             }
             async fn revoke_lease(
                 &self,
-                _: ironclaw_engine::types::capability::LeaseId,
+                _: t3claw_engine::types::capability::LeaseId,
                 _: &str,
             ) -> Result<(), EngineError> {
                 Ok(())
@@ -7075,23 +7073,23 @@ Use this skill to set up a Pika meeting.
     ) -> (
         EffectBridgeAdapter,
         Arc<mission_store::TestStore>,
-        Arc<dyn ironclaw_engine::Store>,
+        Arc<dyn t3claw_engine::Store>,
     ) {
-        use ironclaw_engine::{CapabilityRegistry, LeaseManager, PolicyEngine, ThreadManager};
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_engine::{CapabilityRegistry, LeaseManager, PolicyEngine, ThreadManager};
+        use t3claw_safety::SafetyConfig;
 
         struct NoopLlm;
         #[async_trait]
-        impl ironclaw_engine::LlmBackend for NoopLlm {
+        impl t3claw_engine::LlmBackend for NoopLlm {
             async fn complete(
                 &self,
-                _: &[ironclaw_engine::ThreadMessage],
-                _: &[ironclaw_engine::ActionDef],
-                _: &ironclaw_engine::LlmCallConfig,
-            ) -> Result<ironclaw_engine::LlmOutput, ironclaw_engine::EngineError> {
-                Ok(ironclaw_engine::LlmOutput {
-                    response: ironclaw_engine::types::step::LlmResponse::Text("done".into()),
-                    usage: ironclaw_engine::types::step::TokenUsage::default(),
+                _: &[t3claw_engine::ThreadMessage],
+                _: &[t3claw_engine::ActionDef],
+                _: &t3claw_engine::LlmCallConfig,
+            ) -> Result<t3claw_engine::LlmOutput, t3claw_engine::EngineError> {
+                Ok(t3claw_engine::LlmOutput {
+                    response: t3claw_engine::types::step::LlmResponse::Text("done".into()),
+                    usage: t3claw_engine::types::step::TokenUsage::default(),
                 })
             }
             fn model_name(&self) -> &str {
@@ -7101,15 +7099,15 @@ Use this skill to set up a Pika meeting.
 
         struct NoopEffects;
         #[async_trait]
-        impl ironclaw_engine::EffectExecutor for NoopEffects {
+        impl t3claw_engine::EffectExecutor for NoopEffects {
             async fn execute_action(
                 &self,
                 _: &str,
                 _: serde_json::Value,
-                _: &ironclaw_engine::CapabilityLease,
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<ironclaw_engine::ActionResult, ironclaw_engine::EngineError> {
-                Ok(ironclaw_engine::ActionResult {
+                _: &t3claw_engine::CapabilityLease,
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<t3claw_engine::ActionResult, t3claw_engine::EngineError> {
+                Ok(t3claw_engine::ActionResult {
                     call_id: String::new(),
                     action_name: String::new(),
                     output: serde_json::json!({}),
@@ -7119,24 +7117,24 @@ Use this skill to set up a Pika meeting.
             }
             async fn available_actions(
                 &self,
-                _: &[ironclaw_engine::CapabilityLease],
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<Vec<ironclaw_engine::ActionDef>, ironclaw_engine::EngineError> {
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::ActionDef>, t3claw_engine::EngineError> {
                 Ok(vec![])
             }
 
             async fn available_capabilities(
                 &self,
-                _: &[ironclaw_engine::CapabilityLease],
-                _: &ironclaw_engine::ThreadExecutionContext,
-            ) -> Result<Vec<ironclaw_engine::CapabilitySummary>, ironclaw_engine::EngineError>
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, t3claw_engine::EngineError>
             {
                 Ok(vec![])
             }
         }
 
         let concrete_store = Arc::new(mission_store::TestStore::new());
-        let store: Arc<dyn ironclaw_engine::Store> = concrete_store.clone();
+        let store: Arc<dyn t3claw_engine::Store> = concrete_store.clone();
         let thread_manager = Arc::new(ThreadManager::new(
             Arc::new(NoopLlm),
             Arc::new(NoopEffects),
@@ -7145,7 +7143,7 @@ Use this skill to set up a Pika meeting.
             Arc::new(LeaseManager::new()),
             Arc::new(PolicyEngine::new()),
         ));
-        let mgr = ironclaw_engine::MissionManager::new(Arc::clone(&store), thread_manager);
+        let mgr = t3claw_engine::MissionManager::new(Arc::clone(&store), thread_manager);
 
         let adapter = EffectBridgeAdapter::new(
             tools,
@@ -7170,7 +7168,7 @@ Use this skill to set up a Pika meeting.
                 "mission_create",
                 serde_json::json!({"name": "test", "goal": "do stuff"}),
                 &lease(),
-                &exec_ctx(ironclaw_engine::ThreadId::new(), Some("c1")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c1")),
             )
             .await
             .expect("should return Ok with is_error=true, not Err");
@@ -7200,7 +7198,7 @@ Use this skill to set up a Pika meeting.
                     "cadence": "every tuesday"
                 }),
                 &lease(),
-                &exec_ctx(ironclaw_engine::ThreadId::new(), Some("c2")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c2")),
             )
             .await
             .expect("should return Ok with is_error=true");
@@ -7238,7 +7236,7 @@ Use this skill to set up a Pika meeting.
                     "max_threads_per_day": "5",
                 }),
                 &lease(),
-                &exec_ctx(ironclaw_engine::ThreadId::new(), Some("c3")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c3")),
             )
             .await
             .expect("string-typed guardrails should be coerced and succeed");
@@ -7250,7 +7248,7 @@ Use this skill to set up a Pika meeting.
             .and_then(|v| v.as_str())
             .expect("should have mission_id");
         let mission_id =
-            ironclaw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
+            t3claw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
         let mission = dyn_store
             .load_mission(mission_id)
             .await
@@ -7279,7 +7277,7 @@ Use this skill to set up a Pika meeting.
                     "cooldown_secs": "abc",
                 }),
                 &lease(),
-                &exec_ctx(ironclaw_engine::ThreadId::new(), Some("c3b")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c3b")),
             )
             .await
             .expect("should return Ok with is_error=true");
@@ -7309,7 +7307,7 @@ Use this skill to set up a Pika meeting.
                     "cadence": "0 9 * * *"
                 }),
                 &lease(),
-                &exec_ctx(ironclaw_engine::ThreadId::new(), Some("c4")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c4")),
             )
             .await
             .expect("should succeed");
@@ -7335,7 +7333,7 @@ Use this skill to set up a Pika meeting.
     async fn mission_update_string_guardrails_coerced_via_execute_action() {
         let (adapter, _store, dyn_store) =
             make_adapter_with_missions_and_store(Arc::new(ToolRegistry::new())).await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("u1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("u1"));
 
         // First create a mission to get an ID.
         let create_result = adapter
@@ -7378,7 +7376,7 @@ Use this skill to set up a Pika meeting.
             update_result.output
         );
         let mission_id =
-            ironclaw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
+            t3claw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
         let mission = dyn_store
             .load_mission(mission_id)
             .await
@@ -7391,7 +7389,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn system_event_cadence_round_trips_via_execute_action() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("rt1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("rt1"));
 
         // Create a mission with a system_event cadence.
         let create_result = adapter
@@ -7443,7 +7441,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_complete_returns_completed_status_via_execute_action() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("d1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("d1"));
 
         let create_result = adapter
             .execute_action(
@@ -7500,7 +7498,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_full_lifecycle_via_execute_action() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("lc1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("lc1"));
 
         // Create
         let create = adapter
@@ -7582,7 +7580,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_fire_returns_thread_id_for_manual_cadence_via_execute_action() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("fire1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("fire1"));
 
         let create = adapter
             .execute_action(
@@ -7646,7 +7644,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_fire_resolves_by_name_when_id_absent() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("name-fire-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("name-fire-1"));
 
         adapter
             .execute_action(
@@ -7697,7 +7695,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn routine_fire_alias_resolves_by_name_through_mission_fire() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("alias-name-fire-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("alias-name-fire-1"));
 
         adapter
             .execute_action(
@@ -7744,7 +7742,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_fire_errors_when_neither_id_nor_name_provided() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("no-id-no-name-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("no-id-no-name-1"));
 
         let res = adapter
             .execute_action("mission_fire", serde_json::json!({}), &lease(), &ctx)
@@ -7773,7 +7771,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_fire_errors_with_helpful_message_when_name_not_found() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("name-not-found-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("name-not-found-1"));
 
         // Create a mission with a different name so we know the mission
         // store is reachable; this isolates the failure to "name lookup
@@ -7827,7 +7825,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_get_resolves_by_name() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("get-by-name-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("get-by-name-1"));
 
         adapter
             .execute_action(
@@ -7864,7 +7862,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_complete_resolves_by_name() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("complete-by-name-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("complete-by-name-1"));
 
         adapter
             .execute_action(
@@ -7900,10 +7898,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_pause_and_resume_resolve_by_name() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(
-            ironclaw_engine::ThreadId::new(),
-            Some("pause-resume-name-1"),
-        );
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("pause-resume-name-1"));
 
         adapter
             .execute_action(
@@ -7950,7 +7945,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_resolver_errors_when_id_and_name_disagree() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("conflict-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("conflict-1"));
 
         // Create two distinct missions: A (the one our id refers to)
         // and B (the one our `name` refers to). They are different.
@@ -8023,7 +8018,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_update_preserves_legacy_id_plus_name_rename() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("legacy-rename-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("legacy-rename-1"));
 
         let create = adapter
             .execute_action(
@@ -8090,7 +8085,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_update_renames_via_new_name_and_uses_name_as_lookup() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("new-name-1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("new-name-1"));
 
         adapter
             .execute_action(
@@ -8146,7 +8141,7 @@ Use this skill to set up a Pika meeting.
     #[tokio::test]
     async fn mission_list_returns_all_user_missions_via_execute_action() {
         let adapter = make_adapter_with_missions().await;
-        let ctx = exec_ctx(ironclaw_engine::ThreadId::new(), Some("list1"));
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("list1"));
 
         let names = ["alpha", "beta", "gamma"];
         for name in names {
@@ -8191,8 +8186,8 @@ Use this skill to set up a Pika meeting.
     // thread held an active `missions` lease. This test pins that a
     // thread with a mission lease gets `mission_*` advertised.
 
-    fn mission_capability() -> ironclaw_engine::Capability {
-        ironclaw_engine::Capability {
+    fn mission_capability() -> t3claw_engine::Capability {
+        t3claw_engine::Capability {
             name: "missions".into(),
             description: "Mission lifecycle".into(),
             actions: crate::bridge::engine_actions::mission_capability_actions(),
@@ -8201,12 +8196,12 @@ Use this skill to set up a Pika meeting.
         }
     }
 
-    fn mission_lease(granted: &[&str]) -> ironclaw_engine::CapabilityLease {
-        ironclaw_engine::CapabilityLease {
-            id: ironclaw_engine::types::capability::LeaseId::new(),
-            thread_id: ironclaw_engine::ThreadId::new(),
+    fn mission_lease(granted: &[&str]) -> t3claw_engine::CapabilityLease {
+        t3claw_engine::CapabilityLease {
+            id: t3claw_engine::types::capability::LeaseId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
             capability_name: "missions".into(),
-            granted_actions: ironclaw_engine::GrantedActions::Specific(
+            granted_actions: t3claw_engine::GrantedActions::Specific(
                 granted.iter().map(|s| s.to_string()).collect(),
             ),
             granted_at: chrono::Utc::now(),
@@ -8232,7 +8227,7 @@ Use this skill to set up a Pika meeting.
                     "mission_list",
                     "mission_complete",
                 ])],
-                &exec_ctx(ironclaw_engine::ThreadId::new(), None),
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
             )
             .await
             .expect("available_actions should succeed");
@@ -8286,7 +8281,7 @@ Use this skill to set up a Pika meeting.
         let actions = adapter
             .available_actions(
                 &[mission_lease(&["mission_list"])],
-                &exec_ctx(ironclaw_engine::ThreadId::new(), None),
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
             )
             .await
             .expect("available_actions should succeed");
@@ -8316,7 +8311,7 @@ Use this skill to set up a Pika meeting.
         // No leases passed — no capability actions should surface even
         // though the registry has them.
         let actions = adapter
-            .available_actions(&[], &exec_ctx(ironclaw_engine::ThreadId::new(), None))
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("available_actions should succeed");
 
@@ -8363,7 +8358,7 @@ Use this skill to set up a Pika meeting.
         // With a missions lease active, the LLM's tools list must include
         // BOTH. Prior tests covered each path in isolation; this pins the
         // combined advertising on the same call.
-        use ironclaw_safety::SafetyConfig;
+        use t3claw_safety::SafetyConfig;
 
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(V1EchoTool)).await;
@@ -8387,7 +8382,7 @@ Use this skill to set up a Pika meeting.
                     "mission_list",
                     "mission_complete",
                 ])],
-                &exec_ctx(ironclaw_engine::ThreadId::new(), None),
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
             )
             .await
             .expect("available_actions should succeed");
@@ -8416,7 +8411,7 @@ Use this skill to set up a Pika meeting.
         let mut registry = CapabilityRegistry::new();
         // A hypothetical malformed capability that tries to expose v1
         // tools through the v2 advertising path.
-        registry.register(ironclaw_engine::Capability {
+        registry.register(t3claw_engine::Capability {
             name: "rogue".into(),
             description: "should not surface denylisted v1 names".into(),
             actions: vec![
@@ -8453,11 +8448,11 @@ Use this skill to set up a Pika meeting.
         });
         adapter.set_capability_registry(Arc::new(registry)).await;
 
-        let rogue_lease = ironclaw_engine::CapabilityLease {
-            id: ironclaw_engine::types::capability::LeaseId::new(),
-            thread_id: ironclaw_engine::ThreadId::new(),
+        let rogue_lease = t3claw_engine::CapabilityLease {
+            id: t3claw_engine::types::capability::LeaseId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
             capability_name: "rogue".into(),
-            granted_actions: ironclaw_engine::GrantedActions::All,
+            granted_actions: t3claw_engine::GrantedActions::All,
             granted_at: chrono::Utc::now(),
             expires_at: None,
             max_uses: None,
@@ -8469,7 +8464,7 @@ Use this skill to set up a Pika meeting.
         let actions = adapter
             .available_actions(
                 &[rogue_lease],
-                &exec_ctx(ironclaw_engine::ThreadId::new(), None),
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
             )
             .await
             .expect("available_actions should succeed");
@@ -8504,7 +8499,7 @@ Use this skill to set up a Pika meeting.
             .await;
 
         let scope_uuid = uuid::Uuid::new_v4();
-        let engine_thread_id = ironclaw_engine::ThreadId::new();
+        let engine_thread_id = t3claw_engine::ThreadId::new();
         assert_ne!(
             scope_uuid, engine_thread_id.0,
             "test setup: scope and engine thread must differ"
@@ -8512,14 +8507,14 @@ Use this skill to set up a Pika meeting.
 
         catalog
             .register(
-                ironclaw_engine::ThreadId(scope_uuid),
-                vec![ironclaw_engine::ActionDef {
+                t3claw_engine::ThreadId(scope_uuid),
+                vec![t3claw_engine::ActionDef {
                     name: "lookup_weather".to_string(),
                     description: "caller tool".to_string(),
                     parameters_schema: serde_json::json!({"type": "object"}),
-                    effects: vec![ironclaw_engine::EffectType::Compute],
+                    effects: vec![t3claw_engine::EffectType::Compute],
                     requires_approval: false,
-                    model_tool_surface: ironclaw_engine::ModelToolSurface::FullSchema,
+                    model_tool_surface: t3claw_engine::ModelToolSurface::FullSchema,
                     discovery: None,
                 }],
             )
@@ -8557,17 +8552,17 @@ Use this skill to set up a Pika meeting.
             .await;
 
         let scope_uuid = uuid::Uuid::new_v4();
-        let engine_thread_id = ironclaw_engine::ThreadId::new();
+        let engine_thread_id = t3claw_engine::ThreadId::new();
         catalog
             .register(
-                ironclaw_engine::ThreadId(scope_uuid),
-                vec![ironclaw_engine::ActionDef {
+                t3claw_engine::ThreadId(scope_uuid),
+                vec![t3claw_engine::ActionDef {
                     name: "lookup_weather".to_string(),
                     description: "caller tool".to_string(),
                     parameters_schema: serde_json::json!({"type": "object"}),
-                    effects: vec![ironclaw_engine::EffectType::Compute],
+                    effects: vec![t3claw_engine::EffectType::Compute],
                     requires_approval: false,
-                    model_tool_surface: ironclaw_engine::ModelToolSurface::FullSchema,
+                    model_tool_surface: t3claw_engine::ModelToolSurface::FullSchema,
                     discovery: None,
                 }],
             )
@@ -8590,7 +8585,7 @@ Use this skill to set up a Pika meeting.
                 assert!(
                     matches!(
                         &*resume_kind,
-                        ironclaw_engine::ResumeKind::External { callback_id }
+                        t3claw_engine::ResumeKind::External { callback_id }
                             if callback_id.starts_with("ext_tool:")
                     ),
                     "expected ResumeKind::External(ext_tool:...), got {resume_kind:?}"
@@ -8608,7 +8603,7 @@ Use this skill to set up a Pika meeting.
     /// trigger a duplicate lookup.
     #[test]
     fn external_tool_catalog_keys_dedupes_when_scope_equals_thread() {
-        let thread_id = ironclaw_engine::ThreadId::new();
+        let thread_id = t3claw_engine::ThreadId::new();
 
         let mut ctx_no_scope = exec_ctx(thread_id, None);
         ctx_no_scope.conversation_scope = None;
@@ -8624,6 +8619,6 @@ Use this skill to set up a Pika meeting.
         let scope = uuid::Uuid::new_v4();
         ctx_diff.conversation_scope = Some(scope);
         let keys: Vec<_> = EffectBridgeAdapter::external_tool_catalog_keys(&ctx_diff).collect();
-        assert_eq!(keys, vec![thread_id, ironclaw_engine::ThreadId(scope)]);
+        assert_eq!(keys, vec![thread_id, t3claw_engine::ThreadId(scope)]);
     }
 }

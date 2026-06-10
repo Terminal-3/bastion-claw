@@ -18,7 +18,7 @@ The goal is to match the OpenClaw community shape at the product level, where th
 - Bundled channel wiring and setup flow for `wecom_bot_id` and `wecom_bot_secret`.
 - Host WebSocket runtime protocol support for WeCom AI Bot sessions.
 - WebSocket inbound handling for text, markdown-like text, image, file, video, mixed messages, quote context, and selected interactive events.
-- Inbound media hydration from WeCom-provided encrypted media URLs into IronClaw attachments.
+- Inbound media hydration from WeCom-provided encrypted media URLs into T3Claw attachments.
 - Attachment-only merge window so a file/image followed by text becomes one agent turn.
 - Bot outbound text streaming replies.
 - Bot outbound media upload/send for generated image, voice, video, and file attachments, with size guards and chunked upload state.

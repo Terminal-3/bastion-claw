@@ -1,7 +1,7 @@
 // WhatsApp API types have fields reserved for future use (contacts, statuses, etc.)
 #![allow(dead_code)]
 
-//! WhatsApp Cloud API channel for IronClaw.
+//! WhatsApp Cloud API channel for T3Claw.
 //!
 //! This WASM component implements the channel interface for handling WhatsApp
 //! webhooks and sending messages back via the Cloud API.
@@ -908,7 +908,7 @@ fn send_pairing_reply(
         "text": {
             "preview_url": false,
             "body": format!(
-                "Enter this code in IronClaw to pair your whatsapp account: {}. CLI fallback: ironclaw pairing approve whatsapp {}",
+                "Enter this code in T3Claw to pair your whatsapp account: {}. CLI fallback: t3claw pairing approve whatsapp {}",
                 code, code
             )
         }

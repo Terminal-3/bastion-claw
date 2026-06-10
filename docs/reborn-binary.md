@@ -1,54 +1,54 @@
-# `ironclaw-reborn` standalone binary
+# `t3claw-reborn` standalone binary
 
-`ironclaw-reborn` is the standalone executable boundary for Reborn. It is separate from the current `ironclaw` binary so Reborn boot, config, state, and runtime composition can evolve without accidentally invoking v1 runtime paths.
+`t3claw-reborn` is the standalone executable boundary for Reborn. It is separate from the current `t3claw` binary so Reborn boot, config, state, and runtime composition can evolve without accidentally invoking v1 runtime paths.
 
-This binary is available as the workspace package `ironclaw_reborn_cli` and builds the executable named `ironclaw-reborn`.
+This binary is available as the workspace package `t3claw_reborn_cli` and builds the executable named `t3claw-reborn`.
 
 ## Current status
 
-`ironclaw-reborn` is an early operator/testing surface, not the default IronClaw runtime.
+`t3claw-reborn` is an early operator/testing surface, not the default T3Claw runtime.
 
 It currently supports:
 
 ```bash
-ironclaw-reborn --help
-ironclaw-reborn channels list
-ironclaw-reborn channels list --json
-ironclaw-reborn channels list --verbose
-ironclaw-reborn completion --shell bash
-ironclaw-reborn completion --shell zsh
-ironclaw-reborn config path
-ironclaw-reborn doctor
-ironclaw-reborn extension search github
-ironclaw-reborn extension search github --json
-ironclaw-reborn extension install github-mcp
-ironclaw-reborn extension activate github-mcp
-ironclaw-reborn extension remove github-mcp
-ironclaw-reborn hooks list
-ironclaw-reborn hooks list --json
-ironclaw-reborn hooks list --verbose
-ironclaw-reborn logs
-ironclaw-reborn logs --json
-ironclaw-reborn logs --verbose
-ironclaw-reborn models list
-ironclaw-reborn models list --json
-ironclaw-reborn models status
-ironclaw-reborn models status --json
-ironclaw-reborn profile list
-ironclaw-reborn profile list --json
-ironclaw-reborn repl
-ironclaw-reborn run
-ironclaw-reborn run --confirm-host-access
-ironclaw-reborn serve
-ironclaw-reborn serve --confirm-host-access
-ironclaw-reborn skills list
-ironclaw-reborn skills list --json
-ironclaw-reborn skills list --verbose
+t3claw-reborn --help
+t3claw-reborn channels list
+t3claw-reborn channels list --json
+t3claw-reborn channels list --verbose
+t3claw-reborn completion --shell bash
+t3claw-reborn completion --shell zsh
+t3claw-reborn config path
+t3claw-reborn doctor
+t3claw-reborn extension search github
+t3claw-reborn extension search github --json
+t3claw-reborn extension install github-mcp
+t3claw-reborn extension activate github-mcp
+t3claw-reborn extension remove github-mcp
+t3claw-reborn hooks list
+t3claw-reborn hooks list --json
+t3claw-reborn hooks list --verbose
+t3claw-reborn logs
+t3claw-reborn logs --json
+t3claw-reborn logs --verbose
+t3claw-reborn models list
+t3claw-reborn models list --json
+t3claw-reborn models status
+t3claw-reborn models status --json
+t3claw-reborn profile list
+t3claw-reborn profile list --json
+t3claw-reborn repl
+t3claw-reborn run
+t3claw-reborn run --confirm-host-access
+t3claw-reborn serve
+t3claw-reborn serve --confirm-host-access
+t3claw-reborn skills list
+t3claw-reborn skills list --json
+t3claw-reborn skills list --verbose
 ```
 
 It intentionally does not yet support:
 
-- replacing `ironclaw` behavior;
+- replacing `t3claw` behavior;
 - daemon/service installation;
 - web gateway/UI startup;
 - v1 config, DB, settings, or secrets migration;
@@ -64,9 +64,9 @@ Reports configured Reborn channels without resolving Reborn home, reading v1 cha
 The Reborn channel registry is not wired yet, so the command currently reports an explicit empty surface:
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- channels list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- channels list --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- channels list --verbose
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- channels list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- channels list --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- channels list --verbose
 ```
 
 Expected fields include:
@@ -80,11 +80,11 @@ Expected fields include:
 Searches and manages local-dev Reborn extensions through the same lifecycle facade exposed to product surfaces. Available extension packages are read from `/system/extensions`, which maps to `<reborn-home>/local-dev/system/extensions` for the local-dev profile.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- extension search github
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- extension search github --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- extension install github-mcp
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- extension activate github-mcp
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- extension remove github-mcp
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- extension search github
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- extension search github --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- extension install github-mcp
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- extension activate github-mcp
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- extension remove github-mcp
 ```
 
 The commands are scoped to Reborn boot/config resolution and do not create or read v1 state directories.
@@ -102,8 +102,8 @@ Expected fields include:
 Generates shell completion scripts without resolving Reborn home, reading v1 state, or creating directories.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- completion --shell zsh > ironclaw-reborn.zsh
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- completion --shell bash > ironclaw-reborn.bash
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- completion --shell zsh > t3claw-reborn.zsh
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- completion --shell bash > t3claw-reborn.bash
 ```
 
 The zsh output keeps the v1 CLI guard around `compdef` so the generated script is safe when zsh completion functions are not loaded yet.
@@ -113,7 +113,7 @@ The zsh output keeps the v1 CLI guard around `compdef` so the generated script i
 Shows the resolved Reborn state root, its source, selected profile, and explicit v1-state status without creating directories.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- config path
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- config path
 ```
 
 Expected fields include:
@@ -131,7 +131,7 @@ state or seed config files.
 Validates and reports Reborn boot configuration without creating state directories or starting runtime services.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- doctor
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- doctor
 ```
 
 Expected fields include:
@@ -149,9 +149,9 @@ Reports configured Reborn hooks without resolving Reborn home, reading v1 hook c
 The Reborn hook registry is not wired yet, so the command currently reports an explicit empty surface:
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- hooks list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- hooks list --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- hooks list --verbose
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- hooks list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- hooks list --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- hooks list --verbose
 ```
 
 Expected fields include:
@@ -167,9 +167,9 @@ Reports Reborn log availability without resolving Reborn home, reading v1 gatewa
 The Reborn log source is not wired yet, so the command currently reports an explicit empty surface:
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- logs
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- logs --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- logs --verbose
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- logs
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- logs --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- logs --verbose
 ```
 
 Expected fields include:
@@ -185,10 +185,10 @@ Shows Reborn model purpose slots and route status without resolving Reborn home,
 Routes are not configurable through Reborn CLI yet, so the command currently reports `not-configured` routes for built-in slots:
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- models list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- models list --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- models status
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- models status --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models list --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models status
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models status --json
 ```
 
 Expected fields include:
@@ -203,8 +203,8 @@ Expected fields include:
 Lists the supported Reborn boot profiles without resolving Reborn home, reading v1 state, or creating directories.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- profile list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- profile list --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- profile list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- profile list --json
 ```
 
 Supported profiles:
@@ -214,35 +214,35 @@ Supported profiles:
 - `production`
 - `migration-dry-run`
 
-Select a profile with `IRONCLAW_REBORN_PROFILE=<profile>`.
+Select a profile with `T3CLAW_REBORN_PROFILE=<profile>`.
 
 ### `run`
 
 Starts the standalone Reborn runtime and reads messages from stdin. The no-profile path targets the planned AgentLoop runtime (`reborn-planned-default`). Without model provider environment variables, the runtime still starts but messages fail cleanly because no LLM gateway is wired.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- run
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- run --message "hello"
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run --message "hello"
 ```
 
 Use `--dry-run` for the side-effect-free readiness snapshot:
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- run --dry-run
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run --dry-run
 ```
 
-When `$IRONCLAW_REBORN_HOME/config.toml` is missing, the first stateful
+When `$T3CLAW_REBORN_HOME/config.toml` is missing, the first stateful
 runtime start through `run`, `repl`, or feature-gated `serve` seeds a sparse
 `config.toml` containing `api_version` and the safe `local-dev` boot profile.
 It intentionally does not seed `[llm.default]`, so env-only model selection
 continues to work. `run --dry-run`, diagnostics, and read-only commands remain
 side-effect-free. One-off environment selections such as
-`IRONCLAW_REBORN_PROFILE=local-dev-yolo` are not persisted into the seeded
+`T3CLAW_REBORN_PROFILE=local-dev-yolo` are not persisted into the seeded
 file.
 
 Expected fields include:
 
-- `binary: ironclaw-reborn`
+- `binary: t3claw-reborn`
 - `version`
 - `reborn_home`
 - `home_source`
@@ -253,18 +253,18 @@ Expected fields include:
 - `local_runtime_shell_readiness: ready`
 - `planned_default_profile: available`
 
-For `IRONCLAW_REBORN_PROFILE=local-dev-yolo`, `run`, `repl`, and `serve` require `--confirm-host-access` before the runtime receives trusted-laptop host access. Confirmed access mounts the host home through `/host`; Unix-style raw home aliases are also accepted when they can be represented as scoped mount aliases.
+For `T3CLAW_REBORN_PROFILE=local-dev-yolo`, `run`, `repl`, and `serve` require `--confirm-host-access` before the runtime receives trusted-laptop host access. Confirmed access mounts the host home through `/host`; Unix-style raw home aliases are also accepted when they can be represented as scoped mount aliases.
 
 When `serve --confirm-host-access` grants trusted-laptop access, `serve` refuses non-loopback listeners such as `0.0.0.0`. Bind to `127.0.0.1` or `::1`, or use a less privileged profile for non-loopback test listeners.
 
-For `IRONCLAW_REBORN_PROFILE=production`, `run` requires production storage
+For `T3CLAW_REBORN_PROFILE=production`, `run` requires production storage
 and an explicit runtime policy:
 
 ```toml
 [storage]
 backend = "postgres"
-url_env = "IRONCLAW_REBORN_POSTGRES_URL"
-secret_master_key_env = "IRONCLAW_REBORN_SECRET_MASTER_KEY"
+url_env = "T3CLAW_REBORN_POSTGRES_URL"
+secret_master_key_env = "T3CLAW_REBORN_SECRET_MASTER_KEY"
 # Optional; defaults to 16. Keep below the PostgreSQL server's max_connections
 # after reserving capacity for migrations and operator sessions.
 pool_max_size = 16
@@ -274,8 +274,8 @@ deployment_mode = "hosted_multi_tenant"
 default_profile = "secure_default"
 ```
 
-Set `IRONCLAW_REBORN_POSTGRES_URL` in the process environment, and set
-`IRONCLAW_REBORN_SECRET_MASTER_KEY` to independent cryptographic key material.
+Set `T3CLAW_REBORN_POSTGRES_URL` in the process environment, and set
+`T3CLAW_REBORN_SECRET_MASTER_KEY` to independent cryptographic key material.
 Remote managed PostgreSQL URLs must use TLS, for example `sslmode=require`.
 The first production launch slice supports runtime policies that do not require
 a tenant-sandbox process binding.
@@ -289,9 +289,9 @@ local-dev storage root is reported as an empty skill list without creating
 directories.
 
 ```bash
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- skills list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- skills list --json
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- skills list --verbose
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- skills list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- skills list --json
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- skills list --verbose
 ```
 
 Expected fields include:
@@ -310,18 +310,18 @@ and `requires_skills` when present. `skills list` currently supports
 
 ## State and config root
 
-Reborn must not use the current v1 IronClaw state root by default.
+Reborn must not use the current v1 T3Claw state root by default.
 
 Home resolution precedence:
 
-1. `IRONCLAW_REBORN_HOME`
-2. `~/.ironclaw/reborn`
+1. `T3CLAW_REBORN_HOME`
+2. `~/.t3claw/reborn`
 
-The resolver rejects unsafe or misleading homes, including empty paths, relative paths, filesystem root, parent-directory components, and known v1 state-root aliases such as `$HOME/.ironclaw` or `IRONCLAW_BASE_DIR`.
+The resolver rejects unsafe or misleading homes, including empty paths, relative paths, filesystem root, parent-directory components, and known v1 state-root aliases such as `$HOME/.t3claw` or `T3CLAW_BASE_DIR`.
 
 ## Profiles
 
-Use `IRONCLAW_REBORN_PROFILE` to select the boot profile.
+Use `T3CLAW_REBORN_PROFILE` to select the boot profile.
 
 Supported values:
 
@@ -333,9 +333,9 @@ Supported values:
 Example:
 
 ```bash
-IRONCLAW_REBORN_HOME="$PWD/.reborn-home" \
-IRONCLAW_REBORN_PROFILE=production \
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- doctor
+T3CLAW_REBORN_HOME="$PWD/.reborn-home" \
+T3CLAW_REBORN_PROFILE=production \
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- doctor
 ```
 
 ## Local smoke checks
@@ -344,23 +344,23 @@ Run these before changing Reborn CLI behavior:
 
 ```bash
 cargo fmt --all -- --check
-cargo test -p ironclaw_reborn_cli
-cargo test -p ironclaw_reborn_config
-cargo test -p ironclaw_reborn model_slots_are_exposed_in_cli_display_order
-cargo test -p ironclaw_architecture reborn
-cargo clippy -p ironclaw_reborn_cli --all-targets -- -D warnings
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- --help
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- channels list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- completion --shell zsh >/tmp/ironclaw-reborn.zsh
-IRONCLAW_REBORN_HOME="$(mktemp -d)/reborn-home" \
-  cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- config path
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- hooks list
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- logs
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- models status
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- profile list
-IRONCLAW_REBORN_HOME="$(mktemp -d)/reborn-home" \
-  cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- run
-cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- skills list
+cargo test -p t3claw_reborn_cli
+cargo test -p t3claw_reborn_config
+cargo test -p t3claw_reborn model_slots_are_exposed_in_cli_display_order
+cargo test -p t3claw_architecture reborn
+cargo clippy -p t3claw_reborn_cli --all-targets -- -D warnings
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- --help
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- channels list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- completion --shell zsh >/tmp/t3claw-reborn.zsh
+T3CLAW_REBORN_HOME="$(mktemp -d)/reborn-home" \
+  cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- config path
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- hooks list
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- logs
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models status
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- profile list
+T3CLAW_REBORN_HOME="$(mktemp -d)/reborn-home" \
+  cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- skills list
 ```
 
 ## Adding commands
@@ -368,27 +368,27 @@ cargo run -q -p ironclaw_reborn_cli --bin ironclaw-reborn -- skills list
 Future commands should follow the crate-local agent contract in:
 
 ```text
-crates/ironclaw_reborn_cli/AGENTS.md
+crates/t3claw_reborn_cli/AGENTS.md
 ```
 
 Short version:
 
-1. add one command module under `crates/ironclaw_reborn_cli/src/commands/`;
+1. add one command module under `crates/t3claw_reborn_cli/src/commands/`;
 2. register it in `commands::Command`;
 3. resolve and pass `RebornCliContext` from dispatch only when the command needs boot config;
 4. keep pure commands independent from Reborn home resolution;
-5. add a binary smoke test through `env!("CARGO_BIN_EXE_ironclaw-reborn")`;
+5. add a binary smoke test through `env!("CARGO_BIN_EXE_t3claw-reborn")`;
 6. avoid v1 runtime imports and v1 state mutation unless explicitly scoped and guarded.
 
 Do not port the current `src/cli/*` command tree wholesale. Port commands one at a time, starting with Reborn-owned or read-only surfaces.
 
 ## Release packaging decision
 
-`ironclaw-reborn` is **not yet included in cargo-dist release artifacts**.
+`t3claw-reborn` is **not yet included in cargo-dist release artifacts**.
 
-Current `dist plan --output-format=json` with `crates/ironclaw_reborn_cli` marked `dist = false` emits only the root `ironclaw` package artifacts. Removing `dist = false` alone is not enough to ship `ironclaw-reborn` in the existing `ironclaw-v*` release workflow because that workflow is shaped around the root `ironclaw` package tag. Enabling a standalone `ironclaw_reborn_cli` release also requires cargo-dist WiX metadata/template work and an explicit tag/versioning decision.
+Current `dist plan --output-format=json` with `crates/t3claw_reborn_cli` marked `dist = false` emits only the root `t3claw` package artifacts. Removing `dist = false` alone is not enough to ship `t3claw-reborn` in the existing `t3claw-v*` release workflow because that workflow is shaped around the root `t3claw` package tag. Enabling a standalone `t3claw_reborn_cli` release also requires cargo-dist WiX metadata/template work and an explicit tag/versioning decision.
 
-Follow-up issue: #3483 tracks packaging `ironclaw-reborn` in release artifacts.
+Follow-up issue: #3483 tracks packaging `t3claw-reborn` in release artifacts.
 
 Until #3483 is resolved, keep:
 
@@ -397,4 +397,4 @@ Until #3483 is resolved, keep:
 dist = false
 ```
 
-in `crates/ironclaw_reborn_cli/Cargo.toml` so releases do not silently claim to ship an unverified Reborn binary package.
+in `crates/t3claw_reborn_cli/Cargo.toml` so releases do not silently claim to ship an unverified Reborn binary package.

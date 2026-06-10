@@ -36,25 +36,25 @@ is_shared_test_path() {
     .github/workflows/test.yml|.github/workflows/reborn-tests.yml|.github/workflows/reborn-integration.yml|.github/workflows/reborn-e2e.yml|.github/workflows/nightly-deep-ci.yml)
       return 0
       ;;
-    crates/ironclaw_common/*|crates/ironclaw_host_api/*|crates/ironclaw_host_runtime/*|crates/ironclaw_loop_support/*)
+    crates/t3claw_common/*|crates/t3claw_host_api/*|crates/t3claw_host_runtime/*|crates/t3claw_loop_support/*)
       return 0
       ;;
-    crates/ironclaw_filesystem/*|crates/ironclaw_memory/*|crates/ironclaw_events/*|crates/ironclaw_event_projections/*|crates/ironclaw_event_streams/*)
+    crates/t3claw_filesystem/*|crates/t3claw_memory/*|crates/t3claw_events/*|crates/t3claw_event_projections/*|crates/t3claw_event_streams/*)
       return 0
       ;;
-    crates/ironclaw_capabilities/*|crates/ironclaw_secrets/*|crates/ironclaw_network/*|crates/ironclaw_runtime_policy/*)
+    crates/t3claw_capabilities/*|crates/t3claw_secrets/*|crates/t3claw_network/*|crates/t3claw_runtime_policy/*)
       return 0
       ;;
-    crates/ironclaw_authorization/*|crates/ironclaw_run_state/*|crates/ironclaw_approvals/*|crates/ironclaw_resources/*)
+    crates/t3claw_authorization/*|crates/t3claw_run_state/*|crates/t3claw_approvals/*|crates/t3claw_resources/*)
       return 0
       ;;
-    crates/ironclaw_auth/*|crates/ironclaw_trust/*|crates/ironclaw_turns/*|crates/ironclaw_agent_loop/*|crates/ironclaw_threads/*)
+    crates/t3claw_auth/*|crates/t3claw_trust/*|crates/t3claw_turns/*|crates/t3claw_agent_loop/*|crates/t3claw_threads/*)
       return 0
       ;;
-    crates/ironclaw_prompt_envelope/*|crates/ironclaw_hooks/*|crates/ironclaw_first_party_extensions/*|crates/ironclaw_llm/*)
+    crates/t3claw_prompt_envelope/*|crates/t3claw_hooks/*|crates/t3claw_first_party_extensions/*|crates/t3claw_llm/*)
       return 0
       ;;
-    crates/ironclaw_embeddings/*|crates/ironclaw_safety/*|crates/ironclaw_skills/*|crates/ironclaw_oauth/*)
+    crates/t3claw_embeddings/*|crates/t3claw_safety/*|crates/t3claw_skills/*|crates/t3claw_oauth/*)
       return 0
       ;;
     *)
@@ -69,19 +69,19 @@ is_reborn_test_path() {
     docs/reborn/*|scripts/reborn-e2e-rust.sh|scripts/ci/run-reborn-root-partition.sh|tests/reborn_*|tests/support/reborn/*|tests/e2e/scenarios/test_reborn_*)
       return 0
       ;;
-    crates/ironclaw_architecture/*)
+    crates/t3claw_architecture/*)
       return 0
       ;;
-    crates/ironclaw_reborn/*|crates/ironclaw_reborn_*/*)
+    crates/t3claw_reborn/*|crates/t3claw_reborn_*/*)
       return 0
       ;;
-    crates/ironclaw_product_*/*|crates/ironclaw_slack_v2_adapter/*|crates/ironclaw_telegram_v2_adapter/*)
+    crates/t3claw_product_*/*|crates/t3claw_slack_v2_adapter/*|crates/t3claw_telegram_v2_adapter/*)
       return 0
       ;;
-    crates/ironclaw_wasm_product_adapters/*|crates/ironclaw_webui_v2/*|crates/ironclaw_webui_v2_static/*)
+    crates/t3claw_wasm_product_adapters/*|crates/t3claw_webui_v2/*|crates/t3claw_webui_v2_static/*)
       return 0
       ;;
-    crates/ironclaw_conversations/*|crates/ironclaw_outbound/*|crates/ironclaw_triggers/*)
+    crates/t3claw_conversations/*|crates/t3claw_outbound/*|crates/t3claw_triggers/*)
       return 0
       ;;
     *)

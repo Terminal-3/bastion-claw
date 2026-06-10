@@ -1,0 +1,77 @@
+[package]
+name = "t3claw_host_runtime"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+test-support = []
+postgres = ["dep:deadpool-postgres", "t3claw_filesystem/postgres", "t3claw_resources/postgres", "t3claw_run_state/postgres"]
+libsql = ["dep:libsql", "t3claw_filesystem/libsql", "t3claw_resources/libsql", "t3claw_run_state/libsql"]
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22.1"
+bollard = "0.18"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+chrono-tz = "0.10"
+deadpool-postgres = { version = "0.14", optional = true }
+futures-util = "0.3"
+dirs = "6"
+hex = "0.4"
+t3claw_approvals = { path = "../t3claw_approvals" }
+t3claw_authorization = { path = "../t3claw_authorization" }
+t3claw_capabilities = { path = "../t3claw_capabilities" }
+t3claw_process_sandbox = { path = "../t3claw_process_sandbox" }
+t3claw_dispatcher = { path = "../t3claw_dispatcher" }
+t3claw_events = { path = "../t3claw_events" }
+t3claw_extensions = { path = "../t3claw_extensions" }
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_first_party_extensions = { path = "../t3claw_first_party_extensions" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_memory = { path = "../t3claw_memory" }
+t3claw_mcp = { path = "../t3claw_mcp" }
+t3claw_network = { path = "../t3claw_network" }
+t3claw_processes = { path = "../t3claw_processes" }
+t3claw_product_adapter_registry = { path = "../t3claw_product_adapter_registry" }
+t3claw_prompt_envelope = { path = "../t3claw_prompt_envelope" }
+t3claw_reborn_event_store = { path = "../t3claw_reborn_event_store" }
+t3claw_resources = { path = "../t3claw_resources" }
+t3claw_run_state = { path = "../t3claw_run_state" }
+t3claw_runtime_policy = { path = "../t3claw_runtime_policy" }
+t3claw_safety = { path = "../t3claw_safety" }
+t3claw_scripts = { path = "../t3claw_scripts" }
+t3claw_secrets = { path = "../t3claw_secrets" }
+t3claw_skills = { path = "../t3claw_skills" }
+t3claw_triggers = { path = "../t3claw_triggers" }
+t3claw_trust = { path = "../t3claw_trust" }
+t3claw_turns = { path = "../t3claw_turns" }
+t3claw_wasm = { path = "../t3claw_wasm" }
+libsql = { version = "0.6", optional = true, default-features = false, features = ["core", "replication", "remote", "tls"] }
+jsonschema = { version = "0.45", default-features = false }
+libc = "0.2"
+rust_decimal = { version = "1", features = ["serde", "serde-with-str"] }
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+tracing = "0.1"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+t3claw_event_projections = { path = "../t3claw_event_projections" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio-postgres = "0.7"
+zeroize = "1"
+wat = "1.245.1"
+wit-component = "0.245.1"
+wit-parser = "0.245.1"
+
+[lints]
+workspace = true

@@ -22,7 +22,7 @@ Google Calendar 扩展允许智能体与您的日历交互，包括创建事件�
 <Step title="安装扩展">
 
 ```bash
-ironclaw registry install google-calendar
+t3claw registry install google-calendar
 ```
 
 </Step>
@@ -30,10 +30,10 @@ ironclaw registry install google-calendar
 <Step title="授权访问">
 
 ```bash
-ironclaw tool auth google-calendar
+t3claw tool auth google-calendar
 ```
 
-IronClaw 会提供认证链接。请确保已按 [auth setup](./oauth-setup) 完成回调配置。若环境支持，会自动打开浏览器。授权成功后，令牌会被安全保存并自动刷新。
+T3Claw 会提供认证链接。请确保已按 [auth setup](./oauth-setup) 完成回调配置。若环境支持，会自动打开浏览器。授权成功后，令牌会被安全保存并自动刷新。
 
 <Tip>
 即使已经授权过其他 Google 扩展，也需要对每个新增扩展单独执行一次授权。

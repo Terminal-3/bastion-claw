@@ -18,7 +18,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
+                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
               }
             ]
           }
@@ -53,7 +53,7 @@
               "tool_calls": [
                 {
                   "function": {
-                    "arguments": "{\"name\": \"gmail-draft-3133\", \"goal\": \"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the IronClaw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\", \"cadence\": \"*/3 * * * *\"}",
+                    "arguments": "{\"name\": \"gmail-draft-3133\", \"goal\": \"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the T3Claw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\", \"cadence\": \"*/3 * * * *\"}",
                     "name": "mission_create"
                   },
                   "id": "call_529804722287442abf4af8c4",
@@ -98,7 +98,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
+                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
               }
             ]
           },
@@ -115,7 +115,7 @@
                 "type": "function",
                 "function": {
                   "name": "mission_create",
-                  "arguments": "{\"cadence\":\"*/3 * * * *\",\"goal\":\"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the IronClaw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\",\"name\":\"gmail-draft-3133\"}"
+                  "arguments": "{\"cadence\":\"*/3 * * * *\",\"goal\":\"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the T3Claw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\",\"name\":\"gmail-draft-3133\"}"
                 }
               },
               {
@@ -206,7 +206,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
+                "text": "Use the mission_create tool to create a mission with these exact parameters and DO NOT run any other tools first:\n  name = 'gmail-draft-3133'\n  goal = 'Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.'\n  cadence = cron expression '*/3 * * * *'\nThen immediately use mission_fire to trigger it once. Do not call tool_list, tool_info, tool_activate, or any other tool before mission_create. Just create the mission and fire it."
               }
             ]
           },
@@ -223,7 +223,7 @@
                 "type": "function",
                 "function": {
                   "name": "mission_create",
-                  "arguments": "{\"cadence\":\"*/3 * * * *\",\"goal\":\"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the IronClaw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\",\"name\":\"gmail-draft-3133\"}"
+                  "arguments": "{\"cadence\":\"*/3 * * * *\",\"goal\":\"Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \\\"Test mission #3133\\\" and body \\\"Mock draft from the T3Claw e2e test.\\\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\",\"name\":\"gmail-draft-3133\"}"
                 }
               },
               {
@@ -323,7 +323,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Current Focus\nThis is the first run. Start by understanding the goal and determining the first step.\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #1 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
+                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Current Focus\nThis is the first run. Start by understanding the goal and determining the first step.\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #1 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
               }
             ]
           }
@@ -398,7 +398,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Current Focus\nThis is the first run. Start by understanding the goal and determining the first step.\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #1 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
+                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Current Focus\nThis is the first run. Start by understanding the goal and determining the first step.\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #1 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
               }
             ]
           },
@@ -455,7 +455,7 @@
               "tool_calls": [
                 {
                   "function": {
-                    "arguments": "{\"action\": \"create_draft\", \"body\": \"Mock draft from the IronClaw e2e test.\", \"subject\": \"Test mission #3133\", \"to\": \"owner@example.com\"}",
+                    "arguments": "{\"action\": \"create_draft\", \"body\": \"Mock draft from the T3Claw e2e test.\", \"subject\": \"Test mission #3133\", \"to\": \"owner@example.com\"}",
                     "name": "gmail"
                   },
                   "id": "call_0c6030b6b0cb41ea8e25174b",
@@ -495,7 +495,7 @@
             "content": [
               {
                 "type": "text",
-                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the IronClaw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Previous Approaches\n1. PAUSED: gate 'authentication' on action 'gmail' awaiting authentication\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #2 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
+                "text": "# Mission: gmail-draft-3133\n\nGoal: Use the gmail tool with action=create_draft to send a draft to owner@example.com with subject \"Test mission #3133\" and body \"Mock draft from the T3Claw e2e test.\". Just call the gmail tool directly — the runtime handles authentication. Do NOT call tool_activate, tool_install, or any other setup tool first.\n\n## Previous Approaches\n1. PAUSED: gate 'authentication' on action 'gmail' awaiting authentication\n\n## Knowledge from Prior Threads\n[SKILLS]\n\nThis is thread #2 for this mission.\n\n## Instructions\nBased on the above context, take the next step toward the goal. Use tools to gather information, analyze data, or take actions. When done, call FINAL() with your response. Include:\n1. What you accomplished in this step\n2. What the next focus should be (for the next thread)\n3. Whether the goal has been achieved (yes/no)"
               }
             ]
           }
@@ -530,7 +530,7 @@
               "tool_calls": [
                 {
                   "function": {
-                    "arguments": "{\"action\": \"create_draft\", \"to\": \"owner@example.com\", \"subject\": \"Test mission #3133\", \"body\": \"Mock draft from the IronClaw e2e test.\"}",
+                    "arguments": "{\"action\": \"create_draft\", \"to\": \"owner@example.com\", \"subject\": \"Test mission #3133\", \"body\": \"Mock draft from the T3Claw e2e test.\"}",
                     "name": "gmail"
                   },
                   "id": "call_66394a8fadd141c59b23016f",

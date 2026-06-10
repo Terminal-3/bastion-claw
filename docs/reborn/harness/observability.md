@@ -89,7 +89,7 @@ The local harness should eventually provide:
 scripts/reborn-dev doctor
 ```
 
-or an equivalent `ironclaw reborn doctor --bundle` command.
+or an equivalent `t3claw reborn doctor --bundle` command.
 
 The bundle should contain:
 
@@ -118,7 +118,7 @@ General rule:
 ## Durable Store Evidence
 
 Standalone Reborn composition should consume durable event/audit handles from
-`ironclaw_reborn_event_store`. Local/test harnesses may use in-memory stores or
+`t3claw_reborn_event_store`. Local/test harnesses may use in-memory stores or
 JSONL stores; production must not silently fall back to in-memory storage. JSONL
 is accepted as a single-node durable backend only when explicitly configured.
 PostgreSQL and libSQL stores are the SQL durability adapters for production

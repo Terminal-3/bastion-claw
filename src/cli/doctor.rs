@@ -1,4 +1,4 @@
-//! `ironclaw doctor` - active health diagnostics.
+//! `t3claw doctor` - active health diagnostics.
 //!
 //! Probes external dependencies and validates configuration to surface
 //! problems before they bite during normal operation. Each check reports
@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 use crate::cli::fmt;
 use crate::settings::Settings;
 
@@ -28,7 +28,7 @@ async fn load_acp_agents_for_doctor()
 /// Run all diagnostic checks and print results.
 pub async fn run_doctor_command() -> anyhow::Result<()> {
     println!();
-    println!("  {}IronClaw Doctor{}", fmt::bold(), fmt::reset());
+    println!("  {}T3Claw Doctor{}", fmt::bold(), fmt::reset());
 
     let mut passed = 0u32;
     let mut failed = 0u32;
@@ -297,7 +297,7 @@ async fn check_nearai_session(settings: &Settings) -> CheckResult {
             return CheckResult::Pass("API key configured".into());
         }
         return CheckResult::Fail(format!(
-            "session file not found at {}. Run `ironclaw onboard`",
+            "session file not found at {}. Run `t3claw onboard`",
             session_path.display()
         ));
     }
@@ -395,7 +395,7 @@ async fn try_pg_connect() -> Result<(), String> {
 // ── Workspace directory ─────────────────────────────────────
 
 fn check_workspace_dir() -> CheckResult {
-    let dir = ironclaw_base_dir();
+    let dir = t3claw_base_dir();
 
     if dir.exists() {
         if dir.is_dir() {
@@ -472,7 +472,7 @@ fn check_embeddings(settings: &Settings) -> CheckResult {
         ))
     } else {
         let hint = match config.provider.as_str() {
-            "nearai" => "run `ironclaw onboard` to create a session",
+            "nearai" => "run `t3claw onboard` to create a session",
             "bedrock" => "set AWS_PROFILE or AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY",
             _ => "set OPENAI_API_KEY",
         };
@@ -611,10 +611,10 @@ async fn check_acp_config() -> CheckResult {
 // ── Skills ──────────────────────────────────────────────────
 
 async fn check_skills() -> CheckResult {
-    let user_dir = ironclaw_base_dir().join("skills");
-    let installed_dir = ironclaw_base_dir().join("installed_skills");
+    let user_dir = t3claw_base_dir().join("skills");
+    let installed_dir = t3claw_base_dir().join("installed_skills");
 
-    let mut registry = ironclaw_skills::SkillRegistry::new(user_dir.clone());
+    let mut registry = t3claw_skills::SkillRegistry::new(user_dir.clone());
     registry = registry.with_installed_dir(installed_dir);
 
     // discover_all() returns loaded skill names (not warnings).
@@ -645,13 +645,13 @@ async fn check_skills() -> CheckResult {
 /// exercises the same `secrets::create_secrets_store(crypto, &handles)`
 /// dispatch `AppBuilder::init_secrets` uses at startup. It deliberately
 /// avoids `SecretsConfig::resolve()` because that path auto-generates and
-/// persists a key to `~/.ironclaw/.env` when none exists, which would make
-/// `ironclaw doctor` mutate user state on a fresh machine.
+/// persists a key to `~/.t3claw/.env` when none exists, which would make
+/// `t3claw doctor` mutate user state on a fresh machine.
 async fn check_secrets(settings: &Settings) -> CheckResult {
     // 1. Master-key resolution — READ-ONLY. `SecretsConfig::resolve()`
-    //    auto-generates and persists a key to `~/.ironclaw/.env` when
+    //    auto-generates and persists a key to `~/.t3claw/.env` when
     //    none exists, which is the correct behavior for startup but
-    //    would make `ironclaw doctor` mutate user state every time it
+    //    would make `t3claw doctor` mutate user state every time it
     //    ran on a fresh machine. Instead, probe only for an *existing*
     //    key — env var or OS keychain — so the missing-key case reports
     //    as Skip("not configured") without creating one.
@@ -659,7 +659,7 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
     let resolved_key = crate::secrets::resolve_master_key().await;
 
     let Some(master_key_hex) = resolved_key else {
-        return CheckResult::Skip("secrets not configured (run `ironclaw onboard`)".into());
+        return CheckResult::Skip("secrets not configured (run `t3claw onboard`)".into());
     };
 
     // Determine which source won. Mirrors `SecretsConfig::resolve`'s
@@ -672,7 +672,7 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
         .filter(|s| !s.is_empty())
         .is_some();
     let (source, source_label) = if env_wins {
-        (crate::settings::KeySource::Env, "env / ~/.ironclaw/.env")
+        (crate::settings::KeySource::Env, "env / ~/.t3claw/.env")
     } else {
         (crate::settings::KeySource::Keychain, "OS keychain")
     };
@@ -682,7 +682,7 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
     let settings_note = match (settings.secrets_master_key_source, source) {
         (s, r) if s == r => String::new(),
         (crate::settings::KeySource::None, _) => {
-            " (settings say `None`; run `ironclaw onboard` to persist)".to_string()
+            " (settings say `None`; run `t3claw onboard` to persist)".to_string()
         }
         (s, r) => format!(" (settings say `{s:?}`, runtime resolved `{r:?}`)"),
     };
@@ -729,7 +729,7 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
             return CheckResult::Fail(format!(
                 "master key present ({source_label}){settings_note} but database unreachable: \
                  {e}. Runtime will fall back to an ephemeral in-memory secrets store (see #1537); \
-                 credentials saved via `ironclaw tool auth` will not persist across restarts"
+                 credentials saved via `t3claw tool auth` will not persist across restarts"
             ));
         }
     };
@@ -741,7 +741,7 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
         None => CheckResult::Fail(format!(
             "master key present ({source_label}){settings_note} but no backing store handle \
              available for backend '{}'. This is the #1537 hosted-TEE symptom: runtime will \
-             fall back to an ephemeral in-memory store, and credentials saved via `ironclaw tool \
+             fall back to an ephemeral in-memory store, and credentials saved via `t3claw tool \
              auth` will not persist across restarts",
             config.database.backend
         )),
@@ -753,21 +753,21 @@ async fn check_secrets(settings: &Settings) -> CheckResult {
 fn check_service_installed() -> CheckResult {
     if cfg!(target_os = "macos") {
         let plist =
-            dirs::home_dir().map(|h| h.join("Library/LaunchAgents/com.ironclaw.daemon.plist"));
+            dirs::home_dir().map(|h| h.join("Library/LaunchAgents/com.t3claw.daemon.plist"));
         match plist {
             Some(path) if path.exists() => {
                 CheckResult::Pass(format!("launchd plist installed ({})", path.display()))
             }
-            Some(_) => CheckResult::Skip("not installed (run `ironclaw service install`)".into()),
+            Some(_) => CheckResult::Skip("not installed (run `t3claw service install`)".into()),
             None => CheckResult::Skip("cannot determine home directory".into()),
         }
     } else if cfg!(target_os = "linux") {
-        let unit = dirs::home_dir().map(|h| h.join(".config/systemd/user/ironclaw.service"));
+        let unit = dirs::home_dir().map(|h| h.join(".config/systemd/user/t3claw.service"));
         match unit {
             Some(path) if path.exists() => {
                 CheckResult::Pass(format!("systemd unit installed ({})", path.display()))
             }
-            Some(_) => CheckResult::Skip("not installed (run `ironclaw service install`)".into()),
+            Some(_) => CheckResult::Skip("not installed (run `t3claw service install`)".into()),
             None => CheckResult::Skip("cannot determine home directory".into()),
         }
     } else {
@@ -837,7 +837,7 @@ mod tests {
 
     #[test]
     fn check_binary_skips_nonexistent() {
-        match check_binary("__ironclaw_nonexistent_binary__", &["--version"]) {
+        match check_binary("__t3claw_nonexistent_binary__", &["--version"]) {
             CheckResult::Skip(_) => {}
             other => panic!(
                 "expected Skip for nonexistent binary, got: {}",
@@ -1308,7 +1308,7 @@ mod tests {
     /// Earlier the `Env`-source branch returned Fail when
     /// `SECRETS_MASTER_KEY` was unset. With the TEE-aware rewrite the check
     /// resolves the actual master key (which may auto-generate and persist
-    /// to `~/.ironclaw/.env`, producing a runtime `Env` key that differs
+    /// to `~/.t3claw/.env`, producing a runtime `Env` key that differs
     /// from the settings snapshot). Just make sure settings drift no longer
     /// panics the check.
     #[tokio::test]

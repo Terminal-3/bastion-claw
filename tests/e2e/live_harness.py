@@ -3,16 +3,16 @@
 Mirrors the Rust `LiveTestHarnessBuilder` pattern (see
 `tests/support/live_harness.rs`). Spins up the `live_llm_proxy.py`
 record/replay proxy in front of a real or recorded LLM, points an
-ironclaw instance at it, and lets a Playwright test drive the chat
+t3claw instance at it, and lets a Playwright test drive the chat
 flow against deterministic LLM output.
 
 Modes
 -----
 
-- **Record** (`IRONCLAW_LIVE_TEST=1`): the proxy forwards
+- **Record** (`T3CLAW_LIVE_TEST=1`): the proxy forwards
   `/v1/chat/completions` to the upstream LLM whose URL/key/model are
-  configured via `IRONCLAW_LIVE_LLM_BASE_URL`, `IRONCLAW_LIVE_LLM_API_KEY`,
-  `IRONCLAW_LIVE_LLM_MODEL`. Each prompt+response pair is appended to
+  configured via `T3CLAW_LIVE_LLM_BASE_URL`, `T3CLAW_LIVE_LLM_API_KEY`,
+  `T3CLAW_LIVE_LLM_MODEL`. Each prompt+response pair is appended to
   the test's fixture file.
 
 - **Replay** (default): the proxy reads the committed fixture and
@@ -53,7 +53,7 @@ PROXY_SCRIPT = HERE / "live_llm_proxy.py"
 
 def is_live_mode() -> bool:
     """True when the test should record a fresh trace from a real LLM."""
-    return os.environ.get("IRONCLAW_LIVE_TEST", "").strip() in ("1", "true")
+    return os.environ.get("T3CLAW_LIVE_TEST", "").strip() in ("1", "true")
 
 
 def fixture_path_for(test_name: str) -> Path:
@@ -100,23 +100,23 @@ async def start_live_proxy(
     if mode == "replay" and not fixture.exists():
         pytest.skip(
             f"no live-LLM trace fixture at {fixture.relative_to(HERE.parent.parent)}. "
-            f"To record one, set IRONCLAW_LIVE_TEST=1 plus IRONCLAW_LIVE_LLM_BASE_URL / "
-            f"IRONCLAW_LIVE_LLM_API_KEY / IRONCLAW_LIVE_LLM_MODEL and re-run."
+            f"To record one, set T3CLAW_LIVE_TEST=1 plus T3CLAW_LIVE_LLM_BASE_URL / "
+            f"T3CLAW_LIVE_LLM_API_KEY / T3CLAW_LIVE_LLM_MODEL and re-run."
         )
 
     if record_required and mode != "record":
         pytest.skip(
-            "this test must run in record mode (IRONCLAW_LIVE_TEST=1)"
+            "this test must run in record mode (T3CLAW_LIVE_TEST=1)"
         )
 
     if mode == "record":
-        if not os.environ.get("IRONCLAW_LIVE_LLM_BASE_URL"):
+        if not os.environ.get("T3CLAW_LIVE_LLM_BASE_URL"):
             pytest.skip(
-                "record mode requires IRONCLAW_LIVE_LLM_BASE_URL "
-                "(and usually IRONCLAW_LIVE_LLM_API_KEY / IRONCLAW_LIVE_LLM_MODEL)"
+                "record mode requires T3CLAW_LIVE_LLM_BASE_URL "
+                "(and usually T3CLAW_LIVE_LLM_API_KEY / T3CLAW_LIVE_LLM_MODEL)"
             )
 
-    proxy_stderr_log = os.environ.get("IRONCLAW_LIVE_PROXY_STDERR_LOG")
+    proxy_stderr_log = os.environ.get("T3CLAW_LIVE_PROXY_STDERR_LOG")
     proxy_stderr: Any = asyncio.subprocess.PIPE
     if proxy_stderr_log:
         proxy_stderr = open(proxy_stderr_log, "w")  # noqa: SIM115

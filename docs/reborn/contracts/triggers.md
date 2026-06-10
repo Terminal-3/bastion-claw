@@ -24,7 +24,7 @@ It does **not** own a parallel agent loop, product adapter lifecycles, or outbou
 | `TriggerPollerWorker` | Polling eligible triggers and submitting due fires | Alternate execution loops, hidden queues, outbound send logic |
 | `trigger_create` / `trigger_list` / `trigger_remove` | First-party trigger management capabilities | Legacy tool-only management paths |
 
-The trigger system is owned by `ironclaw_triggers` in implementation terms, but this contract freezes the behavior before code lands.
+The trigger system is owned by `t3claw_triggers` in implementation terms, but this contract freezes the behavior before code lands.
 
 ---
 
@@ -118,7 +118,7 @@ TriggerFire {
 
 The canonical derivation input is a length-prefixed sequence of the canonical
 UTF-8 bytes for `tenant_id`, `trigger_id`, and `fire_slot`, prefixed by the
-literal version label `ironclaw.trigger-fire.v1`. Implementations must not use
+literal version label `t3claw.trigger-fire.v1`. Implementations must not use
 raw string concatenation. `route_thread_id` uses the domain label
 `route-thread`; `external_event_id` uses the domain label `external-event`.
 Each output is encoded from a collision-resistant digest over
@@ -196,7 +196,7 @@ plumbing, not capability APIs.
 A trigger fire is synthetic inbound, not a parallel agent loop.
 
 - The fire must enter the normal Reborn inbound/turn pipeline.
-- The trusted submitter implementation is conversation-owned and exposed to host composition through `trusted_trigger_fire_submitter(...) -> Arc<dyn TrustedTriggerFireSubmitter>`. This public factory is wiring only; trusted authority lives in the sealed `TrustedTriggerSubmitRequest` minted by the trigger worker. The raw `TrustedInboundTurnRequest` constructor and concrete submitter type stay private inside `ironclaw_conversations`; host/composition code only wires the trait object into the poller while the conversation crate converts the worker-carried canonical binding into the private trusted turn request.
+- The trusted submitter implementation is conversation-owned and exposed to host composition through `trusted_trigger_fire_submitter(...) -> Arc<dyn TrustedTriggerFireSubmitter>`. This public factory is wiring only; trusted authority lives in the sealed `TrustedTriggerSubmitRequest` minted by the trigger worker. The raw `TrustedInboundTurnRequest` constructor and concrete submitter type stay private inside `t3claw_conversations`; host/composition code only wires the trait object into the poller while the conversation crate converts the worker-carried canonical binding into the private trusted turn request.
 - Binding resolution for trigger fires must use the trusted-scope path from `conversation-binding.md`.
 - Product adapters, first-party capabilities, and product workflow code must not construct the conversation-owned trusted trigger submitter or submit `TrustedTriggerSubmitRequest`. PR18.5a enforces this with a private trusted request and architecture tests over adapter/product paths.
 - The host mints the trusted trigger ingress request from `TriggerRecord` state:
@@ -252,7 +252,7 @@ Host-trusted trigger ingress request fields are:
 - `trusted_inbound_binding`: the canonical trigger-to-conversation binding
   fields used for both prompt recording and trusted turn submission.
 
-The trigger-owned materialization seam keeps `ironclaw_triggers` free of
+The trigger-owned materialization seam keeps `t3claw_triggers` free of
 conversation and product-workflow dependencies: `TriggerPromptMaterializer`
 accepts a `TriggerFire` and returns a `TriggerMaterializedPrompt` bundle
 containing the opaque `TriggerInboundContentRef` plus the canonical trusted
@@ -337,9 +337,9 @@ Slot bookkeeping is tied to acceptance, not merely polling:
 Turn terminal lookup and clearing are a narrow seam layered above fire-claim
 and submit-result bookkeeping:
 
-- `ironclaw_turns::active_run_ref_state` classifies
+- `t3claw_turns::active_run_ref_state` classifies
   `active_run_ref` through `get_run_state` and `TurnStatus::is_terminal`;
-- `ironclaw_triggers::ClearActiveFireRequest` plus
+- `t3claw_triggers::ClearActiveFireRequest` plus
   `TriggerRepository::clear_active_fire` clears only the exact matching
   `(tenant_id, trigger_id, active_fire_slot, active_run_ref)` after the caller
   has observed a terminal turn outcome.

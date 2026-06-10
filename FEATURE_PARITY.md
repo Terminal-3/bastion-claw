@@ -1,6 +1,6 @@
-# IronClaw ↔ OpenClaw Feature Parity Matrix
+# T3Claw ↔ OpenClaw Feature Parity Matrix
 
-This document tracks feature parity between IronClaw (Rust implementation) and OpenClaw (TypeScript reference implementation). Use this to coordinate work across developers.
+This document tracks feature parity between T3Claw (Rust implementation) and OpenClaw (TypeScript reference implementation). Use this to coordinate work across developers.
 
 **Legend:**
 
@@ -17,7 +17,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ## 1. Architecture
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Hub-and-spoke architecture | ✅ | ✅ | Web gateway as central hub |
 | WebSocket control plane | ✅ | ✅ | Gateway with WebSocket + SSE |
@@ -32,7 +32,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ## 2. Gateway System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Gateway control plane | ✅ | ✅ | Web gateway with 40+ API endpoints |
 | HTTP endpoints for Control UI | ✅ | ✅ | Web dashboard with chat, memory, jobs, logs, extensions |
@@ -70,12 +70,12 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ## 3. Messaging Channels
 
-| Channel | OpenClaw | IronClaw | Priority | Notes |
+| Channel | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | CLI/TUI | ✅ | ✅ | - | Ratatui-based TUI |
 | HTTP webhook | ✅ | ✅ | - | axum with secret validation |
 | REPL (simple) | ✅ | ✅ | - | For testing |
-| WASM channels | ❌ | ✅ | - | IronClaw innovation; host resolves owner scope vs sender identity |
+| WASM channels | ❌ | ✅ | - | T3Claw innovation; host resolves owner scope vs sender identity |
 | WhatsApp | ✅ | ❌ | P1 | Baileys (Web), same-phone mode with echo detection |
 | Telegram | ✅ | ✅ | - | WASM channel(MTProto), polling-first setup, DM pairing, caption, /start, bot_username, DM topics, web/UI ownership claim flow, owner-scoped persistence |
 | Discord | ✅ | 🚧 | P2 | Gateway `MESSAGE_CREATE` intake restored via websocket queue + WASM poll; Gateway DMs now respect pairing; thread parent binding inheritance and reply/thread parity still incomplete |
@@ -101,7 +101,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Telegram-Specific Features (since Feb 2025)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Forum topic creation | ✅ | ❌ | Create topics in forum groups; `message thread create` CLI; learns human topic names from service messages |
 | channel_post support | ✅ | ❌ | Bot-to-bot communication |
@@ -119,7 +119,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Discord-Specific Features (since Feb 2025)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Forwarded attachment downloads | ✅ | ❌ | Fetch media from forwarded messages |
 | Faster reaction state machine | ✅ | ❌ | Watchdog + debounce |
@@ -132,7 +132,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Slack-Specific Features (since Feb 2025)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Streaming draft replies | ✅ | ❌ | Partial replies via draft message updates |
 | Configurable stream modes | ✅ | ❌ | Per-channel stream behavior |
@@ -146,7 +146,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Mattermost-Specific Features (since Mar 2026)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Interactive buttons | ✅ | ❌ | Clickable message buttons with signed callback flow; slash callback validation hardened |
 | Interactive model picker | ✅ | ❌ | In-channel provider/model chooser |
@@ -157,7 +157,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Feishu/Lark-Specific Features (since Mar 2026)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Doc/table actions | ✅ | ❌ | `feishu_doc` supports tables, positional insert, color_text, image upload, and file upload |
 | Rich-text embedded media extraction | ✅ | ❌ | Pull video/media attachments from post messages |
@@ -170,7 +170,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### QQBot-Specific Features (since Mar 2026)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Engine architecture rewrite | ✅ | ❌ | Self-contained engine with QR onboarding, native `/bot-approve`, per-account resource stacks, credential backup/restore |
 | Group chat full support | ✅ | ❌ | History tracking, @-mention gating, activation modes, per-group config, FIFO queue |
@@ -179,7 +179,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### BlueBubbles-Specific Features (since Mar 2026)
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Persistent inbound GUID dedupe | ✅ | ❌ | File-backed cache survives restart, 7-12x cron-duplicate fix |
 | Catchup replay | ✅ | ❌ | Per-account cursor + `/api/v1/message/query?after=` pass on restart |
@@ -190,9 +190,9 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ### Channel Features
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
-| DM pairing codes | ✅ | ✅ | `ironclaw pairing list/approve`, host APIs |
+| DM pairing codes | ✅ | ✅ | `t3claw pairing list/approve`, host APIs |
 | Allowlist/blocklist | ✅ | 🚧 | `allow_from` + pairing store + hardened command/group allowlists |
 | Self-message bypass | ✅ | ❌ | Own messages skip pairing |
 | Mention-based activation | ✅ | ✅ | bot_username + respond_to_all_group_messages |
@@ -215,7 +215,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 
 ## 4. CLI Commands
 
-| Command | OpenClaw | IronClaw | Priority | Notes |
+| Command | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | `run` (agent) | ✅ | ✅ | - | Default command |
 | `tool install/list/remove` | ✅ | ✅ | - | WASM tools |
@@ -242,7 +242,7 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 | `sandbox` | ✅ | ✅ | - | WASM sandbox |
 | `doctor` | ✅ | 🚧 | P2 | 16 subsystem checks |
 | `logs` | ✅ | 🚧 | P3 | `logs` (gateway.log tail), `--follow` (SSE live stream), `--level` (get/set). No DB-persisted log history. |
-| `traces` | ➖ | 🚧 | - | <ul><li>IronClaw-native Trace Commons client MVP, not an OpenClaw parity feature.</li><li>Local opt-in capture, redaction, queueing, queue-status diagnostics, scoped web APIs, revocation, and periodic credit notices.</li><li>CLI opt-in writes the runtime/web user-scope policy that autonomous capture reads, and credentialed submit/status/revoke calls use bounded no-redirect HTTP.</li><li>Authenticated web paths are user-scoped and keep ingestion endpoint/credential settings out of user-managed policy updates.</li><li>Private TraceDAO server ingest/review/export/audit/retention/vector/credit infrastructure now lives in the standalone `tracedao-server` repository, with IronClaw retaining CLI/client integration wrappers.</li></ul> |
+| `traces` | ➖ | 🚧 | - | <ul><li>T3Claw-native Trace Commons client MVP, not an OpenClaw parity feature.</li><li>Local opt-in capture, redaction, queueing, queue-status diagnostics, scoped web APIs, revocation, and periodic credit notices.</li><li>CLI opt-in writes the runtime/web user-scope policy that autonomous capture reads, and credentialed submit/status/revoke calls use bounded no-redirect HTTP.</li><li>Authenticated web paths are user-scoped and keep ingestion endpoint/credential settings out of user-managed policy updates.</li><li>Private TraceDAO server ingest/review/export/audit/retention/vector/credit infrastructure now lives in the standalone `tracedao-server` repository, with T3Claw retaining CLI/client integration wrappers.</li></ul> |
 | `update` | ✅ | ❌ | P3 | Self-update; `OPENCLAW_NO_AUTO_UPDATE=1` kill-switch |
 | `completion` | ✅ | ✅ | - | Shell completion |
 | `migrate` | ✅ | ❌ | P3 | Bundled importers for Claude Code, Claude Desktop, Hermes (config, MCP servers, skills, command prompts, model providers, credentials) |
@@ -267,11 +267,11 @@ This document tracks feature parity between IronClaw (Rust implementation) and O
 | `/dock-*` route switches | ✅ | ❌ | P3 | Switch active session reply route through `session.identityLinks` |
 | `--container` / `OPENCLAW_CONTAINER` | ✅ | ❌ | P3 | Run process commands inside running Docker/Podman container |
 
-Trace Commons incremental note: reviewer quarantine and active-learning queues now surface prioritization metadata, including `review_age_hours`, `review_escalation_state`, and `review_escalation_reasons`, so CLI non-JSON output can show SLA pressure and escalation causes during triage. DB-backed review leases now let reviewer/admin principals claim, release, claim the next available tenant-scoped quarantined trace, or claim a bounded prioritized batch through `POST /v1/review/leases/claim-next`, `POST /v1/review/leases/claim-batch`, `ironclaw traces review-lease-claim-next`, and `ironclaw traces review-lease-claim-batch`, using review escalation/SLA priority ordering before writing DB lease state and typed claim/release audit rows; they also expose lease assignment metadata in review queues, support `all`, `mine`, `available`, `active`, and `expired` lease filters in API/CLI/web operator queues, and block other reviewers from finalizing while a lease is active. Analytics can now suppress aggregate cells below a configured minimum count while reporting the suppression threshold and number of hidden buckets. Tenant token entries can now carry optional RFC3339 `expires_at`/`expires` attributes, and the ingest service can accept optional HS256 signed tenant claims that bind tenant id, actor principal, role, issuer/audience when configured, allowed consent scopes/uses, and expiry without enumerating every bearer token; claim allow-lists now constrain submission, replay exports, benchmark/ranker dataset generation, process-evaluation workers, and utility-credit jobs. Operator docs now pin production asymmetric upload-claim governance to managed issuer/key rotation with EdDSA/Ed25519, leaving static tokens and HS256 claims as internal bridge paths, and `TRACE_COMMONS_REQUIRE_EDDSA_SIGNED_TOKENS` now rejects those bridge credentials on every authenticated route when enabled. Keyed signed-token secrets and EdDSA public-key files support `kid`-selected rotation, deployments can cap signed-claim lifetimes by requiring `iat` and bounding `exp - iat`, require JWT IDs before accepting signed claims, emergency-denylist signed-claim JWT IDs by `jti`, and config status exposes only key/EdDSA-key/denylist/max-TTL/JTI-policy counts plus the EdDSA-required auth gate while submitted audit rows record only the safe auth method plus hashed principal. Retention maintenance also honors `TRACE_COMMONS_LEGAL_HOLD_RETENTION_POLICIES` so configured policy classes are skipped for new expiration and purge passes, and DB-backed maintenance runs now write durable retention job/item ledger rows for resumable expire/purge/revoke bookkeeping with admin-only API plus CLI and web-operator reads for tenant-scoped jobs and per-submission lifecycle items. Maintenance DB reconciliation now runs after the retention ledger write and reports DB retention job/item counts plus current-run retention job or item-count gaps as promotion blockers. Process-evaluation workers have a CLI submit helper for `POST /v1/workers/process-evaluation`, store bounded rubric metadata under the `process_evaluation` worker kind, mirror typed hash/count-only audit metadata, can optionally append idempotent `training_utility` delayed credit for the evaluated accepted submission using an external reference, preserve separate DB derived rows per evaluator version while feeding content-free process-evaluation analytics by label, rating, and score band without double-counting DB-backed submissions, and now require tenant policy or signed-claim evaluation-use ABAC before reading or labeling accepted trace bodies. Utility-credit workers now also require the source trace plus tenant policy or signed claim to allow the requested regression/evaluation, model-training, or ranking-training utility use before appending delayed credit. Object-primary envelope writes now use unique encrypted artifact object ids per logical snapshot so review/process-evaluation writes do not overwrite ciphertext behind older submitted-envelope object refs, terminal-trace status sync can explain retained-but-excluded delayed ledger rows without exposing them through contributor credit-event reads, web enqueue/submit and CLI queue writes reject crafted requests/envelopes that try to include message text or tool payloads disallowed by the standing policy, DB stores now reject derived rows, vector entries, and export manifest items whose object, derived, or vector refs do not belong to the same tenant/submission, periodic local credit notices now include delayed ledger deltas plus credit-event counts and a scoped durable retry outbox with safe delivery attempt hashes, CLI status sync resets credit notices when delayed-credit explanations change even without a numeric delta, and autonomous runtime capture skips ineligible current traces instead of leaving held queue files while preserving queue flush/credit notices.
+Trace Commons incremental note: reviewer quarantine and active-learning queues now surface prioritization metadata, including `review_age_hours`, `review_escalation_state`, and `review_escalation_reasons`, so CLI non-JSON output can show SLA pressure and escalation causes during triage. DB-backed review leases now let reviewer/admin principals claim, release, claim the next available tenant-scoped quarantined trace, or claim a bounded prioritized batch through `POST /v1/review/leases/claim-next`, `POST /v1/review/leases/claim-batch`, `t3claw traces review-lease-claim-next`, and `t3claw traces review-lease-claim-batch`, using review escalation/SLA priority ordering before writing DB lease state and typed claim/release audit rows; they also expose lease assignment metadata in review queues, support `all`, `mine`, `available`, `active`, and `expired` lease filters in API/CLI/web operator queues, and block other reviewers from finalizing while a lease is active. Analytics can now suppress aggregate cells below a configured minimum count while reporting the suppression threshold and number of hidden buckets. Tenant token entries can now carry optional RFC3339 `expires_at`/`expires` attributes, and the ingest service can accept optional HS256 signed tenant claims that bind tenant id, actor principal, role, issuer/audience when configured, allowed consent scopes/uses, and expiry without enumerating every bearer token; claim allow-lists now constrain submission, replay exports, benchmark/ranker dataset generation, process-evaluation workers, and utility-credit jobs. Operator docs now pin production asymmetric upload-claim governance to managed issuer/key rotation with EdDSA/Ed25519, leaving static tokens and HS256 claims as internal bridge paths, and `TRACE_COMMONS_REQUIRE_EDDSA_SIGNED_TOKENS` now rejects those bridge credentials on every authenticated route when enabled. Keyed signed-token secrets and EdDSA public-key files support `kid`-selected rotation, deployments can cap signed-claim lifetimes by requiring `iat` and bounding `exp - iat`, require JWT IDs before accepting signed claims, emergency-denylist signed-claim JWT IDs by `jti`, and config status exposes only key/EdDSA-key/denylist/max-TTL/JTI-policy counts plus the EdDSA-required auth gate while submitted audit rows record only the safe auth method plus hashed principal. Retention maintenance also honors `TRACE_COMMONS_LEGAL_HOLD_RETENTION_POLICIES` so configured policy classes are skipped for new expiration and purge passes, and DB-backed maintenance runs now write durable retention job/item ledger rows for resumable expire/purge/revoke bookkeeping with admin-only API plus CLI and web-operator reads for tenant-scoped jobs and per-submission lifecycle items. Maintenance DB reconciliation now runs after the retention ledger write and reports DB retention job/item counts plus current-run retention job or item-count gaps as promotion blockers. Process-evaluation workers have a CLI submit helper for `POST /v1/workers/process-evaluation`, store bounded rubric metadata under the `process_evaluation` worker kind, mirror typed hash/count-only audit metadata, can optionally append idempotent `training_utility` delayed credit for the evaluated accepted submission using an external reference, preserve separate DB derived rows per evaluator version while feeding content-free process-evaluation analytics by label, rating, and score band without double-counting DB-backed submissions, and now require tenant policy or signed-claim evaluation-use ABAC before reading or labeling accepted trace bodies. Utility-credit workers now also require the source trace plus tenant policy or signed claim to allow the requested regression/evaluation, model-training, or ranking-training utility use before appending delayed credit. Object-primary envelope writes now use unique encrypted artifact object ids per logical snapshot so review/process-evaluation writes do not overwrite ciphertext behind older submitted-envelope object refs, terminal-trace status sync can explain retained-but-excluded delayed ledger rows without exposing them through contributor credit-event reads, web enqueue/submit and CLI queue writes reject crafted requests/envelopes that try to include message text or tool payloads disallowed by the standing policy, DB stores now reject derived rows, vector entries, and export manifest items whose object, derived, or vector refs do not belong to the same tenant/submission, periodic local credit notices now include delayed ledger deltas plus credit-event counts and a scoped durable retry outbox with safe delivery attempt hashes, CLI status sync resets credit notices when delayed-credit explanations change even without a numeric delta, and autonomous runtime capture skips ineligible current traces instead of leaving held queue files while preserving queue flush/credit notices.
 
 This push also adds local autonomous queue diagnostics/status surfaces: CLI `traces queue-status` reports readiness, bearer-token environment presence, queue/held counts, retry/manual-review/policy hold counts, next retry time, durable flush/status-sync telemetry, retryable submission failure counters, last compaction reclaimed count, duplicate envelopes removed, orphan hold sidecars removed, malformed envelopes quarantined, sanitized held-reason counts, safe queue warning aggregates, warning severity, production-promotion blocking flags, safe recommended actions, sanitized failure classes, and local credit summaries; authenticated web `/api/traces/queue-status` reports scoped queue/held diagnostics plus the same durable telemetry, and `/api/traces/credit-notice` marks due notices. Due credit notices now carry local acknowledge/snooze state: CLI `traces credit --notice --ack` and authenticated `POST /api/traces/credit-notice` acknowledgement suppress the current credit fingerprint until credit changes, while `--snooze-hours` and the matching web action suppress it until a bounded deadline without exposing trace bodies or explanation text in the fingerprint. The agent loop now runs a periodic Trace Commons queue worker for opted-in owner/active-user scopes, stores retryable submission failures as typed redacted sidecars with capped backoff, skips retry-held envelopes until due, records durable scoped telemetry for queue/status-sync attempts, writes queue JSON through atomic temp-file replacement, compacts duplicate queued contribution envelopes and orphan held sidecars before submission, quarantines malformed active queue files locally instead of blocking later valid uploads, and broadcasts returned credit notices. Diagnostics warn on schema-version, consent-policy, redaction-pipeline, trace-card-redaction-pipeline, and malformed-envelope mismatches without raw bodies or raw observed mismatch values, and classify local failures into sanitized Endpoint, Credential, Network, NetworkOffline, NetworkDns, NetworkTimeout, NetworkConnectionRefused, HttpRejection, Policy, Queue, StatusSync, Submission, and Unknown buckets. EdDSA/Ed25519 public-key verification is available through default or `kid`-selected key config and JSON/file/guarded-HTTPS keysets with optional activation windows, with safe total/active/inactive/managed EdDSA config-status counts; managed EdDSA-required mode now accepts only active managed-keyset claims with issuer/audience checks. Autonomous clients can refresh short-lived EdDSA upload claims from guarded HTTPS issuers for queue flush, explicit submit, status sync, and remote revoke calls, and ingestion services now refresh guarded HTTPS issuer-managed Ed25519 keysets live with last-good preservation and optional max-stale fail-closed enforcement.
 
-Trace Commons hardening note: required DB mirror mode, object refs, PostgreSQL/libSQL storage, RLS diagnostics, and encrypted artifact storage now live in the public `zmanian/tracedao-server` repo rather than Ironclaw's shared DB abstraction. Ironclaw retains local-first trace contribution capture, upload-claim fetching/validation, queue/status/credit notice behavior, and client-facing CLI/web helpers behind the Reborn-aligned `TraceClientHost` product facade for local redaction, queueing, status sync, and credit-notice delivery.
+Trace Commons hardening note: required DB mirror mode, object refs, PostgreSQL/libSQL storage, RLS diagnostics, and encrypted artifact storage now live in the public `zmanian/tracedao-server` repo rather than T3Claw's shared DB abstraction. T3Claw retains local-first trace contribution capture, upload-claim fetching/validation, queue/status/credit notice behavior, and client-facing CLI/web helpers behind the Reborn-aligned `TraceClientHost` product facade for local redaction, queueing, status sync, and credit-notice delivery.
 
 Trace Commons production-boundary note: PostgreSQL/libSQL now include a durable tenant-scoped revocation-propagation ledger for downstream invalidation and retry work across object refs, exports, vectors, derived artifacts, benchmark/ranker artifacts, credit settlements, and physical delete receipts. The revocation worker can now reverse exact tenant-scoped delayed-credit settlements with deterministic negative ledger rows, verify and physically delete exact service-local encrypted submitted/review envelope, vector worker-intermediate, benchmark artifact, and ranker export provenance object payloads for tenant-scoped object-ref items, mark matching object refs deleted, and upsert durable physical-delete receipt rows with evidence hashes, while marking unsupported stores and artifact kinds as skipped. Export call sites for replay, benchmark, and ranker slices now create and validate short-lived tenant/principal/purpose/dataset-kind access grants before producing artifacts. `TRACE_COMMONS_OBJECT_STORE=remote_service` parses production remote object-store intent but deliberately fails closed behind a disabled service-owned provider instead of falling back to plaintext files. Local autonomous status sync now keeps append-only safe history events and sanitizes server-returned credit explanations before periodic credit notices persist them, and local credit notice delivery now drains a scoped retry outbox so channel failures leave retry state instead of consuming the notice.
 
@@ -283,7 +283,7 @@ Trace Commons export-job note: replay dataset, benchmark conversion, ranker-cand
 
 Trace Commons worker-export note: export-worker automation now has dedicated replay and ranker export routes, `GET|POST /v1/workers/replay-export`, `GET|POST /v1/workers/ranker/training-candidates`, and `GET|POST /v1/workers/ranker/training-pairs`, plus matching CLI helpers. These routes reuse the same consent/use ABAC, access-grant, export-job, source-hash, audit, and delayed-credit behavior as the reviewer/admin routes while keeping scheduled automation off reviewer endpoints.
 
-Trace Commons export-control observability note: admins can now list tenant-scoped durable export access grants and export jobs through `GET /v1/admin/export/access-grants` and `GET /v1/admin/export/jobs`, with status and dataset-kind filters plus matching CLI helpers. `GET /v1/admin/operational-summary` and `ironclaw traces operational-summary` now add an admin-only, tenant-scoped aggregate rollout view for submission status/risk, review SLA pressure, DB export manifests/jobs, retention jobs, vector coverage, and delayed-credit totals. Reads are DB-backed where applicable, admin-only, tenant-scoped, and audited without exposing trace bodies.
+Trace Commons export-control observability note: admins can now list tenant-scoped durable export access grants and export jobs through `GET /v1/admin/export/access-grants` and `GET /v1/admin/export/jobs`, with status and dataset-kind filters plus matching CLI helpers. `GET /v1/admin/operational-summary` and `t3claw traces operational-summary` now add an admin-only, tenant-scoped aggregate rollout view for submission status/risk, review SLA pressure, DB export manifests/jobs, retention jobs, vector coverage, and delayed-credit totals. Reads are DB-backed where applicable, admin-only, tenant-scoped, and audited without exposing trace bodies.
 
 Trace Commons tenant-access grant note: PostgreSQL/libSQL now include a durable tenant-scoped `trace_tenant_access_grants` storage surface for issuer-authorized principals, roles, consent scopes, allowed uses, issuer/audience/subject attribution, status, expiry, revocation metadata, and safe metadata. Admin-token routes and CLI helpers can create, list, and revoke the current tenant's grants while writing safe hash/count-only grant-update audit metadata, and the local `tenant-principal-ref` CLI helper derives stored static-token or signed-claim principal refs without printing raw credentials. `TRACE_COMMONS_REQUIRE_TENANT_ACCESS_GRANTS=true` now fails closed on trace submission, contributor credit/status readback, reviewer/audit reads, review mutations, dataset/export paths, non-revocation worker mutations, maintenance, and admin ledger/observability reads unless the authenticated tenant/principal has an active exact-role grant. Signed EdDSA/Ed25519 claims must also match any issuer, audience, and JWT `sub` subject bindings configured on the grant before scope/use narrowing is applied, while static-token bridge grants ignore those signed-claim-only bindings. Grant consent/use allow-lists intersect with static-token or EdDSA claim allow-lists and cannot upgrade the request role; revocation/self-delete, revocation propagation, config-status, tenant-policy admin, and grant-management routes stay available for deprovisioning and recovery.
 
@@ -295,9 +295,9 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 5. Agent System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
-| Pi agent runtime | ✅ | ➖ | IronClaw uses custom runtime |
+| Pi agent runtime | ✅ | ➖ | T3Claw uses custom runtime |
 | RPC-based execution | ✅ | ✅ | Orchestrator/worker pattern |
 | Multi-provider failover | ✅ | ✅ | `FailoverProvider` tries providers sequentially on retryable errors |
 | Per-sender sessions | ✅ | ✅ | |
@@ -366,7 +366,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 6. Model & Provider Support
 
-| Provider | OpenClaw | IronClaw | Priority | Notes |
+| Provider | OpenClaw | T3Claw | Priority | Notes |
 |----------|----------|----------|----------|-------|
 | NEAR AI | ✅ | ✅ | - | Primary provider |
 | Anthropic (Claude) | ✅ | 🚧 | - | Via NEAR AI proxy; Opus 4.7 (default, adaptive+xhigh+max), Opus 4.6, Sonnet 4.6 |
@@ -381,7 +381,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 | Cloudflare Workers AI | ✅ | ✅ | P3 | Via `cloudflare` adapter |
 | NVIDIA API | ✅ | ✅ | P3 | Via `nvidia` adapter; OpenClaw added bundled provider with API-key onboarding, static catalog, literal model-ref picker, NIM string-content compat |
 | OpenRouter | ✅ | ✅ | - | Via OpenAI-compatible provider; OpenClaw added native video generation, `openrouter:auto`/`openrouter:free` aliases, Hunter/Healer Alpha, free-model fallback for `models scan` |
-| Tinfoil | ❌ | ✅ | - | Private inference provider (IronClaw-only) |
+| Tinfoil | ❌ | ✅ | - | Private inference provider (T3Claw-only) |
 | OpenAI-compatible | ❌ | ✅ | - | Generic OpenAI-compatible endpoint (RigAdapter); OpenAI-style image inputs default missing `image_url.detail` to `auto` |
 | GitHub Copilot | ✅ | ✅ | - | Dedicated provider with OAuth token exchange; default Opus model is `claude-opus-4.7`; GUI/RPC wizard device-code auth; `gpt-5.4` xhigh thinking |
 | Ollama (local) | ✅ | ✅ | - | OpenClaw added Cloud + Local + cloud-only modes, browser sign-in, signed `/api/experimental/web_search`, `params.num_ctx`/`params.think`/`params.keep_alive`, `/api/show` capability detection |
@@ -409,7 +409,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ### Model Features
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Auto-discovery | ✅ | ❌ | Manifest-backed `modelCatalog` with aliases/suppressions; cold installed-index fast path |
 | Failover chains | ✅ | ✅ | `FailoverProvider` with configurable `fallback_model` |
@@ -430,7 +430,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ### TTS / STT / Realtime Voice
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | TTS (Microsoft / Edge) | ✅ | ❌ | P3 | Auto-enabled bundled provider; legacy `messages.tts.providers.edge` voices |
 | TTS (OpenAI) | ✅ | ❌ | P3 | OpenAI-compatible `/audio/speech` |
@@ -464,7 +464,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 7. Media Handling
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | Image processing (Sharp) | ✅ | ❌ | P2 | Resize, format convert |
 | Configurable image resize dims | ✅ | ❌ | P2 | Per-agent dimension config |
@@ -491,12 +491,12 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 8. Plugin & Extension System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Dynamic loading | ✅ | ✅ | WASM modules |
 | Manifest validation | ✅ | ✅ | WASM metadata; `modelCatalog`, `channelConfigs`, `setup.providers`, `setup.requiresRuntime`, `activation.onStartup` contracts |
 | HTTP path registration | ✅ | ❌ | Plugin routes |
-| Workspace-relative install | ✅ | ✅ | ~/.ironclaw/tools/ |
+| Workspace-relative install | ✅ | ✅ | ~/.t3claw/tools/ |
 | Channel plugins | ✅ | ✅ | WASM channels |
 | Auth plugins | ✅ | ❌ | |
 | Memory plugins | ✅ | ❌ | Custom backends + selectable memory slot |
@@ -532,7 +532,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 9. Configuration System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Primary config file | ✅ `~/.openclaw/openclaw.json` | ✅ `.env` | Different formats |
 | JSON5 support | ✅ | ❌ | Comments, trailing commas |
@@ -541,7 +541,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 | Config validation/schema | ✅ | ✅ | Type-safe Config struct + `openclaw config validate`; OpenClaw added top-3 issue surface for `config.set/patch/apply` |
 | Hot-reload | ✅ | ❌ | Many plugins now re-read live runtime config (memory-lancedb, active-memory, github-copilot, ollama, openai, amazon-bedrock, codex, skill-workshop, diffs, gateway-tool); `OPENCLAW_NO_AUTO_UPDATE=1` kill-switch |
 | Legacy migration | ✅ | ➖ | OpenClaw dropped automatic migrations older than two months |
-| State directory | ✅ `~/.openclaw-state/` | ✅ `~/.ironclaw/` | |
+| State directory | ✅ `~/.openclaw-state/` | ✅ `~/.t3claw/` | |
 | Credentials directory | ✅ | ✅ | Session files |
 | Full model compat fields in schema | ✅ | ❌ | pi-ai model compat exposed in config |
 | `models.pricing.enabled` | ✅ | ❌ | Skip OpenRouter/LiteLLM pricing fetches for offline installs |
@@ -559,7 +559,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 10. Memory & Knowledge System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Vector memory | ✅ | ✅ | pgvector |
 | Session-based memory | ✅ | ✅ | |
@@ -574,7 +574,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 | Ollama embeddings | ✅ | ✅ | OpenClaw moved to `/api/embed` with batched `input`; per-host cache keys; non-batch concurrency knob |
 | Local embeddings | ✅ | ❌ | `node-llama-cpp` now optional install |
 | Asymmetric embedding endpoints | ✅ | ❌ | `inputType`/`queryInputType`/`documentInputType` for retrieval prefixes (Ollama: `nomic-embed-text`, `qwen3-embedding`, `mxbai-embed-large`) |
-| SQLite-vec backend | ✅ | ❌ | IronClaw uses PostgreSQL; bundled-plugin runtime-deps mirror sqlite-vec |
+| SQLite-vec backend | ✅ | ❌ | T3Claw uses PostgreSQL; bundled-plugin runtime-deps mirror sqlite-vec |
 | LanceDB backend | ✅ | ❌ | Configurable auto-capture max length; cloud storage support; OpenAI-compatible float embeddings, ZhiPu/DashScope normalization |
 | QMD backend | ✅ | ❌ | Multi-collection `-c` filters, `--mask` collection patterns, opt-in `memory.qmd.update.startup` |
 | Active Memory plugin | ✅ | ❌ | Memory sub-agent before main reply; partial recall on timeout; `allowedChatIds`/`deniedChatIds`; visible status fields |
@@ -599,7 +599,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 11. Mobile Apps
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | iOS app (SwiftUI) | ✅ | 🚫 | - | Out of scope initially |
 | Android app (Kotlin) | ✅ | 🚫 | - | Out of scope initially |
@@ -620,7 +620,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 12. macOS App
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | SwiftUI native app | ✅ | 🚫 | - | Out of scope |
 | Menu bar presence | ✅ | 🚫 | - | Animated menubar icon |
@@ -641,7 +641,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 13. Web Interface
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | Control UI Dashboard | ✅ | ✅ | - | Web gateway with chat, memory, jobs, logs, extensions; modular Overview/Chat/Config/Agent/Session views, command palette, mobile bottom tabs |
 | Channel status view | ✅ | 🚧 | P2 | Gateway status widget, full channel view pending |
@@ -671,7 +671,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 14. Automation
 
-| Feature | OpenClaw | IronClaw | Priority | Notes |
+| Feature | OpenClaw | T3Claw | Priority | Notes |
 |---------|----------|----------|----------|-------|
 | Cron jobs | ✅ | ✅ | - | Routines with cron trigger; runtime state split into `jobs-state.json`; `sessionTarget: "current"`/`session:<id>` bindings |
 | Reborn scheduled trigger loop | ➖ | 🚧 | P2 | Reborn-native trigger persistence, backend parity, atomic fire claim/update APIs, poller core, caller-level harness, first-party `trigger_*` capabilities, and composition-owned worker lifecycle are in progress; external result delivery, production readiness policy, active-run retention/tombstone semantics, and production jitter source selection remain follow-up |
@@ -718,14 +718,14 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 15. Security Features
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Gateway token auth | ✅ | ✅ | Bearer token auth on web gateway; per-request resolution for `secrets.reload`; method-specific least-privilege scopes for CLI Gateway calls |
 | Device pairing | ✅ | ❌ | Single-use bootstrap setup codes; metadata-upgrade auto-approval for shared-secret loopback; scope/role/metadata pairing approval flows |
 | Tailscale identity | ✅ | ❌ | Tailscale-authenticated Control UI bypass for browser device identity |
 | Trusted-proxy auth | ✅ | ❌ | Header-based reverse proxy auth; `trustedProxy.allowLoopback` |
 | OAuth flows | ✅ | 🚧 | NEAR AI OAuth + Gemini OAuth (PKCE, S256) + hosted extension/MCP OAuth broker; external auth-proxy rollout still pending; OpenClaw added bootstrap-token redemption scope allowlist. Reborn `serve` now has browser SSO login for WebChat v2 (Google + GitHub; Google PKCE S256, state CSRF, cleartext-redirect guard) behind `webui-v2-beta`, with fail-closed verified-email-domain admission and per-user identity binding (distinct OAuth identity → distinct user, stateless tenant-bound HMAC session). Local-dev trigger polling also seeds admitted WebUI SSO users into trigger-fire access when enabled |
-| DM pairing verification | ✅ | ✅ | ironclaw pairing approve, host APIs |
+| DM pairing verification | ✅ | ✅ | t3claw pairing approve, host APIs |
 | Allowlist/blocklist | ✅ | 🚧 | allow_from + pairing store; canonical `dmPolicy="open"` only with effective wildcard across all channels |
 | Per-group tool policies | ✅ | ❌ | Group-id validation against session/spawned context before applying group-scoped tool policies |
 | Exec approvals | ✅ | ✅ | TUI overlay; `allow-once` idempotent grace; PATH-resolved basenames; secret redaction in approval prompts; Unicode normalization + zero-width stripping |
@@ -737,7 +737,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 | Loopback-first | ✅ | 🚧 | HTTP binds 0.0.0.0 |
 | Docker sandbox | ✅ | ✅ | Orchestrator/worker containers; opt-in `sandbox.docker.gpus` passthrough; Reborn process sandbox MVP adds typed `SandboxProcessPlan`, backend-neutral `ProcessSandboxBackend`, hardened Docker command construction, fail-closed unenforced network hosts, explicit timeout/cancel cleanup, loop-to-host `SandboxProcessPlan` validation/spawn dispatch, and a host-runtime approval/lease spawn path for `system.process_sandbox.run`; production MITM broker/product wiring still partial |
 | Podman support | ✅ | ❌ | `--container` accepts both Docker + Podman |
-| WASM sandbox | ❌ | ✅ | IronClaw innovation |
+| WASM sandbox | ❌ | ✅ | T3Claw innovation |
 | Sandbox env sanitization | ✅ | 🚧 | Shell tool scrubs env vars (secret detection); Reborn process sandbox rejects sensitive raw env values in plans and uses placeholders for brokered credentials, but production secure-capture and MITM transport wiring remain partial |
 | `OPENCLAW_*` env block | ✅ | ❌ | Untrusted workspace `.env` cannot inject OpenClaw runtime-control vars |
 | Workspace `.env` injection blocks | ✅ | ❌ | Block `CLOUDSDK_PYTHON`, ambient Homebrew, Windows system PATH vars, `MINIMAX_API_HOST`, `npm_execpath` |
@@ -771,7 +771,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## 16. Development & Build System
 
-| Feature | OpenClaw | IronClaw | Notes |
+| Feature | OpenClaw | T3Claw | Notes |
 |---------|----------|----------|-------|
 | Primary language | TypeScript | Rust | Different ecosystems |
 | Build tool | tsdown | cargo | |
@@ -797,7 +797,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 - ✅ TUI channel with approval overlays
 - ✅ HTTP webhook channel
-- ✅ DM pairing (ironclaw pairing list/approve, host APIs)
+- ✅ DM pairing (t3claw pairing list/approve, host APIs)
 - ✅ WASM tool sandbox
 - ✅ Workspace/memory with hybrid search + embeddings batching
 - ✅ Prompt injection defense
@@ -823,7 +823,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ### P1 - High Priority
 
-- 🚧 Slack channel (real implementation): Reborn host-beta route can be explicitly mounted by `ironclaw-reborn serve` with Slack Events API signing, DM/app-mention routing through Product Workflow/Reborn, final-reply delivery, host-state-backed personal binding pairing, WebUI v2 admin-managed allowed-channel picker, durable WebUI channel-route assignment APIs, provider-side default outbound target inventory for shared channels and explicitly provisioned personal DMs, and deterministic chat-side connect action metadata; DMs execute as the paired actor, while shared channel turns route to allowed dynamic or static channel subjects and fail closed for unrouted channels in admin-managed mode; production install/setup hardening and fuller E2E coverage remain follow-up.
+- 🚧 Slack channel (real implementation): Reborn host-beta route can be explicitly mounted by `t3claw-reborn serve` with Slack Events API signing, DM/app-mention routing through Product Workflow/Reborn, final-reply delivery, host-state-backed personal binding pairing, WebUI v2 admin-managed allowed-channel picker, durable WebUI channel-route assignment APIs, provider-side default outbound target inventory for shared channels and explicitly provisioned personal DMs, and deterministic chat-side connect action metadata; DMs execute as the paired actor, while shared channel turns route to allowed dynamic or static channel subjects and fail closed for unrouted channels in admin-managed mode; production install/setup hardening and fuller E2E coverage remain follow-up.
 - ✅ Telegram channel (WASM, polling-first setup, DM pairing, caption, /start)
 - ❌ WhatsApp channel
 - ✅ Multi-provider failover (`FailoverProvider` with retryable error classification)
@@ -877,7 +877,7 @@ Trace Commons issuer/TenantCtx note: the server-side `zmanian/tracedao-server` s
 
 ## Deviations from OpenClaw
 
-IronClaw intentionally differs from OpenClaw in these ways:
+T3Claw intentionally differs from OpenClaw in these ways:
 
 1. **Rust vs TypeScript**: Native performance, memory safety, single binary distribution
 2. **WASM sandbox vs Docker**: Lighter weight, faster startup, capability-based security
@@ -885,7 +885,7 @@ IronClaw intentionally differs from OpenClaw in these ways:
 4. **NEAR AI focus**: Primary provider with session-based auth
 5. **No mobile/desktop apps**: Focus on server-side and CLI initially
 6. **WASM channels**: Novel extension mechanism not in OpenClaw
-7. **Tinfoil private inference**: IronClaw-only provider for private/encrypted inference
+7. **Tinfoil private inference**: T3Claw-only provider for private/encrypted inference
 8. **GitHub WASM tool**: Native GitHub integration as WASM tool
 9. **Prompt-based skills**: Different approach than OpenClaw capability bundles (trust gating, attenuation)
 

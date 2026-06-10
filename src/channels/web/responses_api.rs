@@ -6,13 +6,13 @@
 //! conversation state via a standard OpenAI-compatible interface.
 //!
 //! The canonical path is `/api/v1/responses` so the Responses API shares the
-//! `/api/...` prefix used by the rest of IronClaw's HTTP surface. The legacy
+//! `/api/...` prefix used by the rest of T3Claw's HTTP surface. The legacy
 //! `/v1/responses` path is still accepted as an alias for backward
-//! compatibility with clients configured against it (see ironclaw#2201).
+//! compatibility with clients configured against it (see t3claw#2201).
 //!
 //! ## Externally-provided tools
 //!
-//! Callers can declare their own tools alongside IronClaw's built-in
+//! Callers can declare their own tools alongside T3Claw's built-in
 //! registry by passing `tools: [{type: "function", name, description,
 //! parameters}]` and feeding back results via `function_call_output` items
 //! in the next request's `input`. The integration is engine-native, not
@@ -104,9 +104,9 @@ pub struct ResponsesRequest {
     pub tools: Option<Vec<ResponsesTool>>,
     #[serde(default)]
     pub tool_choice: Option<serde_json::Value>,
-    /// IronClaw extension: structured context injected into the agent's conversation.
+    /// T3Claw extension: structured context injected into the agent's conversation.
     ///
-    /// NOT part of the OpenAI Responses API spec — IronClaw extension.
+    /// NOT part of the OpenAI Responses API spec — T3Claw extension.
     /// The `context` alias is kept for convenience but may collide with
     /// a future OpenAI field; prefer `x_context`.
     ///
@@ -163,7 +163,7 @@ pub struct ResponsesInputItem {
 ///
 /// Per the OpenAI Responses API spec, only `type: "function"` is currently
 /// honoured. Built-in tool types like `web_search`, `file_search`, or
-/// `code_interpreter` are rejected with 400 — IronClaw routes those through
+/// `code_interpreter` are rejected with 400 — T3Claw routes those through
 /// its own internal tool registry, not through caller-provided definitions.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResponsesTool {
@@ -679,21 +679,21 @@ fn validate_external_tools(tools: &[ResponsesTool]) -> Result<(), String> {
 /// Effects are stamped as `Compute` (no externally-claimed effect type)
 /// and `requires_approval` is false — caller-side gating is the
 /// caller's responsibility, not the engine's.
-fn responses_tools_to_action_defs(tools: &[ResponsesTool]) -> Vec<ironclaw_engine::ActionDef> {
+fn responses_tools_to_action_defs(tools: &[ResponsesTool]) -> Vec<t3claw_engine::ActionDef> {
     tools
         .iter()
         .filter_map(|t| {
             let name = t.name.clone()?;
-            Some(ironclaw_engine::ActionDef {
+            Some(t3claw_engine::ActionDef {
                 name,
                 description: t.description.clone().unwrap_or_default(),
                 parameters_schema: t
                     .parameters
                     .clone()
                     .unwrap_or_else(|| serde_json::json!({"type": "object"})),
-                effects: vec![ironclaw_engine::EffectType::Compute],
+                effects: vec![t3claw_engine::EffectType::Compute],
                 requires_approval: false,
-                model_tool_surface: ironclaw_engine::ModelToolSurface::FullSchema,
+                model_tool_surface: t3claw_engine::ModelToolSurface::FullSchema,
                 discovery: None,
             })
         })
@@ -1262,7 +1262,7 @@ pub async fn create_response_handler(
     if let Some(catalog) = catalog.as_ref() {
         let action_defs = responses_tools_to_action_defs(&external_tools);
         catalog
-            .register(ironclaw_engine::ThreadId(thread_uuid), action_defs)
+            .register(t3claw_engine::ThreadId(thread_uuid), action_defs)
             .await;
     }
 
@@ -1297,7 +1297,7 @@ pub async fn create_response_handler(
         // and silently fail to resolve, returning a confusing
         // response to the client.
         let expected_call_id = match &pending.resume_kind {
-            ironclaw_engine::ResumeKind::External { callback_id }
+            t3claw_engine::ResumeKind::External { callback_id }
                 if crate::bridge::is_external_tool_callback_id(callback_id) =>
             {
                 crate::bridge::call_id_from_external_callback(callback_id)
@@ -1967,7 +1967,7 @@ async fn streaming_worker(
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/responses/{id}
-// (also served as GET /v1/responses/{id} for backward compat — ironclaw#2201)
+// (also served as GET /v1/responses/{id} for backward compat — t3claw#2201)
 // ---------------------------------------------------------------------------
 
 pub async fn get_response_handler(
@@ -3111,7 +3111,7 @@ mod tests {
             tool_name: "tool_install".to_string(),
             description: "Need auth".to_string(),
             parameters: "{\"name\":\"notion\"}".to_string(),
-            extension_name: Some(ironclaw_common::ExtensionName::new("notion").unwrap()),
+            extension_name: Some(t3claw_common::ExtensionName::new("notion").unwrap()),
             resume_kind: serde_json::json!({
                 "Authentication": {
                     "credential_name": "notion_api_token",

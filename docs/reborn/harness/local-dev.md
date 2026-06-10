@@ -9,7 +9,7 @@ This document describes the target shape. It does not mean every command exists 
 Current branch-local harness assets include:
 
 - Rust unit/integration tests;
-- `crates/ironclaw_architecture/tests/reborn_dependency_boundaries.rs`;
+- `crates/t3claw_architecture/tests/reborn_dependency_boundaries.rs`;
 - E2E scenarios under `tests/e2e/scenarios/`;
 - replay fixtures under `tests/fixtures/llm_traces/`;
 - live/replay test guide at `tests/support/LIVE_TESTING.md`;

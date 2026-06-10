@@ -12,7 +12,7 @@
 //! [`IncomingMessage`]: crate::channels::IncomingMessage
 
 use axum::http::StatusCode;
-use ironclaw_common::ExtensionName;
+use t3claw_common::ExtensionName;
 use uuid::Uuid;
 
 use crate::channels::web::platform::state::GatewayState;

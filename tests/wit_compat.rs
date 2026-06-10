@@ -314,7 +314,7 @@ fn instantiate_channel_component(
         "near:agent/channel-host@0.3.0".to_string(),
         format!(
             "near:agent/channel-host@{}",
-            ironclaw::tools::wasm::WIT_CHANNEL_VERSION
+            t3claw::tools::wasm::WIT_CHANNEL_VERSION
         ),
     ];
     channel_host_interfaces.sort();
@@ -537,21 +537,21 @@ fn wit_version_constants_match_wit_files() {
 
     let expected_tool = format!(
         "package near:agent@{};",
-        ironclaw::tools::wasm::WIT_TOOL_VERSION
+        t3claw::tools::wasm::WIT_TOOL_VERSION
     );
     let expected_channel = format!(
         "package near:agent@{};",
-        ironclaw::tools::wasm::WIT_CHANNEL_VERSION
+        t3claw::tools::wasm::WIT_CHANNEL_VERSION
     );
 
     assert!(
         tool_wit.contains(&expected_tool),
         "wit/tool.wit version must match WIT_TOOL_VERSION constant ({})",
-        ironclaw::tools::wasm::WIT_TOOL_VERSION
+        t3claw::tools::wasm::WIT_TOOL_VERSION
     );
     assert!(
         channel_wit.contains(&expected_channel),
         "wit/channel.wit version must match WIT_CHANNEL_VERSION constant ({})",
-        ironclaw::tools::wasm::WIT_CHANNEL_VERSION
+        t3claw::tools::wasm::WIT_CHANNEL_VERSION
     );
 }

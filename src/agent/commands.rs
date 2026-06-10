@@ -15,7 +15,7 @@ use crate::channels::{IncomingMessage, StatusUpdate};
 use crate::context::JobState;
 use crate::error::Error;
 use crate::ownership::Owned;
-use ironclaw_llm::{ChatMessage, Reasoning};
+use t3claw_llm::{ChatMessage, Reasoning};
 
 /// Format a count with a suffix, using K/M abbreviations for large numbers.
 fn format_count(n: u64, suffix: &str) -> String {
@@ -421,7 +421,7 @@ impl Agent {
         context.extend_from_slice(&messages[start..]);
         context.push(ChatMessage::user("Summarize this conversation."));
 
-        let request = ironclaw_llm::CompletionRequest::new(context)
+        let request = t3claw_llm::CompletionRequest::new(context)
             .with_max_tokens(512)
             .with_temperature(0.3);
 
@@ -470,7 +470,7 @@ impl Agent {
         context.extend_from_slice(&messages[start..]);
         context.push(ChatMessage::user("What should I do next?"));
 
-        let request = ironclaw_llm::CompletionRequest::new(context)
+        let request = t3claw_llm::CompletionRequest::new(context)
             .with_max_tokens(512)
             .with_temperature(0.5);
 
@@ -1112,13 +1112,13 @@ impl Agent {
         let model_owned = model.to_string();
         let backend = self.deps.llm_backend.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // 3a. Update the backend-specific model env var in ~/.ironclaw/.env
+            // 3a. Update the backend-specific model env var in ~/.t3claw/.env
             //     only if the var already exists (don't inject new vars).
-            let registry = ironclaw_llm::ProviderRegistry::load();
+            let registry = t3claw_llm::ProviderRegistry::load();
             let model_env = registry.model_env_var(&backend);
             let env_var_prefix = format!("{}=", model_env);
 
-            let env_path = crate::bootstrap::ironclaw_env_path();
+            let env_path = crate::bootstrap::t3claw_env_path();
             let env_has_var = std::fs::read_to_string(&env_path)
                 .ok()
                 .is_some_and(|content| {
@@ -1169,14 +1169,14 @@ mod tests {
     use crate::config::{AgentConfig, SafetyConfig, SkillsConfig};
     use crate::hooks::HookRegistry;
     use crate::tools::ToolRegistry;
-    use ironclaw_llm::{
-        CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
-        ToolCompletionResponse,
-    };
-    use ironclaw_safety::SafetyLayer;
     use rust_decimal::Decimal;
     use std::sync::Arc;
     use std::time::Duration;
+    use t3claw_llm::{
+        CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
+        ToolCompletionResponse,
+    };
+    use t3claw_safety::SafetyLayer;
 
     struct StaticLlmProvider;
 

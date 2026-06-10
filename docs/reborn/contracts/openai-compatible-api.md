@@ -4,8 +4,8 @@
 Responses create/retrieve/cancel, idempotency/opaque-ref, and projection-backed
 SSE streaming slices (#4442, #4443, #4444, #4445, #4446, #4447)
 **Parent:** #3283
-**Crates:** `crates/ironclaw_reborn_openai_compat`,
-`crates/ironclaw_reborn_openai_compat_storage`
+**Crates:** `crates/t3claw_reborn_openai_compat`,
+`crates/t3claw_reborn_openai_compat_storage`
 
 ## Purpose
 
@@ -92,7 +92,7 @@ bind sockets or call `axum::serve`.
 
 ## Non-Streaming Chat Completions
 
-With the `openai-compat-beta` feature, `ironclaw-reborn serve` mounts
+With the `openai-compat-beta` feature, `t3claw-reborn serve` mounts
 `openai_compat_router_with_state(...)` inside the Reborn protected route stack
 with an `OpenAiChatCompletionsWorkflow` for `POST /v1/chat/completions`.
 Default routers remain fail-closed unless host composition injects that

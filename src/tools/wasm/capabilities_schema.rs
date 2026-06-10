@@ -85,7 +85,7 @@ pub struct CapabilitiesFile {
     pub websocket: Option<serde_json::Value>,
 
     /// Authentication setup instructions.
-    /// Used by `ironclaw config` to guide users through auth setup.
+    /// Used by `t3claw config` to guide users through auth setup.
     #[serde(default)]
     pub auth: Option<AuthCapabilitySchema>,
 
@@ -395,7 +395,7 @@ pub struct CredentialMappingSchema {
 impl CredentialMappingSchema {
     /// Convert to a runtime `CredentialMapping`, returning `None` if the
     /// declared `path_patterns` contain any invalid entry per
-    /// `ironclaw_skills::validate_path_pattern`. Skipping the mapping (rather
+    /// `t3claw_skills::validate_path_pattern`. Skipping the mapping (rather
     /// than loading it with a warning) matches the skill-side behavior and
     /// prevents `path_patterns: [""]` from silently widening scope: an empty
     /// prefix matches every request path, so a "validation-failed" pattern
@@ -403,7 +403,7 @@ impl CredentialMappingSchema {
     /// the opposite of what the author wrote.
     fn to_credential_mapping(&self) -> Option<CredentialMapping> {
         for pattern in &self.path_patterns {
-            let errs = ironclaw_skills::validate_path_pattern(&self.secret_name, pattern);
+            let errs = t3claw_skills::validate_path_pattern(&self.secret_name, pattern);
             if !errs.is_empty() {
                 for err in errs {
                     tracing::warn!(
@@ -1478,8 +1478,8 @@ mod tests {
                         "intents": 513,
                         "properties": {
                             "os": "linux",
-                            "browser": "ironclaw",
-                            "device": "ironclaw"
+                            "browser": "t3claw",
+                            "device": "t3claw"
                         }
                     }
                 }
@@ -1498,8 +1498,8 @@ mod tests {
                     "intents": 513,
                     "properties": {
                         "os": "linux",
-                        "browser": "ironclaw",
-                        "device": "ironclaw"
+                        "browser": "t3claw",
+                        "device": "t3claw"
                     }
                 }
             }))

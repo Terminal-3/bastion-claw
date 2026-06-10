@@ -10,8 +10,8 @@ mod support;
 mod tests {
     use std::time::Duration;
 
-    use ironclaw::agent::routine::{RoutineAction, Trigger};
-    use ironclaw::context::{JobContext, JobState};
+    use t3claw::agent::routine::{RoutineAction, Trigger};
+    use t3claw::context::{JobContext, JobState};
     use uuid::Uuid;
 
     use crate::support::test_rig::{TestRig, TestRigBuilder};
@@ -54,7 +54,7 @@ mod tests {
 
     async fn resolve_created_job_id(
         rig: &TestRig,
-        responses: &[ironclaw::channels::OutgoingResponse],
+        responses: &[t3claw::channels::OutgoingResponse],
         expected_title: &str,
     ) -> Uuid {
         if let Some(job_id) = responses
@@ -105,7 +105,7 @@ mod tests {
         }
     }
 
-    fn requests_contain(requests: &[Vec<ironclaw_llm::ChatMessage>], needle: &str) -> bool {
+    fn requests_contain(requests: &[Vec<t3claw_llm::ChatMessage>], needle: &str) -> bool {
         requests
             .iter()
             .flatten()

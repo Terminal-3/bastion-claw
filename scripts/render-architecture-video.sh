@@ -34,8 +34,8 @@ if [ ! -d "$VIDEO_DIR/node_modules" ]; then
   fi
 fi
 
-echo "Rendering IronClaw architecture video..."
-(cd "$VIDEO_DIR" && npx remotion render IronClawArchitecture -- "$OUTPUT")
+echo "Rendering T3Claw architecture video..."
+(cd "$VIDEO_DIR" && npx remotion render T3ClawArchitecture -- "$OUTPUT")
 
 echo ""
 echo "Done: $OUTPUT"

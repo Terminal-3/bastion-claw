@@ -13,7 +13,7 @@ use crate::agent::context_monitor::{CompactionStrategy, ContextBreakdown};
 use crate::agent::session::Thread;
 use crate::error::Error;
 use crate::workspace::Workspace;
-use ironclaw_llm::{ChatMessage, CompletionRequest, LlmProvider, Reasoning};
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider, Reasoning};
 
 /// Result of a compaction operation.
 #[derive(Debug)]
@@ -202,10 +202,10 @@ Be brief but capture all important details. Use bullet points."#,
             .iter()
             .map(|m| {
                 let role_str = match m.role {
-                    ironclaw_llm::Role::User => "User",
-                    ironclaw_llm::Role::Assistant => "Assistant",
-                    ironclaw_llm::Role::System => "System",
-                    ironclaw_llm::Role::Tool => {
+                    t3claw_llm::Role::User => "User",
+                    t3claw_llm::Role::Assistant => "Assistant",
+                    t3claw_llm::Role::System => "System",
+                    t3claw_llm::Role::Tool => {
                         return format!(
                             "Tool {}: {}",
                             m.name.as_deref().unwrap_or("unknown"),
@@ -844,9 +844,9 @@ mod tests {
         // Verify alternating user/assistant pattern
         for (i, msg) in messages.iter().enumerate() {
             if i % 2 == 0 {
-                assert_eq!(msg.role, ironclaw_llm::Role::User);
+                assert_eq!(msg.role, t3claw_llm::Role::User);
             } else {
-                assert_eq!(msg.role, ironclaw_llm::Role::Assistant);
+                assert_eq!(msg.role, t3claw_llm::Role::Assistant);
             }
         }
 

@@ -25,7 +25,7 @@ The auth canaries split into two live-provider styles.
 
 ### `auth-live-seeded`
 
-This lane starts a fresh local IronClaw instance and seeds known-good provider
+This lane starts a fresh local T3Claw instance and seeds known-good provider
 credentials into the clean database.
 
 Use it for:
@@ -36,7 +36,7 @@ Use it for:
 
 ### `auth-browser-consent`
 
-This lane starts with no provider tokens in IronClaw, opens the real provider
+This lane starts with no provider tokens in T3Claw, opens the real provider
 OAuth flow in Playwright, completes browser consent, then verifies both browser
 chat and `/v1/responses`.
 
@@ -262,7 +262,7 @@ Classify failures first:
 
 - credential failure: token revoked, scope missing, account disabled
 - provider failure: quota, rate limit, consent UI change, policy change
-- IronClaw failure: secret persistence, refresh, extension activation, auth injection, callback handling
+- T3Claw failure: secret persistence, refresh, extension activation, auth injection, callback handling
 
 Check first:
 

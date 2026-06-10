@@ -2,13 +2,13 @@
 
 **Status:** Draft implementation contract
 **Date:** 2026-04-24
-**Depends on:** `docs/reborn/contracts/host-api.md`, `crates/ironclaw_host_api`
+**Depends on:** `docs/reborn/contracts/host-api.md`, `crates/t3claw_host_api`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_filesystem` is the durable path and mount service for IronClaw Reborn.
+`t3claw_filesystem` is the durable path and mount service for T3Claw Reborn.
 
 It turns host API path contracts into actual storage operations while preserving the core containment invariant:
 
@@ -127,15 +127,15 @@ Recommended meaning:
 | `/tmp` | process/invocation-local temporary data |
 | `/secrets` | encrypted secret records and redacted secret projections only |
 | `/events` | durable event/audit append log and projections |
-| `/processes` | background-process records and result/output blobs (consumer-store mount alias under `ironclaw_processes`) |
-| `/authorization` | capability lease records (consumer-store mount alias under `ironclaw_authorization`) |
-| `/outbound` | outbound delivery policy/subscription/attempt records (consumer-store mount alias under `ironclaw_outbound`) |
-| `/run-state` | invocation-lifecycle run-state records (consumer-store mount alias under `ironclaw_run_state`) |
-| `/approvals` | approval-request lifecycle records (sibling consumer-store mount alias under `ironclaw_run_state`) |
-| `/threads` | canonical session-thread and transcript records (consumer-store mount alias under `ironclaw_threads`) |
-| `/conversations` | conversation binding and session-thread state records (consumer-store mount alias under `ironclaw_conversations`) |
-| `/turns` | turn-coordination persistence snapshot (consumer-store mount alias under `ironclaw_turns`) |
-| `/resources` | resource-governor reservation/usage snapshots (consumer-store mount alias under `ironclaw_resources`) |
+| `/processes` | background-process records and result/output blobs (consumer-store mount alias under `t3claw_processes`) |
+| `/authorization` | capability lease records (consumer-store mount alias under `t3claw_authorization`) |
+| `/outbound` | outbound delivery policy/subscription/attempt records (consumer-store mount alias under `t3claw_outbound`) |
+| `/run-state` | invocation-lifecycle run-state records (consumer-store mount alias under `t3claw_run_state`) |
+| `/approvals` | approval-request lifecycle records (sibling consumer-store mount alias under `t3claw_run_state`) |
+| `/threads` | canonical session-thread and transcript records (consumer-store mount alias under `t3claw_threads`) |
+| `/conversations` | conversation binding and session-thread state records (consumer-store mount alias under `t3claw_conversations`) |
+| `/turns` | turn-coordination persistence snapshot (consumer-store mount alias under `t3claw_turns`) |
+| `/resources` | resource-governor reservation/usage snapshots (consumer-store mount alias under `t3claw_resources`) |
 | `/tenant-shared` | data shared between users/agents in the same tenant; resolves to `/tenants/<tenant_id>/shared/...` per [scoped-filesystem-tenant-isolation](../../plans/2026-05-16-scoped-filesystem-tenant-isolation.md) |
 | `/tenants` | reserved root for tenant-scoped target subtrees written by the per-invocation `MountView` (`/tenants/<tenant_id>/users/<user_id>/<alias>/...`); not consumed directly by stores |
 
@@ -157,7 +157,7 @@ Aliases are resolved by `MountView`; they are not global virtual roots by themse
 
 ### 5.1 `VirtualPath`
 
-Canonical durable namespace path, validated by `ironclaw_host_api`.
+Canonical durable namespace path, validated by `t3claw_host_api`.
 
 Examples:
 
@@ -214,7 +214,7 @@ Rules:
 
 ## 7. Permissions
 
-Use `MountPermissions` from `ironclaw_host_api`:
+Use `MountPermissions` from `t3claw_host_api`:
 
 ```rust
 pub struct MountPermissions {
@@ -377,7 +377,7 @@ ObjectStoreBackend
 RemoteFilesystemBackend
 ```
 
-Memory-specific backend adapters are owned outside this crate. The first Reborn memory seams are `ironclaw_memory::MemoryDocumentFilesystem` for the built-in repository path and `ironclaw_memory::MemoryBackendFilesystemAdapter` for plugin backends that declare file-document capability. PostgreSQL/libSQL adapters port/adapt the current workspace table family (`memory_documents`, `memory_chunks`, libSQL `memory_chunks_fts`, and `memory_document_versions`); metadata inheritance, skip flags, schema validation, embedding-provider integration, embedded chunk writes, FTS search, and rank-fused hybrid search are memory service/indexer responsibilities already represented in `ironclaw_memory`, not in the generic filesystem crate.
+Memory-specific backend adapters are owned outside this crate. The first Reborn memory seams are `t3claw_memory::MemoryDocumentFilesystem` for the built-in repository path and `t3claw_memory::MemoryBackendFilesystemAdapter` for plugin backends that declare file-document capability. PostgreSQL/libSQL adapters port/adapt the current workspace table family (`memory_documents`, `memory_chunks`, libSQL `memory_chunks_fts`, and `memory_document_versions`); metadata inheritance, skip flags, schema validation, embedding-provider integration, embedded chunk writes, FTS search, and rank-fused hybrid search are memory service/indexer responsibilities already represented in `t3claw_memory`, not in the generic filesystem crate.
 
 ---
 
@@ -474,7 +474,7 @@ Add tests through the caller-facing filesystem APIs, not only helper functions:
 
 ## 16. Non-goals
 
-Do not add in `ironclaw_filesystem`:
+Do not add in `t3claw_filesystem`:
 
 - auth policy evaluation
 - resource reservation

@@ -11,7 +11,7 @@ the Routines tab stays visible even with engine v2 enabled. These tests
 drive the JS helpers directly via `page.evaluate()` because the e2e
 harness ships with `ROUTINES_ENABLED=false`, so we cannot create a real
 routine in fixture setup. See `tests/e2e/CLAUDE.md` → "Environment
-passed to ironclaw in tests".
+passed to t3claw in tests".
 
 Some scenarios route-mock `/api/routines/summary` so we can drive the
 real `fetchGatewayStatus` / `refreshLegacyRoutinesPresence` call sites

@@ -9,7 +9,7 @@ use crate::channels::{
 };
 use crate::generated_images::GeneratedImageSentinel;
 
-pub use ironclaw_common::truncate_preview;
+pub use t3claw_common::truncate_preview;
 
 fn normalize_mime_type(mime: &str) -> String {
     mime.split(';')
@@ -399,7 +399,7 @@ pub fn web_incoming_message(
 
 /// Convert stored tool errors into plain text suitable for UI display.
 pub fn tool_error_for_display(error: &str) -> String {
-    ironclaw_safety::SafetyLayer::unwrap_tool_output(error).unwrap_or_else(|| error.to_string())
+    t3claw_safety::SafetyLayer::unwrap_tool_output(error).unwrap_or_else(|| error.to_string())
 }
 
 /// Convert stored tool results into plain text suitable for UI display.
@@ -414,7 +414,7 @@ pub fn tool_result_for_display(result: &serde_json::Value) -> Option<String> {
 
     let content = match result {
         serde_json::Value::String(s) => {
-            ironclaw_safety::SafetyLayer::unwrap_tool_output(s).unwrap_or_else(|| s.clone())
+            t3claw_safety::SafetyLayer::unwrap_tool_output(s).unwrap_or_else(|| s.clone())
         }
         other => other.to_string(),
     };

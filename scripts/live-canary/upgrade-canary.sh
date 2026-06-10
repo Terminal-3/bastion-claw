@@ -6,7 +6,7 @@ set -euo pipefail
 
 PREVIOUS_REF="${PREVIOUS_REF:-}"
 CURRENT_REF="${CURRENT_REF:-HEAD}"
-WORK_ROOT="${WORK_ROOT:-${TMPDIR:-/tmp}/ironclaw-upgrade-canary}"
+WORK_ROOT="${WORK_ROOT:-${TMPDIR:-/tmp}/t3claw-upgrade-canary}"
 PREVIOUS_DIR="${WORK_ROOT}/previous"
 CURRENT_DIR="${WORK_ROOT}/current"
 DB_PATH="${DB_PATH:-${WORK_ROOT}/upgrade-canary.db}"
@@ -42,7 +42,7 @@ common_env=(
   "LLM_BASE_URL=http://127.0.0.1:9/v1"
   "LLM_MODEL=upgrade-canary-placeholder"
   "LLM_API_KEY=upgrade-canary-placeholder"
-  "RUST_LOG=ironclaw=info"
+  "RUST_LOG=t3claw=info"
 )
 
 echo "[upgrade-canary] building previous release"

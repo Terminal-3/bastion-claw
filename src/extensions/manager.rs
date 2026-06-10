@@ -370,7 +370,7 @@ struct TelegramApiOkResponse {
 }
 
 #[cfg(any(test, debug_assertions))]
-const TELEGRAM_TEST_API_BASE_ENV: &str = "IRONCLAW_TEST_TELEGRAM_API_BASE_URL";
+const TELEGRAM_TEST_API_BASE_ENV: &str = "T3CLAW_TEST_TELEGRAM_API_BASE_URL";
 const TELEGRAM_DEFAULT_API_BASE: &str = "https://api.telegram.org";
 
 #[cfg(any(test, debug_assertions))]
@@ -592,7 +592,7 @@ pub struct ExtensionManager {
     /// `/oauth/callback` handler.
     pending_oauth_flows: crate::auth::oauth::PendingOAuthRegistry,
     /// OAuth proxy auth token for authenticating with the hosted token exchange proxy.
-    /// Resolved once at construction from `IRONCLAW_OAUTH_PROXY_AUTH_TOKEN`,
+    /// Resolved once at construction from `T3CLAW_OAUTH_PROXY_AUTH_TOKEN`,
     /// then `GATEWAY_AUTH_TOKEN` as a backward-compatible fallback.
     oauth_proxy_auth_token: Option<String>,
     /// Relay config captured at startup. Used by `auth_channel_relay` and
@@ -889,7 +889,7 @@ impl ExtensionManager {
     /// instead of calling `open::that()` on the server.
     ///
     /// `base_url` is the gateway's own public URL (e.g. `https://my-gateway.example.com`),
-    /// used to build OAuth redirect URIs when `IRONCLAW_OAUTH_CALLBACK_URL` is not set.
+    /// used to build OAuth redirect URIs when `T3CLAW_OAUTH_CALLBACK_URL` is not set.
     pub async fn enable_gateway_mode(&self, base_url: String) {
         self.gateway_mode
             .store(true, std::sync::atomic::Ordering::Release);
@@ -921,7 +921,7 @@ impl ExtensionManager {
     ///
     /// Gateway mode is active when any of:
     /// - `enable_gateway_mode()` was called (web gateway is running), OR
-    /// - `IRONCLAW_OAUTH_CALLBACK_URL` is set to a non-loopback URL, OR
+    /// - `T3CLAW_OAUTH_CALLBACK_URL` is set to a non-loopback URL, OR
     /// - `self.tunnel_url` is set to a non-loopback URL
     pub fn should_use_gateway_mode(&self) -> bool {
         if self.gateway_mode.load(std::sync::atomic::Ordering::Acquire) {
@@ -942,7 +942,7 @@ impl ExtensionManager {
     /// Returns the OAuth redirect URI for gateway mode, or `None` for local mode.
     ///
     /// Priority:
-    /// 1. `IRONCLAW_OAUTH_CALLBACK_URL` env var (via `callback_url()`)
+    /// 1. `T3CLAW_OAUTH_CALLBACK_URL` env var (via `callback_url()`)
     /// 2. `gateway_base_url` (set by `enable_gateway_mode()`)
     /// 3. `tunnel_url` (from config)
     /// 4. `None` (local/CLI mode)
@@ -1877,8 +1877,8 @@ impl ExtensionManager {
     /// Broadcast an extension status change to the web UI via SSE.
     async fn broadcast_extension_status(&self, name: &str, status: &str, message: Option<&str>) {
         if let Some(ref sse) = *self.sse_manager.read().await {
-            sse.broadcast(ironclaw_common::AppEvent::ExtensionStatus {
-                extension_name: ironclaw_common::ExtensionName::from_trusted(name.to_string()),
+            sse.broadcast(t3claw_common::AppEvent::ExtensionStatus {
+                extension_name: t3claw_common::ExtensionName::from_trusted(name.to_string()),
                 status: status.to_string(),
                 message: message.map(|m| m.to_string()),
             });
@@ -1951,7 +1951,7 @@ impl ExtensionManager {
                     ))
                 }
                 ExtensionKind::AcpAgent => Err(ExtensionError::InstallFailed(
-                    "ACP agents are configured via 'ironclaw acp add', not the extension manager"
+                    "ACP agents are configured via 't3claw acp add', not the extension manager"
                         .to_string(),
                 )),
             }
@@ -2026,10 +2026,7 @@ impl ExtensionManager {
                 name: name.to_string(),
                 kind: ExtensionKind::AcpAgent,
                 tools_loaded: Vec::new(),
-                message: format!(
-                    "ACP agent '{}' is managed via 'ironclaw acp' commands",
-                    name
-                ),
+                message: format!("ACP agent '{}' is managed via 't3claw acp' commands", name),
             }),
         }
     }
@@ -2794,7 +2791,7 @@ impl ExtensionManager {
                     .await;
 
                 Ok(format!(
-                    "Removed channel '{}'. Restart IronClaw for the change to take effect.",
+                    "Removed channel '{}'. Restart T3Claw for the change to take effect.",
                     name
                 ))
             }
@@ -2872,9 +2869,9 @@ impl ExtensionManager {
                 Ok(format!("Removed channel relay '{}'", name))
             }
             ExtensionKind::AcpAgent => {
-                // ACP agents are managed via `ironclaw acp remove`
+                // ACP agents are managed via `t3claw acp remove`
                 Ok(format!(
-                    "ACP agent '{}' should be removed via 'ironclaw acp remove {}'",
+                    "ACP agent '{}' should be removed via 't3claw acp remove {}'",
                     name, name
                 ))
             }
@@ -3513,7 +3510,7 @@ impl ExtensionManager {
                 })
             }
             ExtensionKind::AcpAgent => Err(ExtensionError::InstallFailed(
-                "ACP agents are configured via 'ironclaw acp add', not the registry".to_string(),
+                "ACP agents are configured via 't3claw acp add', not the registry".to_string(),
             )),
         }
     }
@@ -4097,7 +4094,7 @@ impl ExtensionManager {
                 ExtensionError::InstallFailed(format!(
                     "'{}' requires building from source. Build artifact not found. \
                          Run `cargo component build --release` in {} first, \
-                         or use `ironclaw registry install {}`.",
+                         or use `t3claw registry install {}`.",
                     name,
                     resolved_dir.display(),
                     name,
@@ -4364,7 +4361,7 @@ impl ExtensionManager {
         extra_params.insert("resource".to_string(), resource.clone());
 
         let launch = build_pending_oauth_launch(PendingOAuthLaunchParams {
-            extension_name: ironclaw_common::ExtensionName::from_trusted(name.to_string()),
+            extension_name: t3claw_common::ExtensionName::from_trusted(name.to_string()),
             display_name: server.name.clone(),
             authorization_url,
             token_url: token_url.clone(),
@@ -4782,9 +4779,7 @@ impl ExtensionManager {
             .await
             .unwrap_or(ExtensionKind::WasmChannel);
         let launch = build_pending_oauth_launch(PendingOAuthLaunchParams {
-            extension_name: ironclaw_common::ExtensionName::from_trusted(
-                extension_name.to_string(),
-            ),
+            extension_name: t3claw_common::ExtensionName::from_trusted(extension_name.to_string()),
             display_name: display_name.to_string(),
             authorization_url: oauth.authorization_url.clone(),
             token_url: oauth.token_url.clone(),
@@ -5392,7 +5387,7 @@ impl ExtensionManager {
             .unwrap_or_else(|| name.to_string());
 
         let launch = build_pending_oauth_launch(PendingOAuthLaunchParams {
-            extension_name: ironclaw_common::ExtensionName::from_trusted(name.to_string()),
+            extension_name: t3claw_common::ExtensionName::from_trusted(name.to_string()),
             display_name: display_name.clone(),
             authorization_url: oauth.authorization_url.clone(),
             token_url: oauth.token_url.clone(),
@@ -5547,12 +5542,12 @@ impl ExtensionManager {
                     // Scope to the OAuth flow owner — a global broadcast
                     // would surface this onboarding state to every
                     // connected tenant tab.
-                    let onboarding_event = ironclaw_common::AppEvent::OnboardingState {
-                        extension_name: ironclaw_common::ExtensionName::from_trusted(ext_name),
+                    let onboarding_event = t3claw_common::AppEvent::OnboardingState {
+                        extension_name: t3claw_common::ExtensionName::from_trusted(ext_name),
                         state: if success {
-                            ironclaw_common::OnboardingStateDto::Ready
+                            t3claw_common::OnboardingStateDto::Ready
                         } else {
-                            ironclaw_common::OnboardingStateDto::Failed
+                            t3claw_common::OnboardingStateDto::Failed
                         },
                         request_id: None,
                         message: Some(message),
@@ -6256,7 +6251,7 @@ impl ExtensionManager {
         // the input so non-canonical aliases (` telegram `, `telegram-`
         // → `telegram`, etc.) cannot bypass the comparison.
         if self.reborn_telegram_v2_enabled() {
-            let canonical = ironclaw_common::ExtensionName::new(name)
+            let canonical = t3claw_common::ExtensionName::new(name)
                 .map(|n| n.into_inner())
                 .unwrap_or_else(|_| name.to_string());
             if canonical == "telegram" {
@@ -6893,7 +6888,7 @@ impl ExtensionManager {
             ExtensionError::Config(e.to_string())
         })?;
 
-        // Generate CSRF nonce — IronClaw validates this on the callback to ensure
+        // Generate CSRF nonce — T3Claw validates this on the callback to ensure
         // the OAuth completion is legitimate. Channel-relay embeds it in the signed
         // state and appends it to the post-OAuth redirect URL.
         let state_nonce = uuid::Uuid::new_v4().to_string();
@@ -6921,7 +6916,7 @@ impl ExtensionManager {
                 ExtensionError::AuthFailed(format!("Failed to store OAuth state: {e}"))
             })?;
 
-        // Store the initiating user_id so the OAuth callback knows which IronClaw
+        // Store the initiating user_id so the OAuth callback knows which T3Claw
         // user to pair with the Slack authed_user_id.
         let user_key = format!("relay:{}:oauth_user", name);
         let _ = self.secrets.delete(&self.user_id, &user_key).await;
@@ -8321,8 +8316,8 @@ impl ExtensionManager {
                     );
                     sse.broadcast_for_user(
                         user_id,
-                        ironclaw_common::OnboardingStateDto::pairing_required(
-                            ironclaw_common::ExtensionName::from_trusted(name.clone()),
+                        t3claw_common::OnboardingStateDto::pairing_required(
+                            t3claw_common::ExtensionName::from_trusted(name.clone()),
                             None,
                             None,
                             None,
@@ -9503,7 +9498,7 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn ensure_extension_ready_reports_needs_auth_for_wasm_channel() {
-        // Serialize against tests that mutate IRONCLAW_OAUTH_CALLBACK_URL
+        // Serialize against tests that mutate T3CLAW_OAUTH_CALLBACK_URL
         // (e.g. `auth_wasm_channel_status_uses_persisted_secret_oauth_descriptor`):
         // without the env lock the auth path nondeterministically returns
         // "awaiting_authorization" instead of "awaiting_token".
@@ -9615,7 +9610,7 @@ mod tests {
         let _env_guard = crate::config::helpers::lock_env();
         unsafe {
             std::env::set_var(
-                "IRONCLAW_OAUTH_CALLBACK_URL",
+                "T3CLAW_OAUTH_CALLBACK_URL",
                 "https://example.com/oauth/callback",
             );
         }
@@ -9679,7 +9674,7 @@ mod tests {
         );
 
         unsafe {
-            std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+            std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
         }
     }
 
@@ -12120,7 +12115,7 @@ mod tests {
         mgr.pending_oauth_flows().write().await.insert(
             "gmail-state".to_string(),
             crate::auth::oauth::PendingOAuthFlow {
-                extension_name: ironclaw_common::ExtensionName::new("gmail").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("gmail").unwrap(),
                 display_name: "Gmail".to_string(),
                 token_url: "https://example.com/token".to_string(),
                 client_id: "client123".to_string(),
@@ -12147,7 +12142,7 @@ mod tests {
         mgr.pending_oauth_flows().write().await.insert(
             "other-state".to_string(),
             crate::auth::oauth::PendingOAuthFlow {
-                extension_name: ironclaw_common::ExtensionName::new("web-search").unwrap(),
+                extension_name: t3claw_common::ExtensionName::new("web-search").unwrap(),
                 display_name: "Web Search".to_string(),
                 token_url: "https://example.com/token".to_string(),
                 client_id: "client456".to_string(),
@@ -12246,7 +12241,7 @@ mod tests {
             mgr.pending_oauth_flows().write().await.insert(
                 state.to_string(),
                 crate::auth::oauth::PendingOAuthFlow {
-                    extension_name: ironclaw_common::ExtensionName::from_trusted(
+                    extension_name: t3claw_common::ExtensionName::from_trusted(
                         "github".to_string(),
                     ),
                     display_name: "GitHub".to_string(),
@@ -12796,7 +12791,7 @@ mod tests {
     // Regression tests for a bug where MCP OAuth called `open::that()` on the
     // server machine instead of returning an auth URL to the gateway frontend.
     // The root cause was that `should_use_gateway_mode()` only checked the
-    // `IRONCLAW_OAUTH_CALLBACK_URL` env var, ignoring `self.tunnel_url`.
+    // `T3CLAW_OAUTH_CALLBACK_URL` env var, ignoring `self.tunnel_url`.
 
     /// Build a minimal ExtensionManager with a custom tunnel_url.
     fn make_manager_with_tunnel(tunnel_url: Option<String>) -> ExtensionManager {
@@ -12810,7 +12805,7 @@ mod tests {
             Arc::new(InMemorySecretsStore::new(crypto));
         let tools = Arc::new(crate::tools::ToolRegistry::new());
         let mcp = Arc::new(McpSessionManager::new());
-        let dir = std::env::temp_dir().join("ironclaw-test-gateway-mode");
+        let dir = std::env::temp_dir().join("t3claw-test-gateway-mode");
 
         ExtensionManager::new(
             mcp,
@@ -12831,10 +12826,10 @@ mod tests {
     #[test]
     fn should_use_gateway_mode_true_for_tunnel_url() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+        let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
         // SAFETY: Under ENV_MUTEX, no concurrent env access.
         unsafe {
-            std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+            std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
         }
 
         let mgr = make_manager_with_tunnel(Some("https://my-gateway.example.com".into()));
@@ -12845,7 +12840,7 @@ mod tests {
 
         unsafe {
             if let Some(val) = original {
-                std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
             }
         }
     }
@@ -12853,9 +12848,9 @@ mod tests {
     #[test]
     fn should_use_gateway_mode_false_without_tunnel() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+        let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
         unsafe {
-            std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+            std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
         }
 
         let mgr = make_manager_with_tunnel(None);
@@ -12866,7 +12861,7 @@ mod tests {
 
         unsafe {
             if let Some(val) = original {
-                std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
             }
         }
     }
@@ -12874,9 +12869,9 @@ mod tests {
     #[test]
     fn should_use_gateway_mode_false_for_loopback_tunnel() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+        let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
         unsafe {
-            std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+            std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
         }
 
         let mgr = make_manager_with_tunnel(Some("http://127.0.0.1:3001".into()));
@@ -12887,13 +12882,13 @@ mod tests {
 
         unsafe {
             if let Some(val) = original {
-                std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
             }
         }
     }
 
     /// Helper to run an async test body while holding the env mutex.
-    /// Clears `IRONCLAW_OAUTH_CALLBACK_URL` for the duration, restoring on drop.
+    /// Clears `T3CLAW_OAUTH_CALLBACK_URL` for the duration, restoring on drop.
     struct EnvGuard {
         original: Option<String>,
         _mutex: std::sync::MutexGuard<'static, ()>,
@@ -12902,10 +12897,10 @@ mod tests {
     impl EnvGuard {
         fn new() -> Self {
             let guard = crate::config::helpers::lock_env();
-            let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+            let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
             // SAFETY: Under ENV_MUTEX, no concurrent env access.
             unsafe {
-                std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
             }
             Self {
                 original,
@@ -12919,9 +12914,9 @@ mod tests {
             // SAFETY: Under ENV_MUTEX (still held by _mutex), no concurrent env access.
             unsafe {
                 if let Some(ref val) = self.original {
-                    std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                    std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
                 } else {
-                    std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                    std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
                 }
             }
         }
@@ -13009,10 +13004,10 @@ mod tests {
     #[test]
     fn gateway_callback_redirect_uri_does_not_duplicate_callback_path_from_env() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+        let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
         unsafe {
             std::env::set_var(
-                "IRONCLAW_OAUTH_CALLBACK_URL",
+                "T3CLAW_OAUTH_CALLBACK_URL",
                 "https://oauth.test.example/oauth/callback",
             );
         }
@@ -13025,9 +13020,9 @@ mod tests {
 
         unsafe {
             if let Some(val) = original {
-                std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
             } else {
-                std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
             }
         }
     }
@@ -13035,10 +13030,10 @@ mod tests {
     #[test]
     fn gateway_callback_redirect_uri_trims_trailing_slash_from_env_callback() {
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+        let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
         unsafe {
             std::env::set_var(
-                "IRONCLAW_OAUTH_CALLBACK_URL",
+                "T3CLAW_OAUTH_CALLBACK_URL",
                 "https://oauth.test.example/oauth/callback/",
             );
         }
@@ -13051,9 +13046,9 @@ mod tests {
 
         unsafe {
             if let Some(val) = original {
-                std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
             } else {
-                std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
             }
         }
     }
@@ -13832,7 +13827,7 @@ mod tests {
     #[test]
     fn test_telegram_token_colon_preserved_in_validation_url() {
         // ScopedEnvVar holds ENV_MUTEX for the test's lifetime, preventing
-        // a concurrent test from setting IRONCLAW_TEST_TELEGRAM_API_BASE_URL.
+        // a concurrent test from setting T3CLAW_TEST_TELEGRAM_API_BASE_URL.
         // Setting to "" is equivalent to unset — telegram_api_base_url()
         // filters empty values. ScopedEnvVar restores the previous value on drop.
         let _env = ScopedEnvVar::set(TELEGRAM_TEST_API_BASE_ENV, "");

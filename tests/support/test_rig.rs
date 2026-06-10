@@ -9,21 +9,21 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use ironclaw::agent::{Agent, AgentDeps};
-use ironclaw::app::{AppBuilder, AppBuilderFlags};
-use ironclaw::channels::web::log_layer::LogBroadcaster;
-use ironclaw::channels::{OutgoingResponse, StatusUpdate};
-use ironclaw::config::Config;
-use ironclaw::db::Database;
-use ironclaw::tools::Tool;
-use ironclaw_llm::{LlmProvider, SessionConfig, SessionManager};
+use t3claw::agent::{Agent, AgentDeps};
+use t3claw::app::{AppBuilder, AppBuilderFlags};
+use t3claw::channels::web::log_layer::LogBroadcaster;
+use t3claw::channels::{OutgoingResponse, StatusUpdate};
+use t3claw::config::Config;
+use t3claw::db::Database;
+use t3claw::tools::Tool;
+use t3claw_llm::{LlmProvider, SessionConfig, SessionManager};
 
 use crate::support::instrumented_llm::InstrumentedLlm;
 use crate::support::metrics::{ToolInvocation, TraceMetrics};
 use crate::support::test_channel::{CapturedEvent, TestChannel, TestChannelHandle};
 use crate::support::trace_llm::{LlmTrace, TraceLlm};
 
-use ironclaw_llm::recording::{HttpExchange, HttpInterceptor, ReplayingHttpInterceptor};
+use t3claw_llm::recording::{HttpExchange, HttpInterceptor, ReplayingHttpInterceptor};
 
 // ---------------------------------------------------------------------------
 // TestRig
@@ -38,14 +38,14 @@ const BOOTSTRAP_GREETING_MARKER: &str = "always-on chief of staff";
 /// rig database from an existing libSQL file.
 ///
 /// Live tests use this to pull *only* the credentials they need (e.g. a
-/// Google OAuth token) out of the developer's real `~/.ironclaw/ironclaw.db`
+/// Google OAuth token) out of the developer's real `~/.t3claw/t3claw.db`
 /// without cloning the rest of the database. Memory, history, secrets the
 /// test didn't ask for — none of it crosses the boundary. The destination
 /// DB starts empty, the listed secret rows are inserted under the test
 /// rig's owner user, and the test must seed any other state itself.
 #[derive(Clone, Debug)]
 pub struct SeededSecretsConfig {
-    /// Path to the source libSQL file (typically `~/.ironclaw/ironclaw.db`).
+    /// Path to the source libSQL file (typically `~/.t3claw/t3claw.db`).
     pub source_path: std::path::PathBuf,
     /// User ID to filter the source rows on (typically the developer's
     /// owner_id from the live config).
@@ -89,7 +89,7 @@ async fn seed_secrets_into(
     );
 
     // Open the source via a separate libSQL connection. We never write to
-    // it. The source process (the developer's running ironclaw) can keep
+    // it. The source process (the developer's running t3claw) can keep
     // running concurrently — libSQL's WAL mode permits a reader from
     // another connection.
     let src_db = libsql::Builder::new_local(&config.source_path)
@@ -199,25 +199,25 @@ pub struct TestRig {
     db: Arc<dyn Database>,
     /// Workspace handle for direct memory operations in tests.
     #[cfg(feature = "libsql")]
-    workspace: Option<Arc<ironclaw::workspace::Workspace>>,
+    workspace: Option<Arc<t3claw::workspace::Workspace>>,
     /// The underlying TraceLlm for inspecting captured requests.
     #[cfg(feature = "libsql")]
     trace_llm: Option<Arc<TraceLlm>>,
     /// Extension manager for direct extension operations in tests.
     #[cfg(feature = "libsql")]
-    extension_manager: Option<Arc<ironclaw::extensions::ExtensionManager>>,
+    extension_manager: Option<Arc<t3claw::extensions::ExtensionManager>>,
     /// Skill registry (if skills are enabled) for direct inspection in tests.
     #[cfg(feature = "libsql")]
-    skill_registry: Option<Arc<std::sync::RwLock<ironclaw_skills::SkillRegistry>>>,
+    skill_registry: Option<Arc<std::sync::RwLock<t3claw_skills::SkillRegistry>>>,
     /// Session manager for direct session/thread access in tests.
     #[cfg(feature = "libsql")]
-    session_manager: Arc<ironclaw::agent::SessionManager>,
+    session_manager: Arc<t3claw::agent::SessionManager>,
     /// Secrets store for tests that need to read pre-seeded credentials
     /// (e.g. live tests that issue direct REST calls to the same backend
     /// the agent is talking to). Pulled from `AppComponents.secrets_store`
     /// during build.
     #[cfg(feature = "libsql")]
-    secrets_store: Option<Arc<dyn ironclaw::secrets::SecretsStore + Send + Sync>>,
+    secrets_store: Option<Arc<dyn t3claw::secrets::SecretsStore + Send + Sync>>,
     /// Owner ID used by the rig — needed by `get_secret` to look up
     /// per-user secret rows.
     #[cfg(feature = "libsql")]
@@ -248,7 +248,7 @@ impl TestRig {
     }
 
     /// Inject a raw `IncomingMessage` (for tests that need attachments, etc.).
-    pub async fn send_incoming(&self, msg: ironclaw::channels::IncomingMessage) {
+    pub async fn send_incoming(&self, msg: t3claw::channels::IncomingMessage) {
         self.channel.send_incoming(msg).await;
     }
 
@@ -261,13 +261,13 @@ impl TestRig {
     pub async fn send_gate_auth_resolution(
         &self,
         request_id: uuid::Uuid,
-        resolution: ironclaw::agent::submission::AuthGateResolution,
+        resolution: t3claw::agent::submission::AuthGateResolution,
     ) {
-        let submission = ironclaw::agent::submission::Submission::GateAuthResolution {
+        let submission = t3claw::agent::submission::Submission::GateAuthResolution {
             request_id,
             resolution,
         };
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             self.channel.channel_name(),
             self.channel.user_id(),
             "",
@@ -291,12 +291,12 @@ impl TestRig {
     /// a previously-emitted `StatusUpdate::ApprovalNeeded`. Tests usually
     /// pull it from `captured_status_events()` after waiting for the gate.
     pub async fn send_exec_approval(&self, request_id: uuid::Uuid, approved: bool, always: bool) {
-        let submission = ironclaw::agent::submission::Submission::ExecApproval {
+        let submission = t3claw::agent::submission::Submission::ExecApproval {
             request_id,
             approved,
             always,
         };
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             self.channel.channel_name(),
             self.channel.user_id(),
             "",
@@ -308,11 +308,11 @@ impl TestRig {
     /// Resolve an OAuth-style gate by submitting a typed
     /// `Submission::ExternalCallback`.
     pub async fn send_external_callback(&self, request_id: uuid::Uuid) {
-        let submission = ironclaw::agent::submission::Submission::ExternalCallback {
+        let submission = t3claw::agent::submission::Submission::ExternalCallback {
             request_id,
             payload: None,
         };
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             self.channel.channel_name(),
             self.channel.user_id(),
             "",
@@ -331,11 +331,11 @@ impl TestRig {
         request_id: uuid::Uuid,
         payload: serde_json::Value,
     ) {
-        let submission = ironclaw::agent::submission::Submission::ExternalCallback {
+        let submission = t3claw::agent::submission::Submission::ExternalCallback {
             request_id,
             payload: Some(payload),
         };
-        let msg = ironclaw::channels::IncomingMessage::new(
+        let msg = t3claw::channels::IncomingMessage::new(
             self.channel.channel_name(),
             self.channel.user_id(),
             "",
@@ -347,7 +347,7 @@ impl TestRig {
     /// Return all message lists that were sent to the LLM provider.
     ///
     /// Only available when the rig was built with a `TraceLlm` (i.e., via `.with_trace()`).
-    pub fn captured_llm_requests(&self) -> Vec<Vec<ironclaw_llm::ChatMessage>> {
+    pub fn captured_llm_requests(&self) -> Vec<Vec<t3claw_llm::ChatMessage>> {
         self.trace_llm
             .as_ref()
             .map(|t| t.captured_requests())
@@ -355,13 +355,13 @@ impl TestRig {
     }
 
     /// Return the extension manager for direct extension operations in tests.
-    pub fn extension_manager(&self) -> Option<&Arc<ironclaw::extensions::ExtensionManager>> {
+    pub fn extension_manager(&self) -> Option<&Arc<t3claw::extensions::ExtensionManager>> {
         self.extension_manager.as_ref()
     }
 
     /// Return the session manager for direct session/thread access in tests.
     #[cfg(feature = "libsql")]
-    pub fn session_manager(&self) -> &Arc<ironclaw::agent::SessionManager> {
+    pub fn session_manager(&self) -> &Arc<t3claw::agent::SessionManager> {
         &self.session_manager
     }
 
@@ -384,7 +384,7 @@ impl TestRig {
             Ok(decrypted) => Some(decrypted.expose().to_string()),
             Err(e) => {
                 // NotFound is expected for optional secrets — only log real errors
-                if !matches!(e, ironclaw::secrets::SecretError::NotFound(_)) {
+                if !matches!(e, t3claw::secrets::SecretError::NotFound(_)) {
                     eprintln!(
                         "[TestRig] get_secret('{name}') for owner '{}' failed: {e}",
                         self.owner_id
@@ -397,7 +397,7 @@ impl TestRig {
 
     /// Get the secrets store for direct credential manipulation.
     #[cfg(feature = "libsql")]
-    pub fn secrets_store(&self) -> Option<&Arc<dyn ironclaw::secrets::SecretsStore + Send + Sync>> {
+    pub fn secrets_store(&self) -> Option<&Arc<dyn t3claw::secrets::SecretsStore + Send + Sync>> {
         self.secrets_store.as_ref()
     }
 
@@ -668,7 +668,7 @@ impl TestRig {
             let completed = self.tool_calls_completed();
             let mut results = self.tool_results();
             for status in self.channel.captured_status_events() {
-                if let ironclaw::channels::StatusUpdate::ToolCompleted {
+                if let t3claw::channels::StatusUpdate::ToolCompleted {
                     name,
                     success: false,
                     error,
@@ -712,7 +712,7 @@ impl TestRig {
         let completed = self.tool_calls_completed();
         let mut results = self.tool_results();
         for status in self.channel.captured_status_events() {
-            if let ironclaw::channels::StatusUpdate::ToolCompleted {
+            if let t3claw::channels::StatusUpdate::ToolCompleted {
                 name,
                 success: false,
                 error,
@@ -798,12 +798,12 @@ pub struct TestRigBuilder {
     ///
     /// `None` (default) preserves the historical "no runtime-policy filter"
     /// path used by every existing test. `Some(p)` is always a value
-    /// produced by `ironclaw_runtime_policy::resolve(...)` — per the
-    /// `ironclaw_runtime_policy` CLAUDE.md guardrail, the resolver is the
+    /// produced by `t3claw_runtime_policy::resolve(...)` — per the
+    /// `t3claw_runtime_policy` CLAUDE.md guardrail, the resolver is the
     /// only sanctioned producer of `EffectiveRuntimePolicy`. Builders that
     /// take `(deployment, profile, disclosure)` route through
     /// `with_runtime_overrides` rather than constructing one inline.
-    runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+    runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
 }
 
 impl TestRigBuilder {
@@ -858,14 +858,14 @@ impl TestRigBuilder {
     /// disclosure)` triple should prefer `with_runtime_overrides`.
     pub fn with_runtime_policy(
         mut self,
-        policy: ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy,
+        policy: t3claw_host_api::runtime_policy::EffectiveRuntimePolicy,
     ) -> Self {
         self.runtime_policy = Some(policy);
         self
     }
 
     /// Convenience wrapper that resolves `(deployment, profile,
-    /// yolo_disclosure)` through `ironclaw_runtime_policy::resolve` and
+    /// yolo_disclosure)` through `t3claw_runtime_policy::resolve` and
     /// installs the result. `OrgPolicyConstraints::default()` is used; tests
     /// needing org ceilings or admin-approved enterprise yolo should
     /// construct the policy via `resolve(...)` directly and pass it through
@@ -875,17 +875,17 @@ impl TestRigBuilder {
     /// production resolver returns a typed error.
     pub fn with_runtime_overrides(
         mut self,
-        deployment: ironclaw_host_api::runtime_policy::DeploymentMode,
-        profile: ironclaw_host_api::runtime_policy::RuntimeProfile,
+        deployment: t3claw_host_api::runtime_policy::DeploymentMode,
+        profile: t3claw_host_api::runtime_policy::RuntimeProfile,
         yolo_disclosure: bool,
     ) -> Self {
-        let req = ironclaw_runtime_policy::ResolveRequest {
+        let req = t3claw_runtime_policy::ResolveRequest {
             deployment,
             requested_profile: profile,
-            org_policy: ironclaw_runtime_policy::OrgPolicyConstraints::default(),
+            org_policy: t3claw_runtime_policy::OrgPolicyConstraints::default(),
             yolo_disclosure_acknowledged: yolo_disclosure,
         };
-        let policy = ironclaw_runtime_policy::resolve(req)
+        let policy = t3claw_runtime_policy::resolve(req)
             .expect("with_runtime_overrides: resolver rejected combination");
         self.runtime_policy = Some(policy);
         self
@@ -906,7 +906,7 @@ impl TestRigBuilder {
     ///
     /// Live tests use this to pull just the credentials they need (e.g.
     /// `google_oauth_token`) out of the developer's real
-    /// `~/.ironclaw/ironclaw.db` so OAuth-backed flows work end-to-end —
+    /// `~/.t3claw/t3claw.db` so OAuth-backed flows work end-to-end —
     /// without cloning conversation history, workspace memory, or any
     /// secret the test didn't ask for. The destination DB starts empty;
     /// the listed rows are inserted under the test rig's owner user; any
@@ -1080,8 +1080,8 @@ impl TestRigBuilder {
     /// Requires the `libsql` feature for the embedded test database.
     #[cfg(feature = "libsql")]
     pub async fn build(self) -> TestRig {
-        use ironclaw::channels::ChannelManager;
-        use ironclaw::db::libsql::LibSqlBackend;
+        use t3claw::channels::ChannelManager;
+        use t3claw::db::libsql::LibSqlBackend;
 
         // Destructure self up front to avoid partial-move issues.
         let TestRigBuilder {
@@ -1130,13 +1130,13 @@ impl TestRigBuilder {
         // which silently disables `SecretsStore` and breaks every test
         // that needs OAuth/encrypted credentials. `with_database_and_handles()`
         // is the right pairing.
-        let db_handles = ironclaw::db::DatabaseHandles {
+        let db_handles = t3claw::db::DatabaseHandles {
             #[cfg(feature = "libsql")]
             libsql_db: Some(backend.shared_db()),
             #[cfg(feature = "postgres")]
             pg_pool: None,
         };
-        let db: Arc<dyn ironclaw::db::Database> = Arc::new(backend);
+        let db: Arc<dyn t3claw::db::Database> = Arc::new(backend);
 
         // 2. Build Config.
         let has_config_override = config_override.is_some();
@@ -1152,7 +1152,7 @@ impl TestRigBuilder {
         let _ = std::fs::create_dir_all(&installed_skills_dir);
         let mut config = if let Some(mut cfg) = config_override {
             // Override database to use temp libSQL, but preserve agent/llm settings.
-            cfg.database.backend = ironclaw::config::DatabaseBackend::LibSql;
+            cfg.database.backend = t3claw::config::DatabaseBackend::LibSql;
             cfg.database.libsql_path = Some(db_path);
             cfg.skills.local_dir = skills_dir.clone();
             cfg.skills.installed_dir = installed_skills_dir.clone();
@@ -1273,10 +1273,10 @@ impl TestRigBuilder {
 
         // Reset engine v2 global state so each test gets a clean engine instance.
         if components.config.agent.engine_v2 {
-            ironclaw::bridge::reset_engine_state().await;
+            t3claw::bridge::reset_engine_state().await;
         }
 
-        let scheduler_slot: ironclaw::tools::builtin::SchedulerSlot =
+        let scheduler_slot: t3claw::tools::builtin::SchedulerSlot =
             Arc::new(tokio::sync::RwLock::new(None));
 
         // Build HTTP interceptor once — shared by both AgentDeps and WASM tools.
@@ -1320,14 +1320,14 @@ impl TestRigBuilder {
 
             // Routine tools: create a RoutineEngine with the LLM and workspace.
             if let (Some(db_arc), Some(ws)) = (&components.db, &components.workspace) {
-                use ironclaw::agent::routine_engine::RoutineEngine;
-                use ironclaw::config::RoutineConfig;
+                use t3claw::agent::routine_engine::RoutineEngine;
+                use t3claw::config::RoutineConfig;
 
                 let routine_config = RoutineConfig::default();
                 let (notify_tx, _notify_rx) = tokio::sync::mpsc::channel(16);
                 let engine = Arc::new(RoutineEngine::new(
                     routine_config,
-                    ironclaw::tenant::SystemScope::new(Arc::clone(db_arc)),
+                    t3claw::tenant::SystemScope::new(Arc::clone(db_arc)),
                     components.llm.clone(),
                     Arc::clone(ws),
                     notify_tx,
@@ -1335,7 +1335,7 @@ impl TestRigBuilder {
                     None,
                     components.tools.clone(),
                     components.safety.clone(),
-                    ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+                    t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
                     None,
                 ));
                 components
@@ -1347,7 +1347,7 @@ impl TestRigBuilder {
             //
             // `AppBuilder::init_database()` re-resolves `config` from
             // DB/TOML/env, which clobbers `config.skills.local_dir` back
-            // to the default (`~/.ironclaw/skills/`). Any registry
+            // to the default (`~/.t3claw/skills/`). Any registry
             // `build_all()` already constructed therefore points at the
             // user's real skills dir, not the tempdir the test laid
             // down. Rebuild here from the in-scope `skills_dir` /
@@ -1357,11 +1357,11 @@ impl TestRigBuilder {
             if enable_skills {
                 components.config.skills.local_dir = skills_dir.clone();
                 components.config.skills.installed_dir = installed_skills_dir.clone();
-                let mut registry = ironclaw_skills::SkillRegistry::new(skills_dir.clone())
+                let mut registry = t3claw_skills::SkillRegistry::new(skills_dir.clone())
                     .with_installed_dir(installed_skills_dir.clone());
                 let _loaded = registry.discover_all().await;
                 let registry = Arc::new(std::sync::RwLock::new(registry));
-                let catalog = ironclaw_skills::catalog::shared_catalog();
+                let catalog = t3claw_skills::catalog::shared_catalog();
                 components
                     .tools
                     .register_skill_tools(Arc::clone(&registry), Arc::clone(&catalog));
@@ -1384,7 +1384,7 @@ impl TestRigBuilder {
 
             // Register WASM tools with the shared HTTP interceptor.
             if !wasm_tools.is_empty() {
-                use ironclaw::tools::wasm::{
+                use t3claw::tools::wasm::{
                     Capabilities, CapabilitiesFile, WasmRuntimeConfig, WasmToolRuntime,
                     WasmToolWrapper,
                 };
@@ -1444,7 +1444,7 @@ impl TestRigBuilder {
         let workspace_ref = components.workspace.clone();
         let ext_mgr_ref = components.extension_manager.clone();
         let skill_registry_ref = components.skill_registry.clone();
-        let session_manager_ref = Arc::new(ironclaw::agent::SessionManager::new());
+        let session_manager_ref = Arc::new(t3claw::agent::SessionManager::new());
 
         // Pre-seed credentials BEFORE the agent starts. This lets live
         // tests inject a fake `github_token` (or similar) so the kernel
@@ -1454,7 +1454,7 @@ impl TestRigBuilder {
         // just needs to exist under the test's owner_id.
         if !pre_seed_secrets.is_empty() {
             if let Some(ref secrets_store) = components.secrets_store {
-                use ironclaw::secrets::CreateSecretParams;
+                use t3claw::secrets::CreateSecretParams;
                 let owner_id = components.config.owner_id.clone();
                 for (name, value) in &pre_seed_secrets {
                     let params = CreateSecretParams::new(name.clone(), value.clone());
@@ -1462,7 +1462,7 @@ impl TestRigBuilder {
                     // should surface rather than triggering a blind create.
                     match secrets_store.get_decrypted(&owner_id, name).await {
                         Ok(_) => {} // already seeded — skip
-                        Err(ironclaw::secrets::SecretError::NotFound(_)) => {
+                        Err(t3claw::secrets::SecretError::NotFound(_)) => {
                             if let Err(e) = secrets_store.create(&owner_id, params).await {
                                 eprintln!(
                                     "[TestRig] WARNING: failed to pre-seed secret '{name}' for \
@@ -1513,10 +1513,10 @@ impl TestRigBuilder {
             http_interceptor,
             transcription: None,
             document_extraction: None,
-            sandbox_readiness: ironclaw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            sandbox_readiness: t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
             builder: None,
             llm_backend: "nearai".to_string(),
-            tenant_rates: std::sync::Arc::new(ironclaw::tenant::TenantRateRegistry::new(4, 3)),
+            tenant_rates: std::sync::Arc::new(t3claw::tenant::TenantRateRegistry::new(4, 3)),
             runtime_policy,
         };
 
@@ -1568,7 +1568,7 @@ impl TestRigBuilder {
 
         // 8. Create Agent.
         let routine_config = if enable_routines {
-            Some(ironclaw::config::RoutineConfig {
+            Some(t3claw::config::RoutineConfig {
                 enabled: true,
                 cron_check_interval_secs: 60,
                 max_concurrent_routines: 3,
@@ -1642,7 +1642,7 @@ impl TestRig {
 
     /// Get the workspace handle for direct memory operations.
     #[cfg(feature = "libsql")]
-    pub fn workspace(&self) -> Option<&Arc<ironclaw::workspace::Workspace>> {
+    pub fn workspace(&self) -> Option<&Arc<t3claw::workspace::Workspace>> {
         self.workspace.as_ref()
     }
 

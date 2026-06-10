@@ -17,7 +17,7 @@ dozen times. This skill kills both.
 
 The building blocks are routinely already present and easy to miss. Real
 example: `RebornProviderAdmin` (catalog list/set-active over `config.toml`) and
-`ironclaw_llm`'s `SwappableLlmProvider` + `LlmReloadHandle` (live provider
+`t3claw_llm`'s `SwappableLlmProvider` + `LlmReloadHandle` (live provider
 hot-swap, zero per-turn-loop change) both existed during the LLM-config work and
 were found *midway*, after plans assumed building them from scratch.
 
@@ -25,17 +25,17 @@ Run these before designing:
 
 ```bash
 # Existing facade methods + ports you'd extend (don't add a parallel trait)
-grep -rn "trait .*ProductFacade\|pub trait .*Service\b" crates/ironclaw_product_workflow/src
-grep -rn "async fn " crates/ironclaw_product_workflow/src/reborn_services.rs
+grep -rn "trait .*ProductFacade\|pub trait .*Service\b" crates/t3claw_product_workflow/src
+grep -rn "async fn " crates/t3claw_product_workflow/src/reborn_services.rs
 
 # Existing composition-side admin/service handles (often already do the read/write)
-grep -rln "RebornProviderAdmin\|Reborn.*Admin\|Reborn.*Facade\|ProductCommandService" crates/ironclaw_reborn_composition/src
+grep -rln "RebornProviderAdmin\|Reborn.*Admin\|Reborn.*Facade\|ProductCommandService" crates/t3claw_reborn_composition/src
 
 # Existing webui2 routes + handlers (mirror the pattern, don't invent a shape)
-grep -n "WEBUI_V2_PATTERN_\|fn .*_descriptor" crates/ironclaw_webui_v2/src/descriptors.rs
+grep -n "WEBUI_V2_PATTERN_\|fn .*_descriptor" crates/t3claw_webui_v2/src/descriptors.rs
 
 # Existing primitives in the extracted crates (config writers, swap/reload, secrets)
-grep -rn "Swappable\|Reload\|UpdateSession\|FileExt\|SecretStore" crates/ironclaw_llm/src crates/ironclaw_reborn_config/src crates/ironclaw_secrets/src
+grep -rn "Swappable\|Reload\|UpdateSession\|FileExt\|SecretStore" crates/t3claw_llm/src crates/t3claw_reborn_config/src crates/t3claw_secrets/src
 ```
 
 Read each module's `CLAUDE.md` (every crate has one; they list the seams and the
@@ -49,16 +49,16 @@ you write the service, not discovered while wiring. The canonical request flow:
 
 ```
 browser (webui_v2_static JS)
-  └ apiFetch → ironclaw_webui_v2 handler (descriptor + route)
-      └ Arc<dyn RebornServicesApi>  (ironclaw_product_workflow facade)
-          └ port trait → composition impl (ironclaw_reborn_composition)
+  └ apiFetch → t3claw_webui_v2 handler (descriptor + route)
+      └ Arc<dyn RebornServicesApi>  (t3claw_product_workflow facade)
+          └ port trait → composition impl (t3claw_reborn_composition)
               └ substrate handles (secret store, config files, reload handle)
 ```
 
 And the composition path that *supplies* that impl:
 
 ```
-ironclaw_reborn_cli serve.rs
+t3claw_reborn_cli serve.rs
   → build_runtime_input_with_options(boot) → RebornRuntimeInput (+ with_* builders)
   → build_reborn_runtime(input)            → RebornRuntime (factory.rs builds substrate)
   → build_webui_services(&runtime, ...)    → attaches facades (webui.rs)  ← attach your service here
@@ -77,18 +77,18 @@ For a feature with N endpoints, expect to touch (in dependency order):
 
 | Layer | Crate | What you add |
 |---|---|---|
-| Port | `ironclaw_product_workflow` | trait + DTOs + error type in `reborn_services/<feature>.rs`; re-export in `reborn_services.rs` + `lib.rs` |
-| Facade | `ironclaw_product_workflow` | `Option<Arc<dyn Port>>` field + `with_*` builder + N `RebornServicesApi` methods (give them **default "unavailable" bodies** so existing fakes/tests compile untouched) + an error mapper (port error → `RebornServicesError`, whose ctors are `pub(super)`) |
-| Impl | `ironclaw_reborn_composition` | the adapter (`mod <feature>.rs`, gated on the right feature, e.g. `root-llm-provider`); register in `lib.rs` |
-| HTTP | `ironclaw_webui_v2` | route constants + pattern + `*_descriptor()` (use `read_policy`/`mutation_policy`) + add to `webui_v2_routes()`; thin handler over `state.services()`; mount in `router.rs`; **update `tests/webui_v2_descriptors_contract.rs`** (it locks the table) |
-| Wiring | `ironclaw_reborn_composition` + `ironclaw_reborn_cli` | thread inputs through `RebornRuntimeInput`/`RebornRuntime`; attach in `build_webui_services`; pass from `serve.rs` |
-| Frontend | `ironclaw_webui_v2_static` | call endpoints via `apiFetch` in `pages/*/lib/*-api.js`; consume in hooks. No build step — `node --check <file>.js` to syntax-check |
+| Port | `t3claw_product_workflow` | trait + DTOs + error type in `reborn_services/<feature>.rs`; re-export in `reborn_services.rs` + `lib.rs` |
+| Facade | `t3claw_product_workflow` | `Option<Arc<dyn Port>>` field + `with_*` builder + N `RebornServicesApi` methods (give them **default "unavailable" bodies** so existing fakes/tests compile untouched) + an error mapper (port error → `RebornServicesError`, whose ctors are `pub(super)`) |
+| Impl | `t3claw_reborn_composition` | the adapter (`mod <feature>.rs`, gated on the right feature, e.g. `root-llm-provider`); register in `lib.rs` |
+| HTTP | `t3claw_webui_v2` | route constants + pattern + `*_descriptor()` (use `read_policy`/`mutation_policy`) + add to `webui_v2_routes()`; thin handler over `state.services()`; mount in `router.rs`; **update `tests/webui_v2_descriptors_contract.rs`** (it locks the table) |
+| Wiring | `t3claw_reborn_composition` + `t3claw_reborn_cli` | thread inputs through `RebornRuntimeInput`/`RebornRuntime`; attach in `build_webui_services`; pass from `serve.rs` |
+| Frontend | `t3claw_webui_v2_static` | call endpoints via `apiFetch` in `pages/*/lib/*-api.js`; consume in hooks. No build step — `node --check <file>.js` to syntax-check |
 
 ## Boundary rules (the guardrails that will reject your PR)
 
-- `ironclaw_reborn_composition` must **not** depend on the root `ironclaw` crate
-  or `src/` — only extracted crates (`ironclaw_llm`, `ironclaw_secrets`,
-  `ironclaw_auth`, …). v1 code under `src/channels/web/` is reference-only.
+- `t3claw_reborn_composition` must **not** depend on the root `t3claw` crate
+  or `src/` — only extracted crates (`t3claw_llm`, `t3claw_secrets`,
+  `t3claw_auth`, …). v1 code under `src/channels/web/` is reference-only.
 - webui_v2 handlers consume **only** `RebornServicesApi`. No dispatcher,
   extensions, host_runtime, DB, etc.
 - Keep substrate handles (secret store, raw stores) **private** to factories;
@@ -111,10 +111,10 @@ they trade with eyes open.
 ## Verify per crate (don't wait for the whole graph)
 
 ```bash
-cargo build -p ironclaw_product_workflow --all-features
-cargo build -p ironclaw_webui_v2 --features webui-v2-beta
-cargo build -p ironclaw_reborn_composition --features "root-llm-provider webui-v2-beta libsql"
-cargo build -p ironclaw_reborn_cli          # compiles the full serve graph
+cargo build -p t3claw_product_workflow --all-features
+cargo build -p t3claw_webui_v2 --features webui-v2-beta
+cargo build -p t3claw_reborn_composition --features "root-llm-provider webui-v2-beta libsql"
+cargo build -p t3claw_reborn_cli          # compiles the full serve graph
 cargo clippy -p <crate> ... --tests          # gate per crate, not at the end
 node --check path/to/changed.js              # frontend syntax (no build step)
 ```

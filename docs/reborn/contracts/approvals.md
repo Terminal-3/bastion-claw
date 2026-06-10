@@ -1,15 +1,15 @@
-# IronClaw Reborn approval resolution contract
+# T3Claw Reborn approval resolution contract
 
 **Date:** 2026-04-25
 **Status:** V1 contract slice
-**Crate:** `crates/ironclaw_approvals`
+**Crate:** `crates/t3claw_approvals`
 **Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/capability-access.md`, `docs/reborn/contracts/run-state.md`, `docs/reborn/contracts/communication-delivery-resolution.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_approvals` resolves durable approval requests into bounded authorization leases.
+`t3claw_approvals` resolves durable approval requests into bounded authorization leases.
 
 It is a host control-plane service. It does not prompt users, render UI, execute capabilities, reserve resources, or route runtime work.
 
@@ -44,7 +44,7 @@ CapabilityHost::resume_json
 
 ## 2. Approval request status transitions
 
-Approval records live in `ironclaw_run_state` because they explain why an invocation is `BlockedApproval`.
+Approval records live in `t3claw_run_state` because they explain why an invocation is `BlockedApproval`.
 
 The V1 status model is:
 
@@ -95,7 +95,7 @@ If an authorizer returns `Decision::RequireApproval` with no fingerprint, `Capab
 
 ## 4. Capability leases
 
-Approved dispatch requests issue `CapabilityLease` values in `ironclaw_authorization`:
+Approved dispatch requests issue `CapabilityLease` values in `t3claw_authorization`:
 
 ```rust
 pub struct CapabilityLease {

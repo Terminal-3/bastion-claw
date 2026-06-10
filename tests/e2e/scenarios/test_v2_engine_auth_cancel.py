@@ -26,9 +26,9 @@ from helpers import api_get, api_post, AUTH_TOKEN, wait_for_ready
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-_CANCEL_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-cancel-e2e-")
-_CANCEL_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-cancel-e2e-home-")
-_CANCEL_PENDING_GATES_PATH = Path(_CANCEL_HOME_TMPDIR.name) / ".ironclaw" / "pending-gates.json"
+_CANCEL_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-cancel-e2e-")
+_CANCEL_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-cancel-e2e-home-")
+_CANCEL_PENDING_GATES_PATH = Path(_CANCEL_HOME_TMPDIR.name) / ".t3claw" / "pending-gates.json"
 
 
 def _forward_coverage_env(env: dict):
@@ -112,7 +112,7 @@ async def cancel_mock_api():
 
 
 @pytest.fixture(scope="module")
-async def cancel_server(ironclaw_binary, mock_llm_server, cancel_mock_api):
+async def cancel_server(t3claw_binary, mock_llm_server, cancel_mock_api):
     """Dedicated server for cancel tests — isolated from main auth tests."""
     mock_api_url = cancel_mock_api["url"]
     mock_api_host = mock_api_url.replace("http://", "")
@@ -124,7 +124,7 @@ async def cancel_server(ironclaw_binary, mock_llm_server, cancel_mock_api):
         )
 
     home_dir = _CANCEL_HOME_TMPDIR.name
-    skills_dir = os.path.join(home_dir, ".ironclaw", "skills")
+    skills_dir = os.path.join(home_dir, ".t3claw", "skills")
     os.makedirs(skills_dir, exist_ok=True)
     _write_skill(skills_dir, mock_api_host)
 
@@ -141,8 +141,8 @@ async def cancel_server(ironclaw_binary, mock_llm_server, cancel_mock_api):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=debug",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
         "AGENT_AUTO_APPROVE_TOOLS": "true",
@@ -153,7 +153,7 @@ async def cancel_server(ironclaw_binary, mock_llm_server, cancel_mock_api):
         "GATEWAY_PORT": str(gw_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": "e2e-cancel-tester",
-        "IRONCLAW_OWNER_ID": "e2e-cancel-tester",
+        "T3CLAW_OWNER_ID": "e2e-cancel-tester",
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
@@ -175,7 +175,7 @@ async def cancel_server(ironclaw_binary, mock_llm_server, cancel_mock_api):
     _forward_coverage_env(env)
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

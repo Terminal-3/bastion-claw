@@ -9,11 +9,11 @@ from helpers import AUTH_TOKEN
 
 
 @pytest.fixture()
-async def responses_user(ironclaw_server):
+async def responses_user(t3claw_server):
     """Create a test user for Responses API tests, yield (base_url, user_token), clean up."""
     email = f"resp-{uuid.uuid4().hex[:8]}@example.com"
     async with httpx.AsyncClient(
-        base_url=ironclaw_server,
+        base_url=t3claw_server,
         headers={"Authorization": f"Bearer {AUTH_TOKEN}", "Content-Type": "application/json"},
         timeout=10,
     ) as admin:
@@ -30,14 +30,14 @@ async def responses_user(ironclaw_server):
         user_id = data["id"]
         user_token = data["token"]
 
-        yield ironclaw_server, user_token
+        yield t3claw_server, user_token
 
         await admin.delete(f"/api/admin/users/{user_id}")
 
 
 @pytest.fixture()
 async def responses_client(responses_user):
-    """HTTP client pointed at the test IronClaw Responses API."""
+    """HTTP client pointed at the test T3Claw Responses API."""
     base_url, user_token = responses_user
     async with httpx.AsyncClient(
         base_url=base_url,
@@ -173,10 +173,10 @@ async def test_context_injection_rejection(responses_client):
 # ---------------------------------------------------------------
 
 
-async def test_error_no_auth(ironclaw_server):
+async def test_error_no_auth(t3claw_server):
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(
-            f"{ironclaw_server}/v1/responses",
+            f"{t3claw_server}/v1/responses",
             headers={"Content-Type": "application/json"},
             json={"input": "hello"},
         )

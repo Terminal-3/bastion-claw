@@ -24,17 +24,17 @@ GitHub 扩展允许智能体与 GitHub 仓库、议题、拉取请求等交互�
 在终端中运行以下命令安装 GitHub 扩展：
 
 ```bash
-ironclaw registry install github
+t3claw registry install github
 ```
 
 </Step>
 
 <Step title="配置 API 密钥">
 
-安装扩展后，需要在 IronClaw 中配置您的 GitHub API 密钥。运行：
+安装扩展后，需要在 T3Claw 中配置您的 GitHub API 密钥。运行：
 
 ```bash
-ironclaw tool auth github
+t3claw tool auth github
 ```
 
 然后按照提示输入您的 API 密钥。
@@ -91,7 +91,7 @@ ironclaw tool auth github
 获取令牌后，运行以下命令认证 GitHub 扩展：
 
 ```bash
-ironclaw tool auth github
+t3claw tool auth github
 ```
 
 然后按照提示输入刚生成的令牌。

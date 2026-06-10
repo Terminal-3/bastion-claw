@@ -3,15 +3,15 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_product_adapters::{
+use reborn_support::{
+    delivery::RecordingOutboundDeliverySink, test_adapter::RebornTestProductAdapter,
+};
+use t3claw_product_adapters::{
     DeliveryStatus, ExternalConversationRef, FakeProtocolHttpEgress, FinalReplyView,
     ProductAdapter, ProductAdapterError, ProductOutboundEnvelope, ProductOutboundPayload,
     ProductOutboundTarget, ProductRenderOutcome, ProjectionCursor,
 };
-use ironclaw_turns::{ReplyTargetBindingRef, TurnRunId};
-use reborn_support::{
-    delivery::RecordingOutboundDeliverySink, test_adapter::RebornTestProductAdapter,
-};
+use t3claw_turns::{ReplyTargetBindingRef, TurnRunId};
 
 #[tokio::test]
 async fn reborn_outbound_reply_target_scope_isolation_parity() {

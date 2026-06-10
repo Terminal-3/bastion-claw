@@ -45,7 +45,7 @@ use axum::{
     extract::{Path, State},
     http::StatusCode,
 };
-use ironclaw_common::ExtensionName;
+use t3claw_common::ExtensionName;
 
 use crate::channels::web::auth::{AdminUser, AuthenticatedUser};
 use crate::channels::web::platform::engine_dispatch::{
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn parse_channel_rejects_too_long_with_bad_request() {
-        let long = "a".repeat(ironclaw_common::MAX_NAME_LEN + 1);
+        let long = "a".repeat(t3claw_common::MAX_NAME_LEN + 1);
         let (status, _msg) = parse_channel(long).expect_err("over length must fail");
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }

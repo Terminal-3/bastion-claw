@@ -20,8 +20,8 @@ Plus: introduce the `CapabilityResultStore` trait (does not exist today). Introd
 
 | # | Decision | Rationale anchor |
 |---|---|---|
-| 1 | All four stores + ledger + log live in `crates/ironclaw_reborn_event_store/`. No new `ironclaw_reborn_persistence` crate. | Reviewer 1 V1 — every new active Reborn crate needs a `BoundaryRule`; pivoting to `event_store` reuses the existing rule. `events.md` §2 makes it canonical owner. |
-| 2 | `CapabilityResultStore` trait lives in `ironclaw_reborn_event_store`, NOT `ironclaw_loop_support`. | Reviewer 1 R2 — `loop_support` is adapter glue, not persistence. |
+| 1 | All four stores + ledger + log live in `crates/t3claw_reborn_event_store/`. No new `t3claw_reborn_persistence` crate. | Reviewer 1 V1 — every new active Reborn crate needs a `BoundaryRule`; pivoting to `event_store` reuses the existing rule. `events.md` §2 makes it canonical owner. |
+| 2 | `CapabilityResultStore` trait lives in `t3claw_reborn_event_store`, NOT `t3claw_loop_support`. | Reviewer 1 R2 — `loop_support` is adapter glue, not persistence. |
 | 3 | Goal + tombstone stores use `ScopedFilesystem` (typed `FilesystemSubagentGoalStore` + new `FilesystemSubagentTombstoneStore`). | `.claude/rules/database.md` direction-of-travel for file-shaped, point-key/value access. Goal store already implements this. |
 | 4 | Gate resolution + capability result store + settlement event log + idempotency ledger use **typed libSQL/PostgreSQL repositories**, NOT ScopedFilesystem. | `_contract-freeze-index.md` §2 storage model: high write rate, transactional multi-table consistency, scoped index scans. |
 | 5 | All durable tables carry `tenant_id TEXT NOT NULL`, `user_id TEXT NOT NULL`, `agent_id TEXT NULL`. Scoped lookups are guaranteed by a scope-prefixed index on each table (e.g. `idx_*_scope` on `(tenant_id, user_id, agent_id, ...)`). Primary keys remain shape-appropriate per table (e.g. `(gate_ref, child_run_id)`, `(result_ref)`) — scope columns are always PRESENT and ALWAYS REACHED via a scoped index, but need not lead every PK. | `_contract-freeze-index.md` §2 + §8 — cross-tenant scan isolation; `TurnScope` projection parity. |
@@ -65,7 +65,7 @@ The rest of this document fills in mechanics for each store.
 
 ### 1.1 Current in-memory shape
 
-`BoundedSubagentGateResolutionStore` (defined in `crates/ironclaw_reborn/src/subagent/gate_resolution.rs`) wraps a `parking_lot::Mutex<GateResolutionInner>`. The three denormalized maps inside `GateResolutionInner` are:
+`BoundedSubagentGateResolutionStore` (defined in `crates/t3claw_reborn/src/subagent/gate_resolution.rs`) wraps a `parking_lot::Mutex<GateResolutionInner>`. The three denormalized maps inside `GateResolutionInner` are:
 
 | Field | Key type | Value type | Purpose |
 |---|---|---|---|
@@ -75,26 +75,26 @@ The rest of this document fills in mechanics for each store.
 
 The `total_states: usize` field is a cached count across all gate keys (O(1) capacity enforcement at `MAX_GATE_RECORDS = 4096`). It is not a fourth map. In the durable backend (§1.3 / §1.4) this O(1) accounting is preserved via a sidecar **`subagent_gate_capacity_counter`** table — one row per `(tenant_id, user_id, agent_id)` scope — updated transactionally with every INSERT / DELETE in the primary tables. The counter is the source of truth for cap-check on the spawn hot path; `SELECT COUNT(*)` on the primary table is NOT used.
 
-`AwaitedChildSetRecord` (in `crates/ironclaw_loop_support/src/subagent_spawn_port.rs`) carries the key scope fields: `child_scope: TurnScope`, `parent_run_context: LoopRunContext`. `TurnScope` (in `crates/ironclaw_turns/src/scope.rs`) contains `tenant_id: TenantId`, `agent_id: Option<AgentId>`, `project_id: Option<ProjectId>`, and `thread_id: ThreadId`. The owning `user_id` is carried through `AwaitedChildTerminalEvent.owner_user_id: Option<UserId>` and indirectly through `TurnScope::thread_owner`.
+`AwaitedChildSetRecord` (in `crates/t3claw_loop_support/src/subagent_spawn_port.rs`) carries the key scope fields: `child_scope: TurnScope`, `parent_run_context: LoopRunContext`. `TurnScope` (in `crates/t3claw_turns/src/scope.rs`) contains `tenant_id: TenantId`, `agent_id: Option<AgentId>`, `project_id: Option<ProjectId>`, and `thread_id: ThreadId`. The owning `user_id` is carried through `AwaitedChildTerminalEvent.owner_user_id: Option<UserId>` and indirectly through `TurnScope::thread_owner`.
 
 First-writer-wins semantics are enforced at `record_awaited_child` (dedup by `gate_ref + child_run_id` before insert) and at `record_child_terminal` (skips re-recording if `terminal_status.is_some()`). The durable backend must replicate this with `INSERT OR IGNORE` / `ON CONFLICT DO NOTHING`.
 
 ### 1.2 Backend choice + rationale
 
-**Choice: typed repository (SQL) inside `crates/ironclaw_reborn_event_store/`.**
+**Choice: typed repository (SQL) inside `crates/t3claw_reborn_event_store/`.**
 
 Rationale against `ScopedFilesystem`:
 
 - `_contract-freeze-index.md` §2 — "Storage model: hybrid: file-shaped content uses filesystem surfaces; **structured/query-heavy/security/control-plane state uses typed repositories**." Gate resolution is control-plane state: it gates parent-loop resumption and participates in descent-reservation accounting. It requires atomic cross-map consistency (all three maps are updated under one `parking_lot::Mutex` lock today), not sequential file writes.
 - `storage-placement.md` §5.3 — "Structured control-plane state: source of truth is a typed repository owned by the domain; optional file-shaped projections may exist for diagnostics." Gate records are not file-shaped documents; they carry structured foreign-key relationships to `run_id` and `gate_ref`, need index-backed scoped queries (`tenant_id`, `child_run_id`, `gate_ref`), and need transactional multi-row upserts to preserve `INSERT OR IGNORE` first-writer-wins semantics.
-- `.claude/rules/database.md` direction — "New persistence features go on `ScopedFilesystem`" applies to the legacy `src/db/` dissolution path. That rules file is scoped to `src/db/**`, `src/history/**`, `migrations/**`. The Reborn crate ecosystem under `crates/` is not in that scope. For Reborn persistence `ironclaw_reborn_event_store` is the established canonical owner (per `events.md` §2 and `crates/ironclaw_reborn_event_store/src/lib.rs` module doc). WU-C plan also explicitly designates `ironclaw_reborn_event_store` as the owner after ruling out both `ironclaw_reborn_persistence` (no boundary rule) and filesystem-only models.
+- `.claude/rules/database.md` direction — "New persistence features go on `ScopedFilesystem`" applies to the legacy `src/db/` dissolution path. That rules file is scoped to `src/db/**`, `src/history/**`, `migrations/**`. The Reborn crate ecosystem under `crates/` is not in that scope. For Reborn persistence `t3claw_reborn_event_store` is the established canonical owner (per `events.md` §2 and `crates/t3claw_reborn_event_store/src/lib.rs` module doc). WU-C plan also explicitly designates `t3claw_reborn_event_store` as the owner after ruling out both `t3claw_reborn_persistence` (no boundary rule) and filesystem-only models.
 - `ScopedFilesystem` cannot atomically update three logically related maps in a single transaction. The claim-then-deliver lifecycle across `by_gate`, `deliverable_by_child`, and `gates_by_child` must be atomic under restart recovery — a file-per-key approach cannot provide this.
 
 **File locations (typed-repo path):**
 
-- `crates/ironclaw_reborn_event_store/src/libsql/gate_resolution.rs` — libSQL repository
-- `crates/ironclaw_reborn_event_store/src/postgres/gate_resolution.rs` — PostgreSQL repository
-- The repository trait (`DurableSubagentGateResolutionStore`) lives in `crates/ironclaw_reborn_event_store/src/lib.rs` alongside the existing `DurableEventLog` / `DurableAuditLog` surface.
+- `crates/t3claw_reborn_event_store/src/libsql/gate_resolution.rs` — libSQL repository
+- `crates/t3claw_reborn_event_store/src/postgres/gate_resolution.rs` — PostgreSQL repository
+- The repository trait (`DurableSubagentGateResolutionStore`) lives in `crates/t3claw_reborn_event_store/src/lib.rs` alongside the existing `DurableEventLog` / `DurableAuditLog` surface.
 
 ### 1.3 libSQL schema
 
@@ -288,7 +288,7 @@ All inserts use `ON CONFLICT DO NOTHING`.
 
 ### 1.5 Settlement event log
 
-The `SubagentRestartReconciler` (currently a stub enum member in `crates/ironclaw_reborn/src/production_readiness.rs` under `RebornLoopProductionComponent::SubagentRestartReconciler`) needs a replay log to reconstruct settled terminal states after a process restart. This table records every terminal settlement event so the reconciler can re-drive delivery for any gate not yet marked `delivered_to_parent = true`.
+The `SubagentRestartReconciler` (currently a stub enum member in `crates/t3claw_reborn/src/production_readiness.rs` under `RebornLoopProductionComponent::SubagentRestartReconciler`) needs a replay log to reconstruct settled terminal states after a process restart. This table records every terminal settlement event so the reconciler can re-drive delivery for any gate not yet marked `delivered_to_parent = true`.
 
 **libSQL:**
 
@@ -400,7 +400,7 @@ COMMIT;
 
 **Bucketed counter under libSQL.** Use `BEGIN IMMEDIATE` for transaction-level serialization. Drift bound is 0 because the entire counter table is logically locked during the transaction. Throughput per scope is correspondingly lower; libSQL deployments are single-node so this is acceptable.
 
-**Why bucketed.** A mega-tenant running 10k+ concurrent spawns under one scope would otherwise serialize on a single counter row. With K=16 buckets, write contention drops by 16× — practical throughput per scope rises from ~100/sec to ~1600/sec on PostgreSQL. Cross-bucket reads (the SUM) are cheap because the partial index `idx_sgcc_scope` covers them. K is the `CAPACITY_COUNTER_BUCKETS` constant in `ironclaw_reborn_event_store`, default 16, operator-tunable per deployment via `RebornEventStoreConfig`.
+**Why bucketed.** A mega-tenant running 10k+ concurrent spawns under one scope would otherwise serialize on a single counter row. With K=16 buckets, write contention drops by 16× — practical throughput per scope rises from ~100/sec to ~1600/sec on PostgreSQL. Cross-bucket reads (the SUM) are cheap because the partial index `idx_sgcc_scope` covers them. K is the `CAPACITY_COUNTER_BUCKETS` constant in `t3claw_reborn_event_store`, default 16, operator-tunable per deployment via `RebornEventStoreConfig`.
 
 ```sql
 -- Settlement path (record_child_terminal equivalent):
@@ -498,7 +498,7 @@ The delete path's GROUP BY scan is bounded by rows under one `gate_ref` (typical
   - *Size*: storing as JSON/JSONB blob sidesteps schema normalization but blocks queries against context fields. If the reconciler ever needs to query by `parent_run_context.scope.agent_id`, those columns must be promoted to first-class SQL columns. For now, top-level indexed columns (`tenant_id`, `user_id`, `agent_id`, `parent_run_id`) cover the scoped-scan needs.
 
   - *Sensitivity*: WU-C MUST audit `LoopRunContext` fields before implementation and confirm none of them carry credentials, API keys, LLM provider tokens, or other sensitive material. If any sensitive field is found, the write-site MUST strip it before serialization. If no sensitive field exists, WU-C MUST add a compile-time lint or test asserting `LoopRunContext` remains credential-free (any future field addition must re-verify). Persisting plaintext credentials in a durable, replicated table is unacceptable. This is a closing-checklist gate.
-- **`user_id` derivation.** `TurnScope` does not carry an explicit `user_id` directly; it surfaces the owner through `TurnThreadOwner::ExplicitUser.owner_user_id` or falls back to the system sentinel. The durable schema uses `user_id TEXT NOT NULL` — the insert path resolves `TurnScope::explicit_owner_user_id()` and writes the sentinel (`ironclaw_host_api::SYSTEM_RESERVED_ID`) when the owner is `ActorFallback` or `Ownerless`.
+- **`user_id` derivation.** `TurnScope` does not carry an explicit `user_id` directly; it surfaces the owner through `TurnThreadOwner::ExplicitUser.owner_user_id` or falls back to the system sentinel. The durable schema uses `user_id TEXT NOT NULL` — the insert path resolves `TurnScope::explicit_owner_user_id()` and writes the sentinel (`t3claw_host_api::SYSTEM_RESERVED_ID`) when the owner is `ActorFallback` or `Ownerless`.
 - **Settlement log deduplication (resolved).** The settlement log is append-only. Duplicate rows on the same `(gate_ref, child_run_id, terminal_kind)` are *possible* under replay-storm conditions but are **benign**: the idempotency ledger's UNIQUE constraint on `(run_id, child_run_id, terminal_kind)` (§5.4 / §5.5) ensures at most one pencil-receipt insert succeeds; the gate-store `redeliver_settled_child` is idempotent on its own primary key; the seal UPDATE is row-level idempotent (`delivered_at IS NULL` guard). Phase 0's LEFT JOIN against the ledger filters out already-sealed rows so duplicate log entries that map to a sealed ledger row are never re-processed. There is no need for a `MIN(id)` ordering choice or a settlement-log UNIQUE constraint at this layer. A future log-rotation / TTL job MAY de-duplicate physically for storage hygiene but that is operational, not correctness-load-bearing.
 - **`deliverable_by_child` as queue table vs. computed view.** Queue table matches in-memory semantics exactly but risks queue/primary-table skew on partial failure. Computed view is always consistent but adds a join on every claim call. Decision recorded in WU-C PR description; recommendation: queue table (matches the lock-free O(1) in-memory contract).
 - **Capacity cap (D6-A + E.A).** `MAX_GATE_RECORDS = 4096` per scope is enforced via the `subagent_gate_capacity_counter` table, **sharded into `CAPACITY_COUNTER_BUCKETS = 16` rows per `(tenant_id, user_id, agent_id)` scope** (operator-tunable per deployment). Spawn picks a bucket via `hash(child_run_id) % K` and increments only that bucket's row. Cap check reads `SUM(undelivered) FROM counter WHERE scope` — cheap with the partial index. This sharding lifts the per-scope spawn throughput ceiling from ~100/sec (single-row lock contention) to ~1600/sec on PostgreSQL at K=16; libSQL deployments retain serialized `BEGIN IMMEDIATE` semantics regardless of K. Drift bound under PostgreSQL with concurrent fan-out is `K - 1` rows over cap (15 at K=16) — bounded and well below the cap itself. The bucket-of-record is stored on `subagent_gate_awaited_children.counter_bucket` at INSERT time so cleanup + delivery paths decrement the correct bucket without rehashing. K is a one-line config knob; raising to K=64 doubles throughput at the cost of slightly more bucket scan on the cap-check SUM (still well under 1 ms). This design scales to mega-tenant deployments (10k+ concurrent spawns under one scope) without falling back to soft caps or background admission control.
@@ -510,9 +510,9 @@ The delete path's GROUP BY scan is bounded by rows under one `gate_ref` (typical
 
 ### 2.1 Current in-memory shape
 
-**Symbol:** `InMemoryBoundedSubagentGoalStore` (`crates/ironclaw_reborn/src/subagent/goal_store.rs`).
+**Symbol:** `InMemoryBoundedSubagentGoalStore` (`crates/t3claw_reborn/src/subagent/goal_store.rs`).
 
-**Trait:** `SubagentGoalStore` (three async methods: `put_goal`, `get_goal`, `delete_goal`). Also implements `ironclaw_loop_support::SubagentSpawnGoalStore` (two-method subset: `put_goal`, `delete_goal`). The spawn port calls through the narrower trait; the reconciler will call through the full trait.
+**Trait:** `SubagentGoalStore` (three async methods: `put_goal`, `get_goal`, `delete_goal`). Also implements `t3claw_loop_support::SubagentSpawnGoalStore` (two-method subset: `put_goal`, `delete_goal`). The spawn port calls through the narrower trait; the reconciler will call through the full trait.
 
 **Key shape:** `(scope: &TurnScope, run_id: TurnRunId)`. `TurnScope` carries `tenant_id` (always present), `agent_id` (nullable), `project_id` (nullable), and `thread_id` (always present).
 
@@ -520,7 +520,7 @@ The delete path's GROUP BY scan is bounded by rows under one `gate_ref` (typical
 
 **Internal data structure:** `GoalStoreInner { goals: HashMap<GoalKey, SubagentGoal>, insertion_order: VecDeque<GoalKey> }` behind a `std::sync::Mutex`. Bounded at `MAX_GOAL_ENTRIES = 4096`. Eviction: LRU-by-insertion. Write semantics: `DuplicateKey` error on second `put_goal` for the same `(scope, run_id)` — first-writer-wins.
 
-**Existing production path:** `FilesystemSubagentGoalStore<F>` already exists in the same file, behind `#[cfg(feature = "filesystem-goal-store")]`. Each goal is a JSON file at a `ScopedPath` under `/turns/subagent-goals/`. Composition (`crates/ironclaw_reborn_composition/src/runtime.rs`) already selects `FilesystemSubagentGoalStore` when `libsql` or `postgres` feature is enabled. **The goal store already has a durable production backend; WU-C must document the schema and verify the production-readiness wiring is marked correctly.**
+**Existing production path:** `FilesystemSubagentGoalStore<F>` already exists in the same file, behind `#[cfg(feature = "filesystem-goal-store")]`. Each goal is a JSON file at a `ScopedPath` under `/turns/subagent-goals/`. Composition (`crates/t3claw_reborn_composition/src/runtime.rs`) already selects `FilesystemSubagentGoalStore` when `libsql` or `postgres` feature is enabled. **The goal store already has a durable production backend; WU-C must document the schema and verify the production-readiness wiring is marked correctly.**
 
 ### 2.2 Backend choice + rationale
 
@@ -530,7 +530,7 @@ The delete path's GROUP BY scan is bounded by rows under one `gate_ref` (typical
 - Each goal is an independent JSON document addressed by a unique `(scope, run_id)` path — file-shaped, key-value access.
 - No cross-row queries, joins, or aggregations.
 - `ScopedFilesystem` with a `LibSqlRootFilesystem` or `PostgresRootFilesystem` backend gives both durable backends through one path without a new SQL schema.
-- `ironclaw_filesystem/CLAUDE.md` invariant 7 satisfied: scope keys appear in the path prefix.
+- `t3claw_filesystem/CLAUDE.md` invariant 7 satisfied: scope keys appear in the path prefix.
 
 A typed SQL repository would be wrong: this is not query-heavy structured state.
 
@@ -569,7 +569,7 @@ If `list_dir` on `/turns/subagent-goals/agents/<agent_id>/` is ever needed for r
 
 ### 3.1 Current in-memory shape
 
-**Symbol:** `BoundedSubagentResultTombstoneStore` (`crates/ironclaw_reborn/src/subagent/tombstone_store.rs`).
+**Symbol:** `BoundedSubagentResultTombstoneStore` (`crates/t3claw_reborn/src/subagent/tombstone_store.rs`).
 
 **Trait:** `SubagentResultTombstoneStore` — two async methods:
 - `write_tombstone(&self, tombstone: SubagentResultTombstone) -> Result<(), TombstoneStoreError>`
@@ -683,7 +683,7 @@ The tombstone store and the idempotency ledger (§5) are **distinct concerns at 
 
 **First-writer-wins correction:** The in-memory `BoundedSubagentResultTombstoneStore::write_tombstone` is currently last-writer-wins (calls `HashMap::insert` unconditionally). The durable `FilesystemSubagentTombstoneStore` uses `CasExpectation::Absent` (first-writer-wins). To keep contract uniform: the in-memory store must be corrected to return `Ok(())` on duplicate key without overwriting. Behavioral correction, same PR as durable wire-up. Same change cited in WU-A plan Part 1 soft corrections.
 
-WU-C MUST add the test `write_tombstone_preserves_first_writer_when_second_write_has_different_disposition` to `crates/ironclaw_reborn/src/subagent/tombstone_store.rs` tests module. The test:
+WU-C MUST add the test `write_tombstone_preserves_first_writer_when_second_write_has_different_disposition` to `crates/t3claw_reborn/src/subagent/tombstone_store.rs` tests module. The test:
 1. Writes tombstone A (`terminal_status = Cancelled`) for some `child_run_id`.
 2. Writes tombstone B (`terminal_status = Completed`) for the same `child_run_id` — must return `Ok(())` (idempotent).
 3. Asserts `read_tombstone` returns tombstone A (first-writer-wins, not B).
@@ -707,13 +707,13 @@ The existing `tombstone_store_is_idempotent_by_child_run` test writes identical 
 A capability result flows through four distinct layers before it rests in memory.
 
 **Layer 1 — `CapabilityResultWrite` assembled at the call site.**
-When a capability finishes, the executor packages the result into a `CapabilityResultWrite<'_>` value (`crates/ironclaw_loop_support/src/capability_port.rs`). The struct carries: `run_context: &LoopRunContext`, `input_ref: &CapabilityInputRef`, `invocation_id: InvocationId`, `capability_id: &CapabilityId`, `output: serde_json::Value`, and `display_preview: Option<CapabilityDisplayOutputPreview>`.
+When a capability finishes, the executor packages the result into a `CapabilityResultWrite<'_>` value (`crates/t3claw_loop_support/src/capability_port.rs`). The struct carries: `run_context: &LoopRunContext`, `input_ref: &CapabilityInputRef`, `invocation_id: InvocationId`, `capability_id: &CapabilityId`, `output: serde_json::Value`, and `display_preview: Option<CapabilityDisplayOutputPreview>`.
 
 **Layer 2 — `LoopCapabilityResultWriter` trait routes the write.**
-The trait (also in `crates/ironclaw_loop_support/src/capability_port.rs`) declares three methods: `write_capability_result`, `update_capability_result`, `delete_capability_result`. WU-A widened `write_capability_result`'s return from `Result<LoopResultRef, AgentLoopHostError>` to `Result<(LoopResultRef, u64), AgentLoopHostError>` so the already-computed `byte_len` surfaces to the caller without re-serializing.
+The trait (also in `crates/t3claw_loop_support/src/capability_port.rs`) declares three methods: `write_capability_result`, `update_capability_result`, `delete_capability_result`. WU-A widened `write_capability_result`'s return from `Result<LoopResultRef, AgentLoopHostError>` to `Result<(LoopResultRef, u64), AgentLoopHostError>` so the already-computed `byte_len` surfaces to the caller without re-serializing.
 
 **Layer 3 — `ProductLiveCapabilityIo` is the production-composition impl.**
-Found in `crates/ironclaw_reborn_composition/src/product_live_adapters.rs`. Its `write_capability_result` method:
+Found in `crates/t3claw_reborn_composition/src/product_live_adapters.rs`. Its `write_capability_result` method:
 1. Calls `serialized_json_len(&output, "capability result")` → `byte_len: usize`.
 2. Mints a `LoopResultRef` with key `"result:{run_id}.{uuid}"` via `LoopResultRef::new(...)`.
 3. Acquires the `Mutex<HashMap<String, StagedCapabilityResult>>` guard; calls `ensure_staging_capacity` (cap: 1 024 entries, 4 MiB total).
@@ -724,11 +724,11 @@ Found in `crates/ironclaw_reborn_composition/src/product_live_adapters.rs`. Its 
 **Layer 4 — `StagedCapabilityResult` lives entirely in a `Mutex<HashMap>`.**
 A private struct in `product_live_adapters.rs`. Three fields: `run_id: String`, `output: serde_json::Value`, `byte_len: usize`. No persistence path. Held in `ProductLiveCapabilityIo.results`. Never written to a database. Ref strings expire when the `ProductLiveCapabilityIo` is dropped.
 
-A second, simpler in-memory impl exists in `crates/ironclaw_reborn_composition/src/runtime/local_dev.rs` (`LocalDevCapabilityIo`). Uses a `BoundedRing` instead of a plain `HashMap`. In-process only.
+A second, simpler in-memory impl exists in `crates/t3claw_reborn_composition/src/runtime/local_dev.rs` (`LocalDevCapabilityIo`). Uses a `BoundedRing` instead of a plain `HashMap`. In-process only.
 
 ### 4.2 Why a trait is needed
 
-Plan WU-C section: "`crates/ironclaw_loop_support/src/capability_port.rs` — do NOT introduce `CapabilityResultStore` trait here (Reviewer 1 R2: loop_support is adapter glue, not persistence). Introduce in `ironclaw_reborn_event_store`."
+Plan WU-C section: "`crates/t3claw_loop_support/src/capability_port.rs` — do NOT introduce `CapabilityResultStore` trait here (Reviewer 1 R2: loop_support is adapter glue, not persistence). Introduce in `t3claw_reborn_event_store`."
 
 Soundness eval: "Doc treats the durable swap as drop-in; reality requires introducing the trait first." Without a trait, durable swap would require conditional compilation or hard-coded `if local_dev { HashMap } else { SQL }` branches scattered through `product_live_adapters.rs`. A trait gives:
 
@@ -744,9 +744,9 @@ Soundness eval: "Doc treats the durable swap as drop-in; reality requires introd
 
 ```rust
 use async_trait::async_trait;
-use ironclaw_host_api::InvocationId;
-use ironclaw_turns::{TurnRunId, TurnScope};
-use ironclaw_turns::run_profile::host::LoopResultRef;
+use t3claw_host_api::InvocationId;
+use t3claw_turns::{TurnRunId, TurnScope};
+use t3claw_turns::run_profile::host::LoopResultRef;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -822,17 +822,17 @@ All methods async. `thiserror` error type with distinct variants for each failur
 
 **Why `Vec<u8>` not `serde_json::Value`.** At multi-tenant scale with megabyte-scale capability payloads (HTML extraction, API responses), passing `Value` forces (a) the caller to serialize for byte counting, (b) a Value clone to pass ownership to the store, (c) the store to serialize again for INSERT — two full serializations + one tree clone per call. With `Vec<u8>`: executor calls `serde_json::to_vec(&output)` once, `byte_len = bytes.len() as u64` derived for free, `bytes` is moved into the store (no clone), store INSERTs the bytes directly into the BLOB/BYTEA column. Single serialization, single allocation, zero clones. The trait shape reflects what actually crosses the boundary — bytes, not a tree. On the `read` path: store returns the BLOB/BYTEA bytes directly; caller deserializes via `serde_json::from_slice(&bytes)?` lazily, only when the Value is actually needed (e.g., for prompt assembly or compaction). The error variant `Deserialization` covers caller-side parsing failures from the read path; the store itself never parses JSON.
 
-### 4.4 Crate placement — `ironclaw_reborn_event_store`
+### 4.4 Crate placement — `t3claw_reborn_event_store`
 
-**Owner:** `crates/ironclaw_reborn_event_store/src/capability_result_store.rs` (new file), trait + error type exported from the crate's `lib.rs`.
+**Owner:** `crates/t3claw_reborn_event_store/src/capability_result_store.rs` (new file), trait + error type exported from the crate's `lib.rs`.
 
 Rationale:
 
-1. **Not `ironclaw_loop_support`.** "loop_support is adapter glue, not persistence" (Reviewer 1 R2). `LoopCapabilityResultWriter` there is a routing trait — it mediates the call from executor to whatever destination is wired. Adding persistence ownership conflates routing and storage. Boundary-test rule separates these.
-2. **Not a new `ironclaw_reborn_persistence` crate.** Reviewer 1 V1 + Reviewer 4 G2 ruled this out: requires a `BoundaryRule` entry, contradicts `database.md` direction. No new crate without a boundary rule.
-3. **`ironclaw_reborn_event_store` is the canonical Reborn durable backend selection point.** Already owns `DurableEventLog`, `DurableAuditLog`. Already has `InMemory`, `Jsonl`, `Postgres`, `Libsql` config variants in `RebornEventStoreConfig`. Existing boundary rule covers it. `build_reborn_event_stores` factory matches the pattern.
+1. **Not `t3claw_loop_support`.** "loop_support is adapter glue, not persistence" (Reviewer 1 R2). `LoopCapabilityResultWriter` there is a routing trait — it mediates the call from executor to whatever destination is wired. Adding persistence ownership conflates routing and storage. Boundary-test rule separates these.
+2. **Not a new `t3claw_reborn_persistence` crate.** Reviewer 1 V1 + Reviewer 4 G2 ruled this out: requires a `BoundaryRule` entry, contradicts `database.md` direction. No new crate without a boundary rule.
+3. **`t3claw_reborn_event_store` is the canonical Reborn durable backend selection point.** Already owns `DurableEventLog`, `DurableAuditLog`. Already has `InMemory`, `Jsonl`, `Postgres`, `Libsql` config variants in `RebornEventStoreConfig`. Existing boundary rule covers it. `build_reborn_event_stores` factory matches the pattern.
 4. **The existing boundary rule covers it** — no new `BoundaryRule` entry needed.
-5. **`ironclaw_reborn_composition` remains the wiring layer.** `product_live_adapters.rs` imports `CapabilityResultStore` from `ironclaw_reborn_event_store` and passes the concrete impl into `ProductLiveCapabilityIo::new`. Composition already depends on `ironclaw_reborn_event_store`.
+5. **`t3claw_reborn_composition` remains the wiring layer.** `product_live_adapters.rs` imports `CapabilityResultStore` from `t3claw_reborn_event_store` and passes the concrete impl into `ProductLiveCapabilityIo::new`. Composition already depends on `t3claw_reborn_event_store`.
 
 ### 4.5 Backend choice + rationale
 
@@ -844,9 +844,9 @@ Capability results are the wrong shape for `ScopedFilesystem`:
 - **Large payloads.** Capability results can be megabyte-scale JSON (HTML extraction, API response bodies). `ScopedFilesystem` deserializes the full file to return payload; a typed table lets the hot existence/metadata paths (`exists_batch`, `byte_len`) read indexed columns without touching the payload at all.
 - **Query-by-run is structural, not file-shaped.** `list_by_run` needs a `WHERE run_id = $1 ORDER BY created_at` scan with an index. No equivalent in `ScopedFilesystem` without a separate index file (its own CAS logic; hot spot).
 - **Atomic tombstone.** Setting `tombstoned_at` while reading `byte_len` is a single `UPDATE ... WHERE result_ref = $1` in SQL.
-- **`ironclaw_reborn_event_store` already has libSQL and PostgreSQL typed-repo backends** for `DurableEventLog`. The `capability_results` table follows the same module shape: `crates/ironclaw_reborn_event_store/src/libsql/capability_result_repo.rs` and `.../postgres/capability_result_repo.rs`. No new dependency; existing feature flags gate respective backends.
+- **`t3claw_reborn_event_store` already has libSQL and PostgreSQL typed-repo backends** for `DurableEventLog`. The `capability_results` table follows the same module shape: `crates/t3claw_reborn_event_store/src/libsql/capability_result_repo.rs` and `.../postgres/capability_result_repo.rs`. No new dependency; existing feature flags gate respective backends.
 
-**In-memory impl** (`InMemoryCapabilityResultStore`) retained as `local_dev` fallback — same role as `InMemoryDurableEventLog`. Wraps `Mutex<HashMap<String, Vec<u8>>>` PLUS a bounded eviction policy: max `INMEMORY_CAPABILITY_RESULT_STORE_MAX_ENTRIES = 1024` entries and `INMEMORY_CAPABILITY_RESULT_STORE_MAX_BYTES = 4 * 1024 * 1024` (4 MiB) aggregate. Eviction is FIFO by insertion order — oldest entries dropped when either cap is hit. Bounded variant prevents long-running local-dev sessions or CI suites from OOMing on accumulated megabyte-scale payloads. Production-readiness check gates this impl to `LocalDevTest` mode regardless. Constants live in `crates/ironclaw_reborn_event_store::InMemoryCapabilityResultStore`.
+**In-memory impl** (`InMemoryCapabilityResultStore`) retained as `local_dev` fallback — same role as `InMemoryDurableEventLog`. Wraps `Mutex<HashMap<String, Vec<u8>>>` PLUS a bounded eviction policy: max `INMEMORY_CAPABILITY_RESULT_STORE_MAX_ENTRIES = 1024` entries and `INMEMORY_CAPABILITY_RESULT_STORE_MAX_BYTES = 4 * 1024 * 1024` (4 MiB) aggregate. Eviction is FIFO by insertion order — oldest entries dropped when either cap is hit. Bounded variant prevents long-running local-dev sessions or CI suites from OOMing on accumulated megabyte-scale payloads. Production-readiness check gates this impl to `LocalDevTest` mode regardless. Constants live in `crates/t3claw_reborn_event_store::InMemoryCapabilityResultStore`.
 The in-memory impl keyed on `(scope, run_id, capability_id, invocation_id) → (result_ref, payload)` provides the same true-idempotency guarantee as the SQL backends. A second write with the same tuple returns the cached `result_ref`.
 
 **Implementation note.** Both libSQL and PostgreSQL backends use a single statement: `INSERT INTO capability_results (..., payload, byte_len) VALUES (..., ?, ?)` with `byte_len = payload.len() as u64`. No `serde_json` call inside the backend. **Both backends store raw bytes: libSQL `BLOB`, PostgreSQL `BYTEA` (decision 25).** JSONB was rejected: it normalizes the document (key reorder, whitespace strip, number reformat), so read-back bytes would differ from written bytes — breaking the §7.3 byte-exact parity test and desyncing `byte_len` from actual stored size. The store never queries inside payloads, so JSONB's containment operators buy nothing. The in-memory `InMemoryCapabilityResultStore` holds `Mutex<HashMap<String, Vec<u8>>>` — keys are the opaque ref strings, values are the serialized bytes. Round-trip parity is byte-exact across all three impls: bytes in == bytes out.
@@ -952,7 +952,7 @@ async fn write_capability_result(
 }
 ```
 
-**Scope source.** The executor takes the parent run's `TurnScope` directly from `LoopRunContext.scope` (already a `TurnScope` — see `crates/ironclaw_turns/src/run_profile/host.rs`). No wrapper helper is needed. Callers must NOT drop or substitute `agent_id` — `LoopRunContext.scope.agent_id` is the canonical source. `user_id` is resolved at SQL-bind time via `TurnScope::explicit_owner_user_id()` falling back to `SYSTEM_RESERVED_ID` per §8.4.
+**Scope source.** The executor takes the parent run's `TurnScope` directly from `LoopRunContext.scope` (already a `TurnScope` — see `crates/t3claw_turns/src/run_profile/host.rs`). No wrapper helper is needed. Callers must NOT drop or substitute `agent_id` — `LoopRunContext.scope.agent_id` is the canonical source. `user_id` is resolved at SQL-bind time via `TurnScope::explicit_owner_user_id()` falling back to `SYSTEM_RESERVED_ID` per §8.4.
 
 **Why this shape.** The executor serializes `write.output` exactly once via `serde_json::to_vec`. The resulting bytes are moved (not cloned) into the store, which INSERTs them directly into the BLOB/BYTEA column. `byte_len` is `bytes.len() as u64` — derived from the same bytes, no extra work. Result: one serialization, one allocation, zero tree-walks per capability call. At the scale of 100s of calls per second per node with megabyte-scale payloads, this saves ~50% of capability-write CPU vs the prior double-serialize approach.
 
@@ -996,19 +996,19 @@ pub async fn build_reborn_capability_result_store(
 
 **`production_readiness.rs` wire-up** mirrors the existing `subagent_result_tombstone_store` field pattern. Add `capability_result_store: RebornComponentReadiness` to `RebornLoopComponentGraphReadiness`. Production: `production_verified(Required)`. Local-dev: `non_durable(Required)` → yields `LocalDevDegraded` (warning, not blocker) in `LocalDevTest` mode.
 
-Existing `production_readiness_rejects_in_memory_checkpoint_store` test in `crates/ironclaw_reborn/tests/production_readiness.rs` is the template for a new `production_readiness_rejects_in_memory_capability_result_store` test. Add the symmetric positive test `production_readiness_accepts_production_verified_capability_result_store` asserting that `graph.capability_result_store = RebornComponentReadiness::production_verified(Required)` yields `RebornLoopProductionStatus::Ready`.
+Existing `production_readiness_rejects_in_memory_checkpoint_store` test in `crates/t3claw_reborn/tests/production_readiness.rs` is the template for a new `production_readiness_rejects_in_memory_capability_result_store` test. Add the symmetric positive test `production_readiness_accepts_production_verified_capability_result_store` asserting that `graph.capability_result_store = RebornComponentReadiness::production_verified(Required)` yields `RebornLoopProductionStatus::Ready`.
 
 `SubagentRestartReconciler` field (`subagent_restart_reconciler`) is already declared. WU-C flips its `RebornComponentRequirement` from `Optional` to `Required` in the production-verified constructor once a concrete impl exists.
 
 ### 4.9 Risks / open questions
 
 - **Payload size cap (MUST).** Per-result cap is **8 MiB** enforced at the SQL CHECK constraint AND at the application layer before INSERT. Implementations MUST surface `CapabilityResultStoreError::CapacityExceeded` when a write would exceed the cap. The cross-result aggregate limit that the in-memory impl carried (`ensure_staging_capacity`) is removed — backpressure for total storage growth is owned by `PostCapabilityStage` compaction, not the result store.
-  WU-C MUST add the test `tests::capability_result_store::write_returns_capacity_exceeded_for_payload_over_8_mib` in `crates/ironclaw_reborn_event_store/tests/capability_result_store.rs`. Test passes an 8_388_609-byte payload; asserts `CapabilityResultStoreError::CapacityExceeded` (NOT a Backend or Io error). Required on the in-memory impl + both SQL backends (parity test variant lives in §7.3).
+  WU-C MUST add the test `tests::capability_result_store::write_returns_capacity_exceeded_for_payload_over_8_mib` in `crates/t3claw_reborn_event_store/tests/capability_result_store.rs`. Test passes an 8_388_609-byte payload; asserts `CapabilityResultStoreError::CapacityExceeded` (NOT a Backend or Io error). Required on the in-memory impl + both SQL backends (parity test variant lives in §7.3).
   **Executor failure mode (decision 32):** the in-memory store previously evicted silently under pressure, so an oversize result was never an error; the durable hard cap changes that. `ProductLiveCapabilityIo::write_capability_result` maps `CapacityExceeded` to a `CapabilityOutcome::Failed` with a sanitized message (`"capability result exceeded 8 MiB cap (<n> bytes)"`) — the model sees the failure and can narrow its request. It MUST NOT abort the loop, fail the turn, or panic. WU-C adds a caller-level test driving an oversize web_fetch-shaped result through the executor and asserting the loop continues.
 - **Serialization discipline (D8-A).** The trait MUST take `Vec<u8>`. Implementations MUST NOT accept `serde_json::Value` and serialize internally — that re-introduces the double-serialization regression this fix addresses. The `read` path returns `Vec<u8>` for the same reason: callers deserialize lazily, only when a `Value` is actually needed. Backend implementations parse JSON ONLY on integrity-check paths (e.g., a startup self-test) and NEVER on the hot read/write paths. Future streaming variants (e.g. an `async-trait` returning a `BoxStream<Item = Bytes>`) compose cleanly with this byte-oriented trait shape; a Value-based trait would block that evolution.
 - **GC policy.** Tombstoned rows accumulate indefinitely unless GC runs. Background GC outside WU-C scope — delete rows where `tombstoned_at < NOW() - interval '7 days'` (or configurable). Until GC lands, disk usage grows proportionally to run volume.
 - **Backward-compat for in-flight refs at deploy.** Active runs have refs in old in-memory `HashMap` inside running process. On process restart those refs are lost. Plan mitigation: "accept loss — feature toggle gates user impact." Background mode defaults `false` through WU-G; no parent loop is actively draining background results in production at deploy time. Blocking capability results are consumed before executor returns to loop, so never re-read after restart. The only at-risk refs are between capability call finish and turn transcript commit — milliseconds window.
-- **Ref durability vs. ref opacity.** `LoopResultRef` is opaque per `ironclaw_turns/CLAUDE.md`. Durable store keyed on `result_ref TEXT` preserves opacity — store never interprets ref's internal structure. Format `"result:{run_id}.{uuid}"` is sufficient as a unique store key; no schema migration needed when format changes.
+- **Ref durability vs. ref opacity.** `LoopResultRef` is opaque per `t3claw_turns/CLAUDE.md`. Durable store keyed on `result_ref TEXT` preserves opacity — store never interprets ref's internal structure. Format `"result:{run_id}.{uuid}"` is sufficient as a unique store key; no schema migration needed when format changes.
 - **Dual-backend parity.** Covered in §7.
 
 ---
@@ -1017,7 +1017,7 @@ Existing `production_readiness_rejects_in_memory_checkpoint_store` test in `crat
 
 ### 5.1 Current state
 
-`SubagentRestartReconciler` exists today solely as a variant of `RebornLoopProductionComponent` in `crates/ironclaw_reborn/src/production_readiness.rs`:
+`SubagentRestartReconciler` exists today solely as a variant of `RebornLoopProductionComponent` in `crates/t3claw_reborn/src/production_readiness.rs`:
 
 ```rust
 pub enum RebornLoopProductionComponent {
@@ -1029,19 +1029,19 @@ pub enum RebornLoopProductionComponent {
 
 Wired into the readiness check via `RebornLoopComponentGraphReadiness.subagent_restart_reconciler: RebornComponentReadiness`. The `production_verified()` constructor already declares this field as `RebornComponentReadiness::production_verified(required)` — meaning in production mode the check fails closed the moment it sees a non-`ProductionVerified` safety class. No trait, no concrete implementation, no boot-replay logic exists anywhere.
 
-No analogous boot-replay code exists elsewhere in the Reborn tree. Closest existing precedent: `IdempotencyLedger::begin_or_replay` in `crates/ironclaw_product_workflow/src/ledger.rs` — handles inbound-message deduplication at the workflow boundary (backed by `InMemoryIdempotencyLedger`, `FilesystemIdempotencyLedger`, and three concrete impls `RebornFilesystemIdempotencyLedger`, `RebornLibSqlIdempotencyLedger`, `RebornPostgresIdempotencyLedger` in `crates/ironclaw_product_workflow_storage`). Drives from `ActionFingerprintKey`, returns `IdempotencyDecision::Replay` carrying the prior settled `ProductInboundAction`. Subagent restart reconciler is structurally analogous but operates on capability result store + settlement event log, not product workflow inbound actions.
+No analogous boot-replay code exists elsewhere in the Reborn tree. Closest existing precedent: `IdempotencyLedger::begin_or_replay` in `crates/t3claw_product_workflow/src/ledger.rs` — handles inbound-message deduplication at the workflow boundary (backed by `InMemoryIdempotencyLedger`, `FilesystemIdempotencyLedger`, and three concrete impls `RebornFilesystemIdempotencyLedger`, `RebornLibSqlIdempotencyLedger`, `RebornPostgresIdempotencyLedger` in `crates/t3claw_product_workflow_storage`). Drives from `ActionFingerprintKey`, returns `IdempotencyDecision::Replay` carrying the prior settled `ProductInboundAction`. Subagent restart reconciler is structurally analogous but operates on capability result store + settlement event log, not product workflow inbound actions.
 
 Second precedent: `BoundedSubagentResultTombstoneStore` (§3). In-memory only, bounded 4096, evicting by insertion order. `write_tombstone`/`read_tombstone` methods keyed by `child_run_id: TurnRunId`. When the durable backend is introduced the tombstone store is one of four stores the reconciler must consult to avoid replaying results that were already discarded before the crash.
 
 ### 5.2 Reconciler trait shape
 
-Trait + associated types live in `crates/ironclaw_reborn_event_store` (canonical owner per `events.md` §2 + existing `BoundaryRule`).
+Trait + associated types live in `crates/t3claw_reborn_event_store` (canonical owner per `events.md` §2 + existing `BoundaryRule`).
 
 ```rust
-// crates/ironclaw_reborn_event_store/src/reconciler.rs
+// crates/t3claw_reborn_event_store/src/reconciler.rs
 
 use async_trait::async_trait;
-use ironclaw_turns::TurnScope;
+use t3claw_turns::TurnScope;
 
 /// One call per boot: re-deliver any settled background-subagent results that
 /// were written to the durable settlement log before the crash but never
@@ -1095,7 +1095,7 @@ pub enum ReconcilerError {
 }
 ```
 
-`TurnScope` (from `crates/ironclaw_turns/src/scope.rs`) carries `tenant_id`, `agent_id`, `project_id`, `thread_id` — already threaded through every Reborn runtime call site. Using it directly avoids introducing a new `Scope` wrapper.
+`TurnScope` (from `crates/t3claw_turns/src/scope.rs`) carries `tenant_id`, `agent_id`, `project_id`, `thread_id` — already threaded through every Reborn runtime call site. Using it directly avoids introducing a new `Scope` wrapper.
 
 WU-C MUST expose both single-key `seal` and multi-row `seal_batch` on the idempotency ledger trait. Phase 4's seal step uses `seal_batch` (single multi-row UPDATE) — per-row `seal` calls in a loop reintroduce the N+1 cost the rest of the algorithm eliminates. Single-key `seal` is retained for the orphan / tombstone paths in Phase 2a which already have their own batching call (`upsert_sealed_batch`).
 
@@ -1104,7 +1104,7 @@ WU-C MUST expose both single-key `seal` and multi-row `seal_batch` on the idempo
 The replay algorithm (§5.3) calls 11 reconciler-facing methods across four stores. WU-C MUST expose each with the signature below. All are async; all return their natural plural shape (`Set`, `Vec`, `Result<()>`).
 
 ```rust
-// crates/ironclaw_reborn_event_store — extends SubagentGateResolutionStore
+// crates/t3claw_reborn_event_store — extends SubagentGateResolutionStore
 trait SubagentGateResolutionStore {
     // ... existing methods ...
     async fn gates_exist_batch(
@@ -1428,7 +1428,7 @@ fn replay(scope: &TurnScope) -> ReplayReport:
 ### 5.4 Idempotency ledger schema (libSQL)
 
 ```sql
--- Migration: inline const in `crates/ironclaw_reborn_event_store/src/libsql/migrations.rs`
+-- Migration: inline const in `crates/t3claw_reborn_event_store/src/libsql/migrations.rs`
 -- under INCREMENTAL_MIGRATIONS array, version assigned per §8.5 numbering.
 
 CREATE TABLE IF NOT EXISTS subagent_idempotency_ledger (
@@ -1476,7 +1476,7 @@ UPDATE subagent_idempotency_ledger
 ### 5.5 Idempotency ledger schema (PostgreSQL)
 
 ```sql
--- Migration: inline const in `crates/ironclaw_reborn_event_store/src/postgres/migrations.rs`
+-- Migration: inline const in `crates/t3claw_reborn_event_store/src/postgres/migrations.rs`
 -- under INCREMENTAL_MIGRATIONS array, version assigned per §8.5 numbering.
 
 CREATE TABLE IF NOT EXISTS subagent_idempotency_ledger (
@@ -1534,11 +1534,11 @@ Both dialects match the in-memory settlement semantics already established in `g
 - Allowlist: `[A-Za-z0-9._-]+`. Reject any other character (or replace with `_`) — the column is read by ops dashboards that may interpret control bytes.
 - On invalid: substitute the literal string `"unknown"` and log a `warn!` line. Never crash the reconciler over a delivery-node validation failure.
 
-WU-C MUST add the test `tests::reconciler_integration::delivery_node_invalid_substituted_to_unknown` in `crates/ironclaw_reborn_event_store/tests/reconciler_integration.rs`. Test cases: (a) oversized 200-char value, (b) embedded control chars `pod\x00foo`, (c) disallowed chars `pod/foo<script>`, (d) empty string. For each case assert (i) `reconciler.replay()` does NOT Err, (ii) the written ledger row has `delivery_node = "unknown"`.
+WU-C MUST add the test `tests::reconciler_integration::delivery_node_invalid_substituted_to_unknown` in `crates/t3claw_reborn_event_store/tests/reconciler_integration.rs`. Test cases: (a) oversized 200-char value, (b) embedded control chars `pod\x00foo`, (c) disallowed chars `pod/foo<script>`, (d) empty string. For each case assert (i) `reconciler.replay()` does NOT Err, (ii) the written ledger row has `delivery_node = "unknown"`.
 
 ### 5.6 Composition wire-up
 
-Reconciler runs once per process boot — **detached in a background task**, not blocking foreground traffic. Boot sequence in `crates/ironclaw_reborn_composition/src/runtime/local_dev.rs` (local dev) and the production counterpart in `crates/ironclaw_reborn_composition/src/lib.rs`:
+Reconciler runs once per process boot — **detached in a background task**, not blocking foreground traffic. Boot sequence in `crates/t3claw_reborn_composition/src/runtime/local_dev.rs` (local dev) and the production counterpart in `crates/t3claw_reborn_composition/src/lib.rs`:
 
 1. `build_reborn_event_stores` constructs the durable backends and returns the `SubagentIdempotencyLedger` instance alongside `RebornEventStores`.
 2. Composition layer creates a concrete `DurableSubagentRestartReconciler` holding references to: settlement event log (scoped reader), `CapabilityResultStore`, `SubagentResultTombstoneStore`, idempotency ledger, gate store. The reconciler is given its own **dedicated DB connection pool** (`replay_pool`, default 4 connections) — separate from the main runtime pool so replay never starves foreground writes during a recovery storm.
@@ -1605,7 +1605,7 @@ RebornEventKind::SubagentReplayCompleted {
 
 ### 5.8 Crate placement
 
-All new types — `SubagentRestartReconciler` trait, `ReplayReport`, `ReconcilerError`, `DurableSubagentRestartReconciler` (libSQL impl), `DurableSubagentRestartReconcilerPostgres` (PostgreSQL impl), `NoopSubagentRestartReconciler`, and the `subagent_idempotency_ledger` migration files — live in `crates/ironclaw_reborn_event_store/`. Canonical owner of Reborn durable backend selection (`events.md` §2). Existing `BoundaryRule` covers it. Already holds both libSQL and filesystem backends. Adding typed repositories for the idempotency ledger here follows the same pattern as the existing libSQL-backed durable event log.
+All new types — `SubagentRestartReconciler` trait, `ReplayReport`, `ReconcilerError`, `DurableSubagentRestartReconciler` (libSQL impl), `DurableSubagentRestartReconcilerPostgres` (PostgreSQL impl), `NoopSubagentRestartReconciler`, and the `subagent_idempotency_ledger` migration files — live in `crates/t3claw_reborn_event_store/`. Canonical owner of Reborn durable backend selection (`events.md` §2). Existing `BoundaryRule` covers it. Already holds both libSQL and filesystem backends. Adding typed repositories for the idempotency ledger here follows the same pattern as the existing libSQL-backed durable event log.
 
 ### 5.9 Test plan
 
@@ -1695,10 +1695,10 @@ Guards D9: orphan rows are cleaned up exactly once and never reprocessed.
 4. Assert each persisted ledger row has `delivery_node = "unknown"` (literal sanitization output).
 ```
 
-**Dual-backend parity test** (libSQL vs PostgreSQL, part of WU-G #4431): run all four bodies against both `RebornLibSqlIdempotencyLedger` and `RebornPostgresIdempotencyLedger`, matching the pattern of `assert_settled_action_survives_reopen_and_replays` in `crates/ironclaw_product_workflow_storage/tests/support/mod.rs`.
+**Dual-backend parity test** (libSQL vs PostgreSQL, part of WU-G #4431): run all four bodies against both `RebornLibSqlIdempotencyLedger` and `RebornPostgresIdempotencyLedger`, matching the pattern of `assert_settled_action_survives_reopen_and_replays` in `crates/t3claw_product_workflow_storage/tests/support/mod.rs`.
 
-All tests go in `crates/ironclaw_reborn_event_store/tests/` (contract-test tier, matching `durable_event_store_contract.rs` + `filesystem_event_log_contract.rs` pattern). Run under `cargo test --features integration` for backend-dependent variants.
-The 7 named tests above live in `crates/ironclaw_reborn_event_store/tests/reconciler_integration.rs`. WU-C MUST land all 7 in the same PR as the `SubagentRestartReconciler` impl — they are the acceptance criteria for the §5.3 algorithm + D1 two-phase ledger + D9 orphan handling invariants.
+All tests go in `crates/t3claw_reborn_event_store/tests/` (contract-test tier, matching `durable_event_store_contract.rs` + `filesystem_event_log_contract.rs` pattern). Run under `cargo test --features integration` for backend-dependent variants.
+The 7 named tests above live in `crates/t3claw_reborn_event_store/tests/reconciler_integration.rs`. WU-C MUST land all 7 in the same PR as the `SubagentRestartReconciler` impl — they are the acceptance criteria for the §5.3 algorithm + D1 two-phase ledger + D9 orphan handling invariants.
 
 ### 5.10 Risks / open questions
 
@@ -1750,7 +1750,7 @@ Replicas that LOSE the election skip replay for that scope; they still receive s
 
 **libSQL fallback.** When the deployment backend is libSQL, `try_become_replay_leader` returns `Some(LeaderHandle::noop)` unconditionally — every replica is its own leader. libSQL deployments are typically single-node so the redundancy concern does not materialize.
 
-**Spec impact.** None on the current WU-C surface. When this lands as a follow-up, it becomes a new `ReconcilerLeaderElection` trait under `crates/ironclaw_reborn_event_store`, with `PostgresAdvisoryLockLeader` and `LibSqlNoopLeader` implementations. The composition wire-up in §5.6 gains an `Arc<dyn ReconcilerLeaderElection>` injection point; the per-scope `tokio::spawn` body calls `try_become_replay_leader` before Phase 0.
+**Spec impact.** None on the current WU-C surface. When this lands as a follow-up, it becomes a new `ReconcilerLeaderElection` trait under `crates/t3claw_reborn_event_store`, with `PostgresAdvisoryLockLeader` and `LibSqlNoopLeader` implementations. The composition wire-up in §5.6 gains an `Arc<dyn ReconcilerLeaderElection>` injection point; the per-scope `tokio::spawn` body calls `try_become_replay_leader` before Phase 0.
 
 ---
 
@@ -1781,7 +1781,7 @@ When toggle flips `true` for the first time:
 
 If `subagent.background_enabled` is set back to `false` after a period it was `true`:
 
-1. `ironclaw_reborn_composition`'s runtime wiring continues to use whichever stores were already wired — goal store stays `FilesystemSubagentGoalStore` (durable), gate resolution / tombstone / capability result stores stay on their configured durable backends. The toggle controls only the admission gate (whether `SpawnSubagentPort` accepts `mode=background`), NOT the backend selection. Toggling OFF does not flip any store from durable to in-memory.
+1. `t3claw_reborn_composition`'s runtime wiring continues to use whichever stores were already wired — goal store stays `FilesystemSubagentGoalStore` (durable), gate resolution / tombstone / capability result stores stay on their configured durable backends. The toggle controls only the admission gate (whether `SpawnSubagentPort` accepts `mode=background`), NOT the backend selection. Toggling OFF does not flip any store from durable to in-memory.
 2. `SubagentRestartReconciler` still runs at boot (required component per `production_readiness.rs`). With toggle off, no new background spawns admitted → no new durable rows written. Reconciler scans durable settlement event log, finds no undelivered rows with living in-memory consumers, exits as no-op.
 3. Durable rows written during ON-period remain. Not deleted, cannot be deleted without explicit GC migration. Correct per **LLM data retention rule** in `CLAUDE.md`: "LLM data is never deleted."
 
@@ -1829,17 +1829,17 @@ Directly addresses `_contract-freeze-index.md` §8: "PostgreSQL/libSQL parity is
 
 Existing parity harness in this repo:
 
-- `crates/ironclaw_hooks_parity/tests/parity_matrix.rs` — hooks-tier behavioral parity matrix.
+- `crates/t3claw_hooks_parity/tests/parity_matrix.rs` — hooks-tier behavioral parity matrix.
 - `tests/reborn_wrong_scope_access_isolation_parity.rs` — cross-scope isolation parity at integration test tier.
 - `tests/support_unit_tests.rs` and `tests/support/reborn/product_workflow.rs` — `RebornProductWorkflowHarness` / `FilesystemIdempotencyLedger` parity helpers with `filesystem_temp` + `filesystem_shared_backend` constructors.
 
-Subagent store parity tests do **not** belong in `ironclaw_hooks_parity` (hooks-specific contract). Correct location:
+Subagent store parity tests do **not** belong in `t3claw_hooks_parity` (hooks-specific contract). Correct location:
 
 ```
-crates/ironclaw_reborn_event_store/tests/parity.rs
+crates/t3claw_reborn_event_store/tests/parity.rs
 ```
 
-`crates/ironclaw_reborn_event_store/` is canonical owner of durable backend selection per `events.md` §2 and already contains:
+`crates/t3claw_reborn_event_store/` is canonical owner of durable backend selection per `events.md` §2 and already contains:
 
 - `tests/durable_event_store_contract.rs`
 - `tests/filesystem_event_log_contract.rs`
@@ -1885,7 +1885,7 @@ The following invariants must be tested against both libSQL and PostgreSQL (unde
 
 ### 7.4 Fixture strategy
 
-**libSQL:** in-process libSQL using `libsql::Builder::new_local(":memory:")`. No external service. Pattern used throughout existing `crates/ironclaw_reborn_event_store/tests/` contract tests.
+**libSQL:** in-process libSQL using `libsql::Builder::new_local(":memory:")`. No external service. Pattern used throughout existing `crates/t3claw_reborn_event_store/tests/` contract tests.
 
 **PostgreSQL:** testcontainers via `testcontainers::runners::AsyncRunner` and `testcontainers-modules::postgres::Postgres` image. Per `CLAUDE.md` current limitation: "Integration tests need testcontainers for PostgreSQL." Tests gated behind `#[cfg(feature = "integration")]`.
 
@@ -1896,7 +1896,7 @@ Both backends exercised through identical test functions, parameterized by `Back
 All parity tests run under:
 
 ```bash
-cargo test -p ironclaw_reborn_event_store --features integration
+cargo test -p t3claw_reborn_event_store --features integration
 ```
 
 Broader integration suite:
@@ -1917,7 +1917,7 @@ WU-G ships these tests. Per plan closing criteria, feature toggle `subagent.back
 
 Every durable table introduced by WU-C carries `tenant_id`, `user_id`, and `agent_id` columns per `_contract-freeze-index.md` §2 + §8.
 
-`agent_id` is **nullable** — non-agent runs produce `TurnScope` values where `agent_id` is `None` (`TurnScope` in `crates/ironclaw_turns/src/scope.rs`, field `pub agent_id: Option<AgentId>`).
+`agent_id` is **nullable** — non-agent runs produce `TurnScope` values where `agent_id` is `None` (`TurnScope` in `crates/t3claw_turns/src/scope.rs`, field `pub agent_id: Option<AgentId>`).
 
 `user_id` maps to `TurnScope::explicit_owner_user_id()` when present, falls back to `SYSTEM_RESERVED_ID` for ownerless turns (per `TurnScope::to_resource_scope()`).
 
@@ -1953,7 +1953,7 @@ Notes:
 
 ### 8.4 `TurnScope` as the scope type threading through trait signatures
 
-The canonical scope type is `TurnScope` from `crates/ironclaw_turns/src/scope.rs`:
+The canonical scope type is `TurnScope` from `crates/t3claw_turns/src/scope.rs`:
 
 ```rust
 pub struct TurnScope {
@@ -1966,9 +1966,9 @@ pub struct TurnScope {
 ```
 
 - `agent_id: Option<AgentId>` maps directly to nullable `agent_id` column.
-- `TurnScope::to_resource_scope()` produces `ironclaw_host_api::ResourceScope` used by `FilesystemSubagentGoalStore` and `FilesystemIdempotencyLedger` for filesystem path dispatch — new typed-repo stores derive column values from same `TurnScope` fields rather than calling `to_resource_scope()`.
+- `TurnScope::to_resource_scope()` produces `t3claw_host_api::ResourceScope` used by `FilesystemSubagentGoalStore` and `FilesystemIdempotencyLedger` for filesystem path dispatch — new typed-repo stores derive column values from same `TurnScope` fields rather than calling `to_resource_scope()`.
 
-`TurnScope` is already the scope parameter in all four existing in-memory store trait signatures (`SubagentGoalStore::put_goal(&self, scope: &TurnScope, ...)`, `SubagentGateResolutionStore`, `SubagentResultTombstoneStore`, `SubagentSpawnGoalStore` alias in `ironclaw_loop_support`). Durable implementations accept the same `&TurnScope` and extract `tenant_id`, `user_id` (from `explicit_owner_user_id()` or sentinel), `agent_id` at write time.
+`TurnScope` is already the scope parameter in all four existing in-memory store trait signatures (`SubagentGoalStore::put_goal(&self, scope: &TurnScope, ...)`, `SubagentGateResolutionStore`, `SubagentResultTombstoneStore`, `SubagentSpawnGoalStore` alias in `t3claw_loop_support`). Durable implementations accept the same `&TurnScope` and extract `tenant_id`, `user_id` (from `explicit_owner_user_id()` or sentinel), `agent_id` at write time.
 
 `CapabilityResultStore` trait (introduced in WU-C; does not yet exist) must be defined with `&TurnScope` as scope parameter, consistent with all other store traits in this family.
 
@@ -1980,11 +1980,11 @@ Legacy v1 database layer uses:
 - `src/db/libsql_migrations.rs` — consolidated base schema + `INCREMENTAL_MIGRATIONS` array (versioned `(i64, &str, &str)` tuples).
 - `src/db/postgres.rs` — PostgreSQL DDL executed at startup.
 
-Reborn-crate persistence is separate. `ScopedFilesystem`-backed stores (goal store) do not use SQL migrations — filesystem path layout is implied by `TurnScope` → `ResourceScope` → path grammar. Typed-repo stores (gate_resolution, capability_result, settlement_event_log, idempotency_ledger) in `crates/ironclaw_reborn_event_store/` use crate-local migration modules:
+Reborn-crate persistence is separate. `ScopedFilesystem`-backed stores (goal store) do not use SQL migrations — filesystem path layout is implied by `TurnScope` → `ResourceScope` → path grammar. Typed-repo stores (gate_resolution, capability_result, settlement_event_log, idempotency_ledger) in `crates/t3claw_reborn_event_store/` use crate-local migration modules:
 
 ```
-crates/ironclaw_reborn_event_store/src/libsql/migrations.rs   # libSQL DDL constants
-crates/ironclaw_reborn_event_store/src/postgres/migrations.rs # PostgreSQL DDL constants
+crates/t3claw_reborn_event_store/src/libsql/migrations.rs   # libSQL DDL constants
+crates/t3claw_reborn_event_store/src/postgres/migrations.rs # PostgreSQL DDL constants
 ```
 
 **Naming convention** (matching `libsql_migrations.rs`):
@@ -1998,7 +1998,7 @@ pub const INCREMENTAL_MIGRATIONS: &[(i64, &str, &str)] = &[
 ];
 ```
 
-Version numbers are **independent** from `src/db/libsql_migrations.rs` — `ironclaw_reborn_event_store` owns its own `_reborn_migrations` tracking table (same `(version, name, applied_at)` schema, different table name to avoid collision). Matches comment in `libsql_migrations.rs`: "libSQL incremental migration version numbers are independent from PostgreSQL migration version numbers."
+Version numbers are **independent** from `src/db/libsql_migrations.rs` — `t3claw_reborn_event_store` owns its own `_reborn_migrations` tracking table (same `(version, name, applied_at)` schema, different table name to avoid collision). Matches comment in `libsql_migrations.rs`: "libSQL incremental migration version numbers are independent from PostgreSQL migration version numbers."
 
 All DDL uses `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS` for idempotency.
 
@@ -2014,8 +2014,8 @@ The parent agent currently has NO action surface over a running child: interacti
 
 | Mechanism | Where | Status |
 |---|---|---|
-| Durable cancel request | `TurnStateStore::request_cancel(CancelRunRequest { scope, actor, run_id, reason, idempotency_key }) → CancelRunResponse { status, already_terminal, … }` (`crates/ironclaw_turns/src/request.rs`, `coordinator.rs`) | EXISTS — callers today are product/host surfaces (WebUI cancel, `reborn_services.rs`) |
-| Cooperative in-loop delivery | `RunCancellationFactory` / `RunCancellationHandle` (`crates/ironclaw_loop_support/src/cancellation_port.rs`). `TurnStateRunCancellationFactory` seeds handles from durable run state; wake-driven flip + polling fallback; the child loop observes the handle at iteration boundaries | EXISTS |
+| Durable cancel request | `TurnStateStore::request_cancel(CancelRunRequest { scope, actor, run_id, reason, idempotency_key }) → CancelRunResponse { status, already_terminal, … }` (`crates/t3claw_turns/src/request.rs`, `coordinator.rs`) | EXISTS — callers today are product/host surfaces (WebUI cancel, `reborn_services.rs`) |
+| Cooperative in-loop delivery | `RunCancellationFactory` / `RunCancellationHandle` (`crates/t3claw_loop_support/src/cancellation_port.rs`). `TurnStateRunCancellationFactory` seeds handles from durable run state; wake-driven flip + polling fallback; the child loop observes the handle at iteration boundaries | EXISTS |
 | Subagent-context cancel precedent | `SpawnCompensationState::rollback` (`subagent_spawn_port.rs`) already cancels a just-submitted child: `request_cancel` with `SanitizedCancelReason::Superseded`, idempotency key `subagent-rollback-cancel:{parent_run}:{child_run}` | EXISTS |
 | Cancelled-terminal settlement | `Cancelled` is terminal → flows through `SubagentCompletionObserver::handle_terminal` exactly like `Completed`/`Failed` (gate-store `record_child_terminal`, capacity release) | EXISTS |
 | Child enumeration + status | `TurnSpawnTreeStateStore::children_of(scope, run_id)`, `get_run_record`; `TurnEventProjectionSource::read_turn_events_after` (cursor-paged lifecycle events incl. `RunnerHeartbeat`, `Blocked`) | EXISTS — host-only |
@@ -2025,7 +2025,7 @@ So this section adds NO new stores and NO new durability machinery. It defines t
 
 ### 9.2 New actions — `subagent_cancel` + `subagent_status`
 
-Both live next to `spawn_subagent` in `crates/ironclaw_loop_support/src/subagent_spawn_port.rs` (same deps struct, same wiring) and are parent-loop capabilities, model-invokable. Background-mode children only — a parent blocked on a Blocking child is suspended and cannot issue calls — so both actions gate on `subagent.background_enabled` and ship in WU-D.
+Both live next to `spawn_subagent` in `crates/t3claw_loop_support/src/subagent_spawn_port.rs` (same deps struct, same wiring) and are parent-loop capabilities, model-invokable. Background-mode children only — a parent blocked on a Blocking child is suspended and cannot issue calls — so both actions gate on `subagent.background_enabled` and ship in WU-D.
 
 **`subagent_cancel { child_run_id, reason? }`**
 
@@ -2082,14 +2082,14 @@ Polling cost: `subagent_status` is a model-visible action — each call burns a 
 - [ ] **MERGE-BLOCKING:** WU-C MUST complete `LoopRunContext` credential audit before merging the durable gate-resolution backend. Acceptable resolution: (a) zero sensitive fields found AND compile-time lint added asserting credential-freeness, OR (b) write-site stripping verified with unit tests asserting the persisted JSON contains no token/key field names. WU-C PR description MUST link to the audit document or test. (Per §1.7 sensitivity bullet.)
 - [ ] This spec PR merged.
 - [ ] WU-C decides per-store ScopedFilesystem-vs-typed-repo choices match §1 through §5 recommendations (any deviation requires an addendum here).
-- [ ] WU-C adds `BoundaryRule` verification step: `cargo test -p ironclaw_architecture` passes with the new types in `ironclaw_reborn_event_store` (existing rule covers; no new entry needed).
+- [ ] WU-C adds `BoundaryRule` verification step: `cargo test -p t3claw_architecture` passes with the new types in `t3claw_reborn_event_store` (existing rule covers; no new entry needed).
 - [ ] WU-C adds `SubagentRestartReconciler` impl behind feature-gated build; production-readiness check flips from stub to required.
 - [ ] WU-C adds `CapabilityResultStore` trait + impls (in-memory + libSQL + PostgreSQL).
 - [ ] WU-C wires `BoundedSubagentResultTombstoneStore` into `SubagentCompletionObserver` (the wiring gap from §3.1).
 - [ ] WU-C corrects in-memory tombstone store to first-writer-wins (§3.6).
-- [ ] WU-G adds parity test at `crates/ironclaw_reborn_event_store/tests/parity.rs` per §7.
+- [ ] WU-G adds parity test at `crates/t3claw_reborn_event_store/tests/parity.rs` per §7.
 - [ ] WU-C lands the `SubagentResultTombstoneStore` scope-parameter signature changes (BOTH `write_tombstone` AND `read_tombstone`) BEFORE implementing `FilesystemSubagentTombstoneStore` (§3.7); tombstone `ScopedPath` layout is flat per scope — no thread segment (decision 28).
-- [ ] WU-C lands the two-phase idempotency ledger (D1): `delivered_at NULL` column nullable; pencil-insert + pen-seal pattern; matches the existing `IdempotencyLedger::begin_or_replay` precedent in `crates/ironclaw_product_workflow/src/ledger.rs`.
+- [ ] WU-C lands the two-phase idempotency ledger (D1): `delivered_at NULL` column nullable; pencil-insert + pen-seal pattern; matches the existing `IdempotencyLedger::begin_or_replay` precedent in `crates/t3claw_product_workflow/src/ledger.rs`.
 - [ ] WU-C lands orphan-gate handling (D9): reconciler tombstones + seals when a gate ref is absent from `gates_exist_batch`'s result (the batch method IS the existence check — no separate single-row `gate_exists` needed).
 - [ ] WU-C lands tombstoned-row capacity resolution (decision 31): reconciler's `skipped_tombstoned` path calls `resolve_undeliverable_batch` (flip `delivered_to_parent`, decrement bucket, delete queue entry); WU-D's parent-cancel flow pairs the tombstone write with the same gate-row resolution in one transaction.
 - [ ] WU-C extends `ReplayReport` with `retryable: u32` and `skipped_orphan: u32` counters and updates operator dashboards (`warn!` on `failed > 0` only).
@@ -2102,7 +2102,7 @@ Polling cost: `subagent_status` is a model-visible action — each call burns a 
 - [ ] WU-G E2E gates the background-mode toggle (`subagent.background_enabled = true` in production) on the observability dashboard being live AND the three alerts being silent over a 7-day soak.
 - [ ] **WU-C MUST include** the `gate_resolution_scoped_query_excludes_rows_from_other_agents` parity test in the same PR as the gate-resolution backend impl (promoted from WU-G — security gate, not E2E gate).
 - [ ] WU-C `InMemoryCapabilityResultStore` ships with `INMEMORY_CAPABILITY_RESULT_STORE_MAX_ENTRIES = 1024` + `INMEMORY_CAPABILITY_RESULT_STORE_MAX_BYTES = 4 MiB` FIFO eviction. Prevents local-dev / CI OOM on long sessions.
-- [ ] WU-C lands the bucketed capacity counter (D6-A + E.A): `subagent_gate_capacity_counter` table with `(tenant_id, user_id, agent_id, bucket)` PK; `counter_bucket` column on `subagent_gate_awaited_children`; `CAPACITY_COUNTER_BUCKETS = 16` constant in `ironclaw_reborn_event_store` exposed via `RebornEventStoreConfig`; insert / delivery / delete paths use the bucketed transactional protocol per §1.6.
+- [ ] WU-C lands the bucketed capacity counter (D6-A + E.A): `subagent_gate_capacity_counter` table with `(tenant_id, user_id, agent_id, bucket)` PK; `counter_bucket` column on `subagent_gate_awaited_children`; `CAPACITY_COUNTER_BUCKETS = 16` constant in `t3claw_reborn_event_store` exposed via `RebornEventStoreConfig`; insert / delivery / delete paths use the bucketed transactional protocol per §1.6.
 - [ ] WU-C implements `CapabilityResultStore` trait with `Vec<u8>` payload (D8-A). Executor calls `serde_json::to_vec` exactly once; backend INSERTs the bytes directly into BLOB / BYTEA without re-serializing. `read()` returns bytes; callers deserialize lazily.
 - [ ] WU-C adds `RebornEventStoreConfig.reconciler_replay_jitter_ms: u64` (default 5000) and applies it via `tokio::time::sleep(Duration::from_millis(rand::random::<u64>() % jitter))` immediately before launching the per-process replay task (A.A).
 - [ ] §5.11 HA leader election is a tracked follow-up; NOT WU-C scope. WU-C ships the spec-documented invariants without it; promotion gated on the §5.7 metric trigger.
@@ -2128,14 +2128,14 @@ Polling cost: `subagent_status` is a model-visible action — each call burns a 
 - `docs/reborn/contracts/events.md` §2
 - `docs/reborn/2026-04-25-storage-catalog-and-placement.md` §5.3
 - `.claude/rules/database.md`
-- `crates/ironclaw_reborn_event_store/src/lib.rs` (canonical durable backend owner)
-- `crates/ironclaw_reborn/src/production_readiness.rs` (`RebornLoopProductionComponent`)
-- `crates/ironclaw_reborn/src/subagent/gate_resolution.rs` (`BoundedSubagentGateResolutionStore`)
-- `crates/ironclaw_reborn/src/subagent/goal_store.rs` (`InMemoryBoundedSubagentGoalStore`, `FilesystemSubagentGoalStore`)
-- `crates/ironclaw_reborn/src/subagent/tombstone_store.rs` (`BoundedSubagentResultTombstoneStore`)
-- `crates/ironclaw_loop_support/src/capability_port.rs` (`LoopCapabilityResultWriter`)
-- `crates/ironclaw_loop_support/src/cancellation_port.rs` (`RunCancellationFactory`, `RunCancellationHandle`)
-- `crates/ironclaw_loop_support/src/subagent_spawn_port.rs` (`spawn_subagent`, `SpawnCompensationState::rollback` cancel precedent)
-- `crates/ironclaw_turns/src/status.rs` (`SanitizedCancelReason`)
-- `crates/ironclaw_reborn_composition/src/product_live_adapters.rs` (`ProductLiveCapabilityIo`)
-- `crates/ironclaw_architecture/tests/reborn_dependency_boundaries.rs` (boundary rules)
+- `crates/t3claw_reborn_event_store/src/lib.rs` (canonical durable backend owner)
+- `crates/t3claw_reborn/src/production_readiness.rs` (`RebornLoopProductionComponent`)
+- `crates/t3claw_reborn/src/subagent/gate_resolution.rs` (`BoundedSubagentGateResolutionStore`)
+- `crates/t3claw_reborn/src/subagent/goal_store.rs` (`InMemoryBoundedSubagentGoalStore`, `FilesystemSubagentGoalStore`)
+- `crates/t3claw_reborn/src/subagent/tombstone_store.rs` (`BoundedSubagentResultTombstoneStore`)
+- `crates/t3claw_loop_support/src/capability_port.rs` (`LoopCapabilityResultWriter`)
+- `crates/t3claw_loop_support/src/cancellation_port.rs` (`RunCancellationFactory`, `RunCancellationHandle`)
+- `crates/t3claw_loop_support/src/subagent_spawn_port.rs` (`spawn_subagent`, `SpawnCompensationState::rollback` cancel precedent)
+- `crates/t3claw_turns/src/status.rs` (`SanitizedCancelReason`)
+- `crates/t3claw_reborn_composition/src/product_live_adapters.rs` (`ProductLiveCapabilityIo`)
+- `crates/t3claw_architecture/tests/reborn_dependency_boundaries.rs` (boundary rules)

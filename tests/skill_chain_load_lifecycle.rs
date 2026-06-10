@@ -34,11 +34,11 @@
 //! ## Why two tests (v1 + v2)
 //!
 //! The v1 path runs through `src/agent/agent_loop.rs ::
-//! select_active_skills` → `crates/ironclaw_skills/src/selector.rs ::
+//! select_active_skills` → `crates/t3claw_skills/src/selector.rs ::
 //! prefilter_skills`.
 //!
 //! The v2 path runs through the Python orchestrator's `select_skills`
-//! in `crates/ironclaw_engine/orchestrator/default.py`, which
+//! in `crates/t3claw_engine/orchestrator/default.py`, which
 //! receives a marker-filtered list from the Rust
 //! `handle_list_skills` host function. Both paths implement chain
 //! loading but in different languages on different call stacks, so
@@ -138,7 +138,7 @@ absent, it wasn't.
     /// Count occurrences of `needle` across every captured LLM
     /// request's messages (system + user + assistant). A positive
     /// count means the string was injected into at least one prompt.
-    fn occurrences_in_requests(requests: &[Vec<ironclaw_llm::ChatMessage>], needle: &str) -> usize {
+    fn occurrences_in_requests(requests: &[Vec<t3claw_llm::ChatMessage>], needle: &str) -> usize {
         let mut n = 0;
         for req in requests {
             for msg in req {

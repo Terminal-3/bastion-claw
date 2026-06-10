@@ -6,20 +6,20 @@ mod support;
 use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
-use ironclaw_loop_support::{
-    HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
-    HostIdentityMessageContent, HostManagedModelMessageRole, HostManagedModelResponse,
-    IdentityApplicability, IdentityFileName,
-};
-use ironclaw_turns::{
-    LoopMessageRef, TurnStatus,
-    run_profile::{LoopRunContext, PromptMode},
-};
 use reborn_support::harness::{
     RebornBinaryE2EHarness, RebornHarnessSharedStorage, RecordingTestCapabilityPort,
     test_product_scope,
 };
 use reborn_support::model_replay::RebornTraceReplayModelGateway;
+use t3claw_loop_support::{
+    HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
+    HostIdentityMessageContent, HostManagedModelMessageRole, HostManagedModelResponse,
+    IdentityApplicability, IdentityFileName,
+};
+use t3claw_turns::{
+    LoopMessageRef, TurnStatus,
+    run_profile::{LoopRunContext, PromptMode},
+};
 use tokio::sync::RwLock;
 
 const PROJECT_ALPHA_IDENTITY: &str = "Alice project alpha identity: carries amber notebook.";
@@ -52,7 +52,7 @@ async fn reborn_identity_project_scope_isolation_parity() {
         RecordingTestCapabilityPort::echo(),
         project_alpha,
         identity_source.clone(),
-        ironclaw_product_adapters::ProductTriggerReason::DirectChat,
+        t3claw_product_adapters::ProductTriggerReason::DirectChat,
         "reborn-test",
         "install-1",
         "alice",
@@ -68,7 +68,7 @@ async fn reborn_identity_project_scope_isolation_parity() {
         RecordingTestCapabilityPort::echo(),
         project_beta,
         identity_source.clone(),
-        ironclaw_product_adapters::ProductTriggerReason::DirectChat,
+        t3claw_product_adapters::ProductTriggerReason::DirectChat,
         "reborn-test",
         "install-1",
         "alice",
@@ -147,7 +147,7 @@ async fn reborn_identity_project_scope_isolation_parity() {
     beta.shutdown().await;
 }
 
-fn system_prompt_text(request: &ironclaw_loop_support::HostManagedModelRequest) -> String {
+fn system_prompt_text(request: &t3claw_loop_support::HostManagedModelRequest) -> String {
     request
         .messages
         .iter()

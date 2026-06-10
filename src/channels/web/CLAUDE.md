@@ -17,22 +17,22 @@ Browser-facing HTTP API and SSE/WebSocket real-time streaming. Axum-based, singl
 | `platform/legacy_auth.rs` | Temporary v1 thread-level auth-mode shim: `handle_legacy_auth_token_submission`, `handle_legacy_auth_cancel`, `clear_auth_mode`, `clear_auth_mode_for_thread`. Consumed by `features/chat/`, `handlers/auth.rs`, and `platform/ws.rs`; co-located under `platform/` so every consumer can reach it without a cross-slice back-edge. Delete alongside `/api/chat/auth-token` and `/api/chat/auth-cancel` once the gateway retires the no-`request_id` path. |
 | `platform/engine_dispatch.rs` | Shared engine-channel dispatch wrappers: `dispatch_engine_submission`, `dispatch_engine_external_callback`, `dispatch_onboarding_ready_followup`. Lives in platform because `features/chat/`, `features/extensions/`, and `features/pairing/` all compose them. |
 | `log_layer.rs` | Tracing layer that tees log lines to the `/api/logs/events` SSE stream |
-| `features/extensions/` | Nine extension lifecycle routes — `/api/extensions`, `/api/extensions/readiness`, `/api/extensions/tools`, `/api/extensions/install`, `/api/extensions/{name}/activate`, `/api/extensions/{name}/remove`, `/api/extensions/registry`, `/api/extensions/{name}/setup` (GET+POST). Every handler that takes `{name}` from the URL path validates via `ExtensionName::new` at the boundary (400 on path-traversal / invalid chars / oversized). Owns the `derive_activation_status`, `derive_onboarding`, `extension_phase_for_web`, and `apply_extension_readiness_to_response` helpers. Routes setup-submit through the `AuthManager` canonical resolver + `platform::engine_dispatch`. Migrated from `server.rs` in ironclaw#2599 stage 4d. |
-| `features/jobs/` | Nine sandbox-job routes — `/api/jobs`, `/api/jobs/summary`, `/api/jobs/{id}`, `/api/jobs/{id}/cancel`, `/api/jobs/{id}/restart`, `/api/jobs/{id}/prompt`, `/api/jobs/{id}/events`, `/api/jobs/{id}/files/list`, `/api/jobs/{id}/files/read`. Migrated from `handlers/jobs.rs` in ironclaw#2599 stage 5. |
-| `features/routines/` | Seven routine management routes — `/api/routines`, `/api/routines/summary`, `/api/routines/{id}` (GET+DELETE), `/api/routines/{id}/trigger`, `/api/routines/{id}/toggle`, `/api/routines/{id}/runs`. Merges the previously split `handlers/routines.rs` + an inline `routines_runs_handler` (historically in `server.rs`) into one slice with a single canonical `routines_runs_handler`. Migrated in ironclaw#2599 stage 5. |
-| `features/settings/` | Eight settings routes — `/api/settings`, `/api/settings/export`, `/api/settings/import`, `/api/settings/{key}` (GET/PUT/DELETE), plus the `/api/admin/tool-policy` dependencies via `resolve_settings_store` (now `pub(crate)` for `handlers/tool_policy.rs`). Migrated from `handlers/settings.rs` in ironclaw#2599 stage 5. |
-| `features/chat/` | Ten chat routes end-to-end — `/api/chat/send`, `/api/chat/approval`, `/api/chat/gate/resolve`, `/api/chat/auth-token` (legacy v1 shim), `/api/chat/auth-cancel` (legacy v1 shim), `/api/chat/ws`, `/api/chat/events`, `/api/chat/history`, `/api/chat/threads`, `/api/chat/thread/new`. Owns chat-private helpers: `is_local_origin` (CSRF-gate for WS), `pending_gate_extension_name` (routes through the canonical `AuthManager::resolve_extension_name_for_auth_flow`), in-progress reconciliation (`reconcile_in_progress_with_turns` + satellites), `turn_info_from_in_memory_turn`, `thread_state_label` / `turn_state_label`, `summary_live_state`, and the `ChatEventsQuery` / `HistoryQuery` request DTOs. Absorbed the four live handler duplicates formerly in `handlers/chat.rs`, which has been deleted. Migrated from `server.rs` in ironclaw#2599 stage 4c. |
-| `features/logs/` | `GET /api/logs/events` + `GET/PUT /api/logs/level` — runtime log stream and log-level knob. Migrated from `server.rs` in ironclaw#2599 stage 4b. |
-| `features/oauth/` | First feature slice landed per ironclaw#2599 stage 4a: OAuth callback (`/oauth/callback`), channel-relay event webhook (`/relay/events`), and the Slack-specific relay OAuth completion flow (`/oauth/slack/callback`). Owns its private helpers (`oauth_error_page`, `redact_oauth_state_for_logs`). |
-| `features/pairing/` | `GET /api/pairing/{channel}` + `POST /api/pairing/{channel}/approve` — WASM channel pairing approvals. Validates the URL path through `ExtensionName::new` at the handler boundary so invalid channel names reject with 400 instead of silently routing to a lookup-miss. Migrated from `server.rs` in ironclaw#2599 stage 4b. |
-| `features/status/` | `GET /api/gateway/status` — runtime snapshot for the admin dashboard (uptime, SSE/WS counts, cost / usage aggregates, active config). Owns the `GatewayStatusResponse` DTO. Migrated from `server.rs` in ironclaw#2599 stage 4b. |
-| `handlers/` | Transitional feature handlers that haven't migrated to `features/<slice>/` yet: `auth`, `engine`, `frontend`, `llm`, `memory`, `secrets`, `skills`, `system_prompt`, `tokens`, `tool_policy`, `users`, `webhooks`. Targeted for migration per ironclaw#2599 if churn / slice-boundary pressure justifies it. |
+| `features/extensions/` | Nine extension lifecycle routes — `/api/extensions`, `/api/extensions/readiness`, `/api/extensions/tools`, `/api/extensions/install`, `/api/extensions/{name}/activate`, `/api/extensions/{name}/remove`, `/api/extensions/registry`, `/api/extensions/{name}/setup` (GET+POST). Every handler that takes `{name}` from the URL path validates via `ExtensionName::new` at the boundary (400 on path-traversal / invalid chars / oversized). Owns the `derive_activation_status`, `derive_onboarding`, `extension_phase_for_web`, and `apply_extension_readiness_to_response` helpers. Routes setup-submit through the `AuthManager` canonical resolver + `platform::engine_dispatch`. Migrated from `server.rs` in t3claw#2599 stage 4d. |
+| `features/jobs/` | Nine sandbox-job routes — `/api/jobs`, `/api/jobs/summary`, `/api/jobs/{id}`, `/api/jobs/{id}/cancel`, `/api/jobs/{id}/restart`, `/api/jobs/{id}/prompt`, `/api/jobs/{id}/events`, `/api/jobs/{id}/files/list`, `/api/jobs/{id}/files/read`. Migrated from `handlers/jobs.rs` in t3claw#2599 stage 5. |
+| `features/routines/` | Seven routine management routes — `/api/routines`, `/api/routines/summary`, `/api/routines/{id}` (GET+DELETE), `/api/routines/{id}/trigger`, `/api/routines/{id}/toggle`, `/api/routines/{id}/runs`. Merges the previously split `handlers/routines.rs` + an inline `routines_runs_handler` (historically in `server.rs`) into one slice with a single canonical `routines_runs_handler`. Migrated in t3claw#2599 stage 5. |
+| `features/settings/` | Eight settings routes — `/api/settings`, `/api/settings/export`, `/api/settings/import`, `/api/settings/{key}` (GET/PUT/DELETE), plus the `/api/admin/tool-policy` dependencies via `resolve_settings_store` (now `pub(crate)` for `handlers/tool_policy.rs`). Migrated from `handlers/settings.rs` in t3claw#2599 stage 5. |
+| `features/chat/` | Ten chat routes end-to-end — `/api/chat/send`, `/api/chat/approval`, `/api/chat/gate/resolve`, `/api/chat/auth-token` (legacy v1 shim), `/api/chat/auth-cancel` (legacy v1 shim), `/api/chat/ws`, `/api/chat/events`, `/api/chat/history`, `/api/chat/threads`, `/api/chat/thread/new`. Owns chat-private helpers: `is_local_origin` (CSRF-gate for WS), `pending_gate_extension_name` (routes through the canonical `AuthManager::resolve_extension_name_for_auth_flow`), in-progress reconciliation (`reconcile_in_progress_with_turns` + satellites), `turn_info_from_in_memory_turn`, `thread_state_label` / `turn_state_label`, `summary_live_state`, and the `ChatEventsQuery` / `HistoryQuery` request DTOs. Absorbed the four live handler duplicates formerly in `handlers/chat.rs`, which has been deleted. Migrated from `server.rs` in t3claw#2599 stage 4c. |
+| `features/logs/` | `GET /api/logs/events` + `GET/PUT /api/logs/level` — runtime log stream and log-level knob. Migrated from `server.rs` in t3claw#2599 stage 4b. |
+| `features/oauth/` | First feature slice landed per t3claw#2599 stage 4a: OAuth callback (`/oauth/callback`), channel-relay event webhook (`/relay/events`), and the Slack-specific relay OAuth completion flow (`/oauth/slack/callback`). Owns its private helpers (`oauth_error_page`, `redact_oauth_state_for_logs`). |
+| `features/pairing/` | `GET /api/pairing/{channel}` + `POST /api/pairing/{channel}/approve` — WASM channel pairing approvals. Validates the URL path through `ExtensionName::new` at the handler boundary so invalid channel names reject with 400 instead of silently routing to a lookup-miss. Migrated from `server.rs` in t3claw#2599 stage 4b. |
+| `features/status/` | `GET /api/gateway/status` — runtime snapshot for the admin dashboard (uptime, SSE/WS counts, cost / usage aggregates, active config). Owns the `GatewayStatusResponse` DTO. Migrated from `server.rs` in t3claw#2599 stage 4b. |
+| `handlers/` | Transitional feature handlers that haven't migrated to `features/<slice>/` yet: `auth`, `engine`, `frontend`, `llm`, `memory`, `secrets`, `skills`, `system_prompt`, `tokens`, `tool_policy`, `users`, `webhooks`. Targeted for migration per t3claw#2599 if churn / slice-boundary pressure justifies it. |
 | `openai_compat.rs` | OpenAI-compatible proxy (`/v1/chat/completions`, `/v1/models`) |
 | `util.rs` | Shared helpers (`web_incoming_message`, `build_turns_from_db_messages`, `images_to_attachments`, `truncate_preview`) |
-| `test_helpers.rs` | Always-compiled test utilities. `TestGatewayBuilder` (public) — the `tests/` crate's entry point for spinning up a `GatewayState` + optional Axum server on a random port. Plus seven `pub(crate)` `#[cfg(test)]`-gated cross-slice fixtures — `test_gateway_state(ext_mgr)`, `test_gateway_state_with_dependencies(ext_mgr, store, db_auth, pairing_store)`, `test_gateway_state_with_store_and_session_manager(store, session_manager)`, `insert_test_user`, `test_secrets_store`, `test_ext_mgr`, `test_ext_mgr_with_db` — landed in ironclaw#2599 stages 6a+6 so the chat / extensions / oauth / pairing / users slice test modules can share construction helpers without a central mega-tests block. |
+| `test_helpers.rs` | Always-compiled test utilities. `TestGatewayBuilder` (public) — the `tests/` crate's entry point for spinning up a `GatewayState` + optional Axum server on a random port. Plus seven `pub(crate)` `#[cfg(test)]`-gated cross-slice fixtures — `test_gateway_state(ext_mgr)`, `test_gateway_state_with_dependencies(ext_mgr, store, db_auth, pairing_store)`, `test_gateway_state_with_store_and_session_manager(store, session_manager)`, `insert_test_user`, `test_secrets_store`, `test_ext_mgr`, `test_ext_mgr_with_db` — landed in t3claw#2599 stages 6a+6 so the chat / extensions / oauth / pairing / users slice test modules can share construction helpers without a central mega-tests block. |
 | `static/` | Single-page app (HTML/CSS/JS) — embedded at compile time via `include_str!`/`include_bytes!` |
 
-## Platform vs. feature layering (ironclaw#2599)
+## Platform vs. feature layering (t3claw#2599)
 
 The target layout is a `platform/` subtree (router, state, auth, SSE,
 WS, static serving) that feature handlers depend on.
@@ -43,7 +43,7 @@ meets features — `platform/router.rs` imports every feature handler it
 registers. Every *other* platform submodule (state, static_files,
 auth, sse, ws) must stay handler-agnostic, and
 `scripts/check_gateway_boundaries.py` (wired into the `code_style`
-CI workflow as of ironclaw#2599 stage 5) enforces this: it fails the
+CI workflow as of t3claw#2599 stage 5) enforces this: it fails the
 build on any added import from `platform/*` (except `router.rs`) into
 `handlers/*` or `features/*`. The stage-6 deletion also retired the
 `server.rs` shim itself, but the checker still rejects
@@ -192,7 +192,7 @@ Current consolidation points:
 - `src/bridge/auth_manager.rs`: `resolve_extension_name_for_auth_flow(...)` — **canonical resolver, single source of truth**
 - `src/bridge/router.rs`: `resolve_auth_gate_extension_name(...)` — thin wrapper for gate display/submit
 - `src/channels/web/features/chat/mod.rs`: `pending_gate_extension_name(...)` — thin wrapper for history/pending-gate hydration
-- `crates/ironclaw_gateway/static/js/core/onboarding.js`: `handleOnboardingState(...)` as the canonical client entrypoint (the old monolithic `app.js` has been split into per-concern modules under `static/js/`; `APP_JS` in `crates/ironclaw_gateway/src/assets.rs` concatenates them at compile time)
+- `crates/t3claw_gateway/static/js/core/onboarding.js`: `handleOnboardingState(...)` as the canonical client entrypoint (the old monolithic `app.js` has been split into per-concern modules under `static/js/`; `APP_JS` in `crates/t3claw_gateway/src/assets.rs` concatenates them at compile time)
 
 All three of the backend wrappers above delegate to the canonical resolver
 or return `Option<ExtensionName>`; they must not duplicate its logic.
@@ -229,7 +229,7 @@ Legacy cleanup note:
 | POST | `/api/traces/submissions/{submission_id}/revoke` | Mark an owned contribution revoked and optionally call the configured private revocation API |
 
 The Reborn gateway exposes these as authenticated API routes first. Static UI
-controls should be added in the modular `crates/ironclaw_gateway/static/js`
+controls should be added in the modular `crates/t3claw_gateway/static/js`
 surfaces instead of restoring the deleted monolithic `app.js`/`style.css`
 gateway. Any future reviewer/operator panel should call a user-configured
 TraceDAO service with a session-only pasted reviewer/admin bearer token.
@@ -316,7 +316,7 @@ Claim-next review leases POST `{ lease_ttl_seconds?: i64, review_due_at?: RFC333
 | GET | `/api/debug/prompt` | Inspect the current system prompt components (workspace identity files) |
 | POST | `/v1/chat/completions` | OpenAI-compatible LLM proxy |
 | GET | `/v1/models` | OpenAI-compatible model list |
-| POST | `/api/v1/responses` | OpenAI Responses API (routes through the full agent loop). Also served as `/v1/responses` for backward compatibility (ironclaw#2201). |
+| POST | `/api/v1/responses` | OpenAI Responses API (routes through the full agent loop). Also served as `/v1/responses` for backward compatibility (t3claw#2201). |
 | GET | `/api/v1/responses/{id}` | Retrieve a historical Responses-API response. Also served as `/v1/responses/{id}` for backward compatibility. |
 
 ### Static / Project files
@@ -414,7 +414,7 @@ All responses include:
 
 ## Pending Gates
 
-Classic agent approvals are in-memory, but engine v2 pauses live in the unified pending-gate store with file-backed recovery under `~/.ironclaw/pending-gates.json`. `HistoryResponse.pending_gate` rehydrates from that store so cards survive thread switches, SSE reconnects, and process restarts. Gate UI must remain thread-scoped: stale cards from another thread should not be rendered or resolved in the current thread.
+Classic agent approvals are in-memory, but engine v2 pauses live in the unified pending-gate store with file-backed recovery under `~/.t3claw/pending-gates.json`. `HistoryResponse.pending_gate` rehydrates from that store so cards survive thread switches, SSE reconnects, and process restarts. Gate UI must remain thread-scoped: stale cards from another thread should not be rendered or resolved in the current thread.
 
 The chat history contract also carries a lightweight `HistoryResponse.in_progress` payload for durable in-flight turn state. Use it to rebuild the visible user message plus "Processing..." affordance after refresh or thread switches. Do not persist transient SSE-only thinking text as normal conversation messages.
 

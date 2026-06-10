@@ -3,12 +3,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ironclaw_host_api::NetworkMethod;
-use ironclaw_network::{
+use sha2::{Digest, Sha256};
+use t3claw_host_api::NetworkMethod;
+use t3claw_network::{
     NetworkHttpError, NetworkHttpResponse, NetworkHttpTransport, NetworkTransportRequest,
     PolicyNetworkHttpEgress,
 };
-use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub struct RecordingNetworkHttpTransport {

@@ -51,7 +51,7 @@ async fn gateway_respond_without_thread_id_returns_error() {
 async fn gateway_respond_with_thread_id_succeeds() {
     let gw = test_gateway();
     let mut msg = IncomingMessage::new("gateway", "test-user", "hello");
-    msg.thread_id = Some(ironclaw_common::ExternalThreadId::from_trusted(
+    msg.thread_id = Some(t3claw_common::ExternalThreadId::from_trusted(
         "thread-123".to_string(),
     ));
 
@@ -93,8 +93,8 @@ async fn gateway_broadcast_without_thread_id_and_no_store_returns_error() {
 async fn gateway_broadcast_without_thread_id_falls_back_to_assistant_thread() {
     use crate::db::Database;
     use futures::StreamExt;
-    use ironclaw_common::AppEvent;
     use std::sync::Arc;
+    use t3claw_common::AppEvent;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test_broadcast_fallback.db");
@@ -177,8 +177,8 @@ async fn mission_notification_cross_user_does_not_leak_owner_thread_id() {
     use crate::channels::ChannelManager;
     use crate::db::Database;
     use futures::StreamExt;
-    use ironclaw_common::AppEvent;
     use std::sync::Arc;
+    use t3claw_common::AppEvent;
 
     // Set up DB for broadcast fallback
     let dir = tempfile::tempdir().unwrap();
@@ -202,10 +202,10 @@ async fn mission_notification_cross_user_does_not_leak_owner_thread_id() {
     mgr.add(Box::new(gw)).await;
     let channels = Arc::new(mgr);
 
-    let notif = ironclaw_engine::MissionNotification {
-        mission_id: ironclaw_engine::MissionId(uuid::Uuid::new_v4()),
+    let notif = t3claw_engine::MissionNotification {
+        mission_id: t3claw_engine::MissionId(uuid::Uuid::new_v4()),
         mission_name: "test-mission".to_string(),
-        thread_id: ironclaw_engine::ThreadId(uuid::Uuid::new_v4()),
+        thread_id: t3claw_engine::ThreadId(uuid::Uuid::new_v4()),
         user_id: "owner-user".to_string(),
         notify_channels: vec!["gateway".to_string()],
         notify_user: Some("other-user".to_string()),
@@ -264,8 +264,8 @@ async fn mission_notification_same_user_attaches_owner_thread_id() {
     use crate::channels::ChannelManager;
     use crate::db::Database;
     use futures::StreamExt;
-    use ironclaw_common::AppEvent;
     use std::sync::Arc;
+    use t3claw_common::AppEvent;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test_same_user.db");
@@ -287,10 +287,10 @@ async fn mission_notification_same_user_attaches_owner_thread_id() {
     mgr.add(Box::new(gw)).await;
     let channels = Arc::new(mgr);
 
-    let notif = ironclaw_engine::MissionNotification {
-        mission_id: ironclaw_engine::MissionId(uuid::Uuid::new_v4()),
+    let notif = t3claw_engine::MissionNotification {
+        mission_id: t3claw_engine::MissionId(uuid::Uuid::new_v4()),
         mission_name: "test-mission".to_string(),
-        thread_id: ironclaw_engine::ThreadId(uuid::Uuid::new_v4()),
+        thread_id: t3claw_engine::ThreadId(uuid::Uuid::new_v4()),
         user_id: "test-user".to_string(),
         notify_channels: vec!["gateway".to_string()],
         notify_user: None, // owner IS the recipient
@@ -342,8 +342,8 @@ async fn mission_notification_explicit_same_user_attaches_owner_thread_id() {
     use crate::channels::ChannelManager;
     use crate::db::Database;
     use futures::StreamExt;
-    use ironclaw_common::AppEvent;
     use std::sync::Arc;
+    use t3claw_common::AppEvent;
 
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test_explicit_same_user.db");
@@ -364,10 +364,10 @@ async fn mission_notification_explicit_same_user_attaches_owner_thread_id() {
     mgr.add(Box::new(gw)).await;
     let channels = Arc::new(mgr);
 
-    let notif = ironclaw_engine::MissionNotification {
-        mission_id: ironclaw_engine::MissionId(uuid::Uuid::new_v4()),
+    let notif = t3claw_engine::MissionNotification {
+        mission_id: t3claw_engine::MissionId(uuid::Uuid::new_v4()),
         mission_name: "test-mission".to_string(),
-        thread_id: ironclaw_engine::ThreadId(uuid::Uuid::new_v4()),
+        thread_id: t3claw_engine::ThreadId(uuid::Uuid::new_v4()),
         user_id: "test-user".to_string(),
         notify_channels: vec!["gateway".to_string()],
         // Explicitly set to same user — guard must still attach thread_id

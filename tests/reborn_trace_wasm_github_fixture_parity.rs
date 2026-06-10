@@ -5,10 +5,6 @@ mod support;
 
 use std::time::Duration;
 
-use ironclaw_host_api::{CapabilityId, NetworkMethod};
-use ironclaw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
-use ironclaw_network::NetworkHttpRequest;
-use ironclaw_turns::TurnStatus;
 use reborn_support::{
     harness::{HarnessWaitConfig, RebornBinaryE2EHarness},
     model_replay::{
@@ -16,6 +12,10 @@ use reborn_support::{
     },
 };
 use serde_json::json;
+use t3claw_host_api::{CapabilityId, NetworkMethod};
+use t3claw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
+use t3claw_network::NetworkHttpRequest;
+use t3claw_turns::TurnStatus;
 
 #[tokio::test]
 async fn reborn_trace_advertises_github_v2_wasm_capabilities() {
@@ -153,7 +153,7 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.get_repo",
             "get-repo",
-            json!({"owner": "nearai", "repo": "ironclaw"}),
+            json!({"owner": "nearai", "repo": "t3claw"}),
         ),
         call(
             "github.create_repo",
@@ -171,14 +171,14 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.list_issues",
             "list-issues",
-            json!({"owner": "nearai", "repo": "ironclaw", "state": "closed", "limit": 7, "page": 2}),
+            json!({"owner": "nearai", "repo": "t3claw", "state": "closed", "limit": 7, "page": 2}),
         ),
         call(
             "github.create_issue",
             "create-issue",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "title": "matrix issue",
                 "body": "body",
                 "labels": ["qa", "reborn"]
@@ -187,12 +187,12 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.get_issue",
             "get-issue",
-            json!({"owner": "nearai", "repo": "ironclaw", "issue_number": 42}),
+            json!({"owner": "nearai", "repo": "t3claw", "issue_number": 42}),
         ),
         call(
             "github.list_issue_comments",
             "list-issue-comments",
-            json!({"owner": "nearai", "repo": "ironclaw", "issue_number": 42, "limit": 5, "page": 3}),
+            json!({"owner": "nearai", "repo": "t3claw", "issue_number": 42, "limit": 5, "page": 3}),
         ),
         call(
             "github.create_issue_comment",
@@ -202,14 +202,14 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.list_pull_requests",
             "list-prs",
-            json!({"owner": "nearai", "repo": "ironclaw", "state": "all", "limit": 9, "page": 4}),
+            json!({"owner": "nearai", "repo": "t3claw", "state": "all", "limit": 9, "page": 4}),
         ),
         call(
             "github.create_pull_request",
             "create-pr",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "title": "matrix pr",
                 "head": "feature/matrix",
                 "base": "main",
@@ -220,19 +220,19 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.get_pull_request",
             "get-pr",
-            json!({"owner": "nearai", "repo": "ironclaw", "pr_number": 4280}),
+            json!({"owner": "nearai", "repo": "t3claw", "pr_number": 4280}),
         ),
         call(
             "github.get_pull_request_files",
             "get-pr-files",
-            json!({"owner": "nearai", "repo": "ironclaw", "pr_number": 4280}),
+            json!({"owner": "nearai", "repo": "t3claw", "pr_number": 4280}),
         ),
         call(
             "github.create_pr_review",
             "create-pr-review",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "pr_number": 4280,
                 "body": "review body",
                 "event": "COMMENT"
@@ -241,14 +241,14 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.list_pull_request_comments",
             "list-pr-comments",
-            json!({"owner": "nearai", "repo": "ironclaw", "pr_number": 4280, "limit": 6, "page": 2}),
+            json!({"owner": "nearai", "repo": "t3claw", "pr_number": 4280, "limit": 6, "page": 2}),
         ),
         call(
             "github.reply_pull_request_comment",
             "reply-pr-comment",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "pr_number": 4280,
                 "comment_id": 123456789_u64,
                 "body": "reply"
@@ -257,19 +257,19 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.get_pull_request_reviews",
             "get-pr-reviews",
-            json!({"owner": "nearai", "repo": "ironclaw", "pr_number": 4280, "limit": 8, "page": 3}),
+            json!({"owner": "nearai", "repo": "t3claw", "pr_number": 4280, "limit": 8, "page": 3}),
         ),
         call(
             "github.get_combined_status",
             "get-status",
-            json!({"owner": "nearai", "repo": "ironclaw", "ref": "feature/matrix"}),
+            json!({"owner": "nearai", "repo": "t3claw", "ref": "feature/matrix"}),
         ),
         call(
             "github.merge_pull_request",
             "merge-pr",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "pr_number": 4280,
                 "commit_title": "merge title",
                 "commit_message": "merge body",
@@ -284,7 +284,7 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.search_repositories",
             "search-repos",
-            json!({"query": "org:nearai ironclaw", "limit": 12, "page": 3, "sort": "updated", "order": "desc"}),
+            json!({"query": "org:nearai t3claw", "limit": 12, "page": 3, "sort": "updated", "order": "desc"}),
         ),
         call(
             "github.search_code",
@@ -299,17 +299,17 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.list_branches",
             "list-branches",
-            json!({"owner": "nearai", "repo": "ironclaw", "protected": true, "limit": 13, "page": 2}),
+            json!({"owner": "nearai", "repo": "t3claw", "protected": true, "limit": 13, "page": 2}),
         ),
         call(
             "github.create_branch",
             "create-branch",
-            json!({"owner": "nearai", "repo": "ironclaw", "branch": "feature/matrix", "from_ref": "main"}),
+            json!({"owner": "nearai", "repo": "t3claw", "branch": "feature/matrix", "from_ref": "main"}),
         ),
         call(
             "github.get_file_content",
             "get-file",
-            json!({"owner": "nearai", "repo": "ironclaw", "path": "docs/replay.md", "ref": "feature/matrix"}),
+            json!({"owner": "nearai", "repo": "t3claw", "path": "docs/replay.md", "ref": "feature/matrix"}),
         ),
         call(
             "github.create_or_update_file",
@@ -320,14 +320,14 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.list_releases",
             "list-releases",
-            json!({"owner": "nearai", "repo": "ironclaw", "limit": 14, "page": 2}),
+            json!({"owner": "nearai", "repo": "t3claw", "limit": 14, "page": 2}),
         ),
         call(
             "github.create_release",
             "create-release",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "tag_name": "v1.2.3",
                 "target_commitish": "main",
                 "name": "v1.2.3",
@@ -342,7 +342,7 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
             "trigger-workflow",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "workflow_id": "ci.yml",
                 "ref": "main",
                 "inputs": {"suite": "smoke"}
@@ -351,16 +351,16 @@ fn github_capability_calls() -> Vec<RebornScriptedProviderToolCall> {
         call(
             "github.get_workflow_runs",
             "get-workflow-runs",
-            json!({"owner": "nearai", "repo": "ironclaw", "workflow_id": "ci.yml", "limit": 15, "page": 2}),
+            json!({"owner": "nearai", "repo": "t3claw", "workflow_id": "ci.yml", "limit": 15, "page": 2}),
         ),
         call(
             "github.fork_repo",
             "fork-repo",
             json!({
                 "owner": "nearai",
-                "repo": "ironclaw",
+                "repo": "t3claw",
                 "organization": "nearai-labs",
-                "name": "ironclaw-fork",
+                "name": "t3claw-fork",
                 "default_branch_only": true
             }),
         ),
@@ -454,7 +454,7 @@ fn expected_github_http_requests() -> Vec<ExpectedGithubHttpRequest> {
         ),
         get("https://api.github.com/users/nearai/repos?per_page=11&page=2"),
         get(
-            "https://api.github.com/search/repositories?q=org%3Anearai%20ironclaw&per_page=12&page=3&sort=updated&order=desc",
+            "https://api.github.com/search/repositories?q=org%3Anearai%20t3claw&per_page=12&page=3&sort=updated&order=desc",
         ),
         get(
             "https://api.github.com/search/code?q=repo%3Anearai%2Fironclaw%20path%3Asrc%20Tool&per_page=12&page=3&sort=updated&order=desc",
@@ -524,7 +524,7 @@ fn expected_github_http_requests() -> Vec<ExpectedGithubHttpRequest> {
             "https://api.github.com/repos/nearai/ironclaw/forks",
             json!({
                 "organization": "nearai-labs",
-                "name": "ironclaw-fork",
+                "name": "t3claw-fork",
                 "default_branch_only": true
             }),
         ),
@@ -614,7 +614,7 @@ fn request(
 fn issue_comment_input() -> serde_json::Value {
     json!({
         "owner": "nearai",
-        "repo": "ironclaw",
+        "repo": "t3claw",
         "issue_number": 42,
         "body": "matrix comment"
     })
@@ -623,7 +623,7 @@ fn issue_comment_input() -> serde_json::Value {
 fn file_write_input() -> serde_json::Value {
     json!({
         "owner": "nearai",
-        "repo": "ironclaw",
+        "repo": "t3claw",
         "path": "docs/replay.md",
         "message": "write replay",
         "content": "hello",
@@ -637,7 +637,7 @@ fn file_write_input() -> serde_json::Value {
 fn file_delete_input() -> serde_json::Value {
     json!({
         "owner": "nearai",
-        "repo": "ironclaw",
+        "repo": "t3claw",
         "path": "docs/replay.md",
         "message": "delete replay",
         "sha": "abc123",

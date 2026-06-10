@@ -1747,10 +1747,10 @@ pub struct ConversationSummary {
 
 /// A single message in a conversation.
 ///
-/// Re-exported from `ironclaw_reborn_traces` so that the trace client
+/// Re-exported from `t3claw_reborn_traces` so that the trace client
 /// extraction can share a single type definition with the legacy monolith
 /// without forcing call-site churn.
-pub use ironclaw_reborn_traces::ConversationMessage;
+pub use t3claw_reborn_traces::ConversationMessage;
 
 #[cfg(feature = "postgres")]
 impl Store {

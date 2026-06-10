@@ -27,8 +27,8 @@ const WECHAT_OUTBOUND_ENVELOPE_MAGIC: &[u8] = b"ICWXENC1";
 /// pushing unbounded data into the host.
 const MAX_DECODED_WAV_BYTES: usize = 50 * 1024 * 1024;
 const SILK_DECODER_TIMEOUT: Duration = Duration::from_secs(15);
-const SILK_DECODER_BIN_NAME: &str = "ironclaw-silk-decoder";
-const SILK_DECODER_ENV_VAR: &str = "IRONCLAW_SILK_DECODER";
+const SILK_DECODER_BIN_NAME: &str = "t3claw-silk-decoder";
+const SILK_DECODER_ENV_VAR: &str = "T3CLAW_SILK_DECODER";
 
 #[derive(Debug, Deserialize)]
 struct WechatAttachmentExtras {
@@ -394,7 +394,7 @@ async fn maybe_transcode_wechat_silk_attachment(attachment: &mut Attachment) -> 
     }
     let decoder_path = resolve_silk_decoder_command().ok_or_else(|| {
         format!(
-            "{SILK_DECODER_BIN_NAME} not found (set {SILK_DECODER_ENV_VAR}, install on PATH, or place beside the ironclaw binary)"
+            "{SILK_DECODER_BIN_NAME} not found (set {SILK_DECODER_ENV_VAR}, install on PATH, or place beside the t3claw binary)"
         )
     })?;
 
@@ -417,9 +417,9 @@ async fn maybe_transcode_wechat_silk_attachment(attachment: &mut Attachment) -> 
 
 /// Locate the optional SILK decoder helper binary. Lookup order:
 ///
-/// 1. `IRONCLAW_SILK_DECODER` env var, used verbatim as a path.
-/// 2. Sibling of the running executable (`<exe-dir>/ironclaw-silk-decoder[.exe]`).
-/// 3. Bare `ironclaw-silk-decoder` for `$PATH` resolution by `Command`.
+/// 1. `T3CLAW_SILK_DECODER` env var, used verbatim as a path.
+/// 2. Sibling of the running executable (`<exe-dir>/t3claw-silk-decoder[.exe]`).
+/// 3. Bare `t3claw-silk-decoder` for `$PATH` resolution by `Command`.
 ///
 /// Returns `None` only when no candidate looks viable; callers fall back to
 /// preserving raw SILK and logging that the decoder is not configured.

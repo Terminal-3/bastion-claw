@@ -3,10 +3,10 @@
 Mirrors `scripts/workflow_canary/telegram_mock.py`'s shape: single-port
 aiohttp, ``MOCK_SHEETS_PORT=<n>`` on stdout, test hooks under
 ``/__mock/``. Routes via
-``IRONCLAW_TEST_HTTP_REMAP=sheets.googleapis.com=<mock_url>`` set in
+``T3CLAW_TEST_HTTP_REMAP=sheets.googleapis.com=<mock_url>`` set in
 ``run_workflow_canary.py``.
 
-Surface (subset of Sheets v4 actually exercised by IronClaw's tools):
+Surface (subset of Sheets v4 actually exercised by T3Claw's tools):
 
 - ``POST /v4/spreadsheets`` — create a new spreadsheet
 - ``POST /v4/spreadsheets/{id}/values/{range}:append`` — append rows
@@ -23,7 +23,7 @@ Test-only hooks:
 - ``POST /__mock/reset`` — clear all state between probes
 
 The mock validates ``values`` is a list-of-lists (refusing strings),
-which is exactly the contract IronClaw's google-sheets WASM tool
+which is exactly the contract T3Claw's google-sheets WASM tool
 expects to satisfy. A regression where the tool sends a string instead
 of an array would surface as a 400 from this mock — same shape as the
 real ``"expected a sequence"`` error from real Google.
@@ -306,7 +306,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock Google Sheets API v4 for IronClaw workflow-canary."
+        description="Mock Google Sheets API v4 for T3Claw workflow-canary."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

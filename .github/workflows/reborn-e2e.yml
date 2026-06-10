@@ -12,7 +12,7 @@ on:
     branches:
       - main
     paths:
-      - "crates/ironclaw_*/**"
+      - "crates/t3claw_*/**"
       - "docs/reborn/**"
       - "scripts/reborn-e2e-rust.sh"
       - "tests/e2e/**"
@@ -25,7 +25,7 @@ on:
     branches:
       - main
     paths:
-      - "crates/ironclaw_*/**"
+      - "crates/t3claw_*/**"
       - "docs/reborn/**"
       - "scripts/reborn-e2e-rust.sh"
       - "tests/e2e/**"
@@ -95,7 +95,7 @@ jobs:
           key: reborn-e2e-gateway-smoke
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
-      - name: Build ironclaw with libSQL
+      - name: Build t3claw with libSQL
         run: cargo build --no-default-features --features libsql
 
       - name: Install Python
@@ -140,8 +140,8 @@ jobs:
           key: reborn-e2e-webui-v2-smoke
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
 
-      - name: Build ironclaw-reborn with WebChat v2 surface
-        run: cargo build -p ironclaw_reborn_cli --features webui-v2-beta
+      - name: Build t3claw-reborn with WebChat v2 surface
+        run: cargo build -p t3claw_reborn_cli --features webui-v2-beta
 
       - name: Install Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5

@@ -9,18 +9,18 @@ use std::{
 };
 
 use async_trait::async_trait;
-use ironclaw_loop_support::{
+use reborn_support::harness::{RebornBinaryE2EHarness, RecordingTestCapabilityPort};
+use reborn_support::model_replay::RebornTraceReplayModelGateway;
+use t3claw_loop_support::{
     HostIdentityContextBuildError, HostIdentityContextCandidate, HostIdentityContextSource,
     HostIdentityMessageContent, HostManagedModelMessageRole, HostManagedModelResponse,
     IdentityApplicability, IdentityFileName,
 };
-use ironclaw_product_adapters::ProductTriggerReason;
-use ironclaw_turns::{
+use t3claw_product_adapters::ProductTriggerReason;
+use t3claw_turns::{
     LoopMessageRef, TurnStatus,
     run_profile::{LoopRunContext, PromptMode},
 };
-use reborn_support::harness::{RebornBinaryE2EHarness, RecordingTestCapabilityPort};
-use reborn_support::model_replay::RebornTraceReplayModelGateway;
 
 const ALICE_IDENTITY: &str = "Alice is a software engineer who lives in Seattle.";
 const BOB_IDENTITY: &str = "Bob is a marine biologist who lives in Miami.";
@@ -119,7 +119,7 @@ async fn reborn_identity_prompt_scope_isolation_parity() {
     harness.shutdown().await;
 }
 
-fn system_prompt_text(request: &ironclaw_loop_support::HostManagedModelRequest) -> String {
+fn system_prompt_text(request: &t3claw_loop_support::HostManagedModelRequest) -> String {
     request
         .messages
         .iter()

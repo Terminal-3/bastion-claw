@@ -5,8 +5,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use ironclaw_engine::{MountError, ProjectId, WorkspaceMounts};
 use serde_json::Value;
+use t3claw_engine::{MountError, ProjectId, WorkspaceMounts};
 use tracing::debug;
 
 /// Tool names that the sandbox **may** handle when their path argument
@@ -137,7 +137,7 @@ pub async fn maybe_intercept(
                         .iter()
                         .map(|e| {
                             let suffix = match e.kind {
-                                ironclaw_engine::workspace::EntryKind::Directory => "/",
+                                t3claw_engine::workspace::EntryKind::Directory => "/",
                                 _ => "",
                             };
                             format!("{}{}", e.path.display(), suffix)
@@ -273,11 +273,11 @@ fn is_mountable_path(path: &str) -> bool {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use ironclaw_engine::workspace::{DirEntry, EntryKind, FilesystemBackend, ShellOutput};
-    use ironclaw_engine::{MountBackend, ProjectMountFactory, ProjectMounts};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use t3claw_engine::workspace::{DirEntry, EntryKind, FilesystemBackend, ShellOutput};
+    use t3claw_engine::{MountBackend, ProjectMountFactory, ProjectMounts};
     use tempfile::TempDir;
 
     #[derive(Debug)]

@@ -1,4 +1,4 @@
-//! Web gateway channel for browser-based access to IronClaw.
+//! Web gateway channel for browser-based access to T3Claw.
 //!
 //! Provides a single-page web UI with:
 //! - Chat with the agent (via REST + SSE)
@@ -25,7 +25,7 @@ pub mod responses_api;
 pub mod types;
 pub(crate) mod util;
 
-// Backward-compat re-exports for the ironclaw#2599 migration. The auth,
+// Backward-compat re-exports for the t3claw#2599 migration. The auth,
 // SSE, and WebSocket modules moved to `platform::*` in stage 3; every
 // existing `crate::channels::web::{auth,sse,ws}::...` call site
 // continues to resolve via these re-exports until a follow-up PR
@@ -64,9 +64,9 @@ use crate::extensions::ExtensionManager;
 use crate::orchestrator::job_manager::ContainerJobManager;
 use crate::tools::ToolRegistry;
 use crate::workspace::Workspace;
-use ironclaw_embeddings::{EmbeddingCacheConfig, EmbeddingProvider};
-use ironclaw_skills::catalog::SkillCatalog;
-use ironclaw_skills::registry::SkillRegistry;
+use t3claw_embeddings::{EmbeddingCacheConfig, EmbeddingProvider};
+use t3claw_skills::catalog::SkillCatalog;
+use t3claw_skills::registry::SkillRegistry;
 
 use self::log_layer::{LogBroadcaster, LogLevelHandle};
 
@@ -381,20 +381,20 @@ impl GatewayChannel {
     }
 
     /// Inject the LLM provider for OpenAI-compatible API proxy.
-    pub fn with_llm_provider(mut self, llm: Arc<dyn ironclaw_llm::LlmProvider>) -> Self {
+    pub fn with_llm_provider(mut self, llm: Arc<dyn t3claw_llm::LlmProvider>) -> Self {
         self.rebuild_state(|s| s.llm_provider = Some(llm));
         self
     }
 
     /// Inject the LLM hot-reload controller for the settings handlers.
-    pub fn with_llm_reload(mut self, reload: Arc<ironclaw_llm::LlmReloadHandle>) -> Self {
+    pub fn with_llm_reload(mut self, reload: Arc<t3claw_llm::LlmReloadHandle>) -> Self {
         self.rebuild_state(|s| s.llm_reload = Some(reload));
         self
     }
 
     /// Inject the LLM session manager so a hot-reload can rebuild the
     /// provider chain without dropping the current auth session.
-    pub fn with_llm_session_manager(mut self, sm: Arc<ironclaw_llm::SessionManager>) -> Self {
+    pub fn with_llm_session_manager(mut self, sm: Arc<t3claw_llm::SessionManager>) -> Self {
         self.rebuild_state(|s| s.llm_session_manager = Some(sm));
         self
     }
@@ -869,7 +869,7 @@ impl Channel for GatewayChannel {
                 request_id,
             } => AppEvent::OnboardingState {
                 extension_name,
-                state: ironclaw_common::OnboardingStateDto::AuthRequired,
+                state: t3claw_common::OnboardingStateDto::AuthRequired,
                 request_id,
                 message: None,
                 instructions,
@@ -885,9 +885,9 @@ impl Channel for GatewayChannel {
             } => AppEvent::OnboardingState {
                 extension_name,
                 state: if success {
-                    ironclaw_common::OnboardingStateDto::Ready
+                    t3claw_common::OnboardingStateDto::Ready
                 } else {
-                    ironclaw_common::OnboardingStateDto::Failed
+                    t3claw_common::OnboardingStateDto::Failed
                 },
                 request_id: None,
                 message: Some(message),

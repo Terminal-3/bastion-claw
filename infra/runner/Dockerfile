@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         liblttng-ust1 \
         libssl-dev \
         pkg-config \
-        # ironclaw pulls pyo3 via pydantic-monty (embedded Python
+        # t3claw pulls pyo3 via pydantic-monty (embedded Python
         # interpreter called from Rust validators), so the build
         # needs both python3 (for pyo3's interpreter-discovery step)
         # and python3-dev (libpython headers/linkage for the embed
@@ -52,7 +52,7 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # All runtime state lives under /runner-data. Mount a Railway volume here so
 # the runner binary (which self-updates in place), the cargo/rustup caches,
-# and — critically — the ironclaw libsql DB that holds rotated OAuth refresh
+# and — critically — the t3claw libsql DB that holds rotated OAuth refresh
 # tokens all survive container restarts and deploys.
 ENV RUNNER_VERSION=${RUNNER_VERSION} \
     RUNNER_DATA=/runner-data \

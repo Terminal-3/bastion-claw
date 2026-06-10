@@ -25,7 +25,7 @@
 //!   `sandbox_daemon`.
 //!
 //! [`EffectBridgeAdapter`]: super::EffectBridgeAdapter
-//! [`WorkspaceMounts`]: ironclaw_engine::WorkspaceMounts
+//! [`WorkspaceMounts`]: t3claw_engine::WorkspaceMounts
 
 mod containerized_backend;
 mod containerized_factory;

@@ -20,8 +20,8 @@ use crate::tools::{
     prepare_tool_params,
 };
 use crate::worker::job::{Worker, WorkerDeps};
-use ironclaw_llm::LlmProvider;
-use ironclaw_safety::SafetyLayer;
+use t3claw_llm::LlmProvider;
+use t3claw_safety::SafetyLayer;
 
 /// Message to send to a worker.
 #[derive(Debug)]
@@ -69,11 +69,11 @@ pub struct Scheduler {
     /// SSE manager for live job event streaming.
     sse_tx: Option<Arc<crate::channels::web::sse::SseManager>>,
     /// HTTP interceptor for trace recording/replay (propagated to workers).
-    http_interceptor: Option<Arc<dyn ironclaw_llm::recording::HttpInterceptor>>,
+    http_interceptor: Option<Arc<dyn t3claw_llm::recording::HttpInterceptor>>,
     /// Resolved runtime policy propagated to per-job workers so the
     /// model-facing tool list filter applies to background jobs too.
     /// `None` in tests / before `Config::with_runtime_overrides` runs.
-    runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+    runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
     /// Running jobs (main LLM-driven jobs).
     jobs: Arc<RwLock<HashMap<Uuid, ScheduledJob>>>,
     /// Running sub-tasks (tool executions, background tasks).
@@ -114,7 +114,7 @@ impl Scheduler {
     /// Set the HTTP interceptor for trace recording/replay.
     pub fn set_http_interceptor(
         &mut self,
-        interceptor: Arc<dyn ironclaw_llm::recording::HttpInterceptor>,
+        interceptor: Arc<dyn t3claw_llm::recording::HttpInterceptor>,
     ) {
         self.http_interceptor = Some(interceptor);
     }
@@ -124,7 +124,7 @@ impl Scheduler {
     /// (#3243 HIGH iteration-2 gap).
     pub fn set_runtime_policy(
         &mut self,
-        policy: ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy,
+        policy: t3claw_host_api::runtime_policy::EffectiveRuntimePolicy,
     ) {
         self.runtime_policy = Some(policy);
     }
@@ -761,12 +761,12 @@ mod tests {
     use super::*;
     use crate::config::SafetyConfig;
     use crate::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput};
-    use ironclaw_llm::{
+    use rust_decimal_macros::dec;
+    use t3claw_llm::{
         CompletionRequest, CompletionResponse, LlmError, LlmProvider, ToolCompletionRequest,
         ToolCompletionResponse,
     };
-    use ironclaw_safety::SafetyLayer;
-    use rust_decimal_macros::dec;
+    use t3claw_safety::SafetyLayer;
 
     /// Minimal LLM provider stub for scheduler tests that don't exercise LLM calls.
     struct StubLlm;

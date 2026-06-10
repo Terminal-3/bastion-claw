@@ -379,7 +379,7 @@ pub async fn llm_providers_handler(
     AuthenticatedUser(_user): AuthenticatedUser,
 ) -> Json<serde_json::Value> {
     // For NEAR AI, the OAuth onboarding writes a session token into
-    // `SessionManager` (loaded from `~/.ironclaw/session.json` or the
+    // `SessionManager` (loaded from `~/.t3claw/session.json` or the
     // `NEARAI_SESSION_TOKEN` env var) and never populates `NEARAI_API_KEY`.
     // The configure surface treats `has_api_key` as the credential gate, so
     // a host configured with only a session token would otherwise show NEAR
@@ -393,7 +393,7 @@ pub async fn llm_providers_handler(
 
 fn build_llm_providers(nearai_has_session_token: bool) -> serde_json::Value {
     use crate::config::helpers::optional_env;
-    use ironclaw_llm::registry::ProviderRegistry;
+    use t3claw_llm::registry::ProviderRegistry;
 
     let registry = ProviderRegistry::load();
 
@@ -499,11 +499,11 @@ fn build_llm_providers(nearai_has_session_token: bool) -> serde_json::Value {
 /// settings GET. It does not replace the resolver's own validation
 /// when the chain actually rebuilds.
 fn backend_has_credentials(
-    def: &ironclaw_llm::registry::ProviderDefinition,
+    def: &t3claw_llm::registry::ProviderDefinition,
     has_api_key: bool,
     read_env: &dyn Fn(&str) -> Option<String>,
 ) -> bool {
-    use ironclaw_llm::registry::SetupHint;
+    use t3claw_llm::registry::SetupHint;
     match def.setup.as_ref() {
         // No setup hint at all = nothing to configure (Tinfoil, Groq,
         // etc. — they all carry SetupHint::ApiKey today, so this arm is
@@ -538,7 +538,7 @@ fn backend_has_credentials(
         // configured" when the session lives at a custom path.
         Some(SetupHint::OAuthDeviceCode { .. }) => read_env("OPENAI_CODEX_SESSION_PATH")
             .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| ironclaw_llm::OpenAiCodexConfig::default().session_path)
+            .unwrap_or_else(|| t3claw_llm::OpenAiCodexConfig::default().session_path)
             .exists(),
         // Gemini OAuth + similar file-based flows. Expand `~` in the
         // hint, then test for file existence.
@@ -575,13 +575,13 @@ fn expand_tilde(path: &str) -> Option<std::path::PathBuf> {
 /// 2. for built-in providers, the environment variable declared by the
 ///    registry (e.g. `NEARAI_API_KEY`, `OPENAI_API_KEY`), then
 /// 3. for NEAR AI specifically, the live `SessionManager` token (loaded
-///    from `~/.ironclaw/session.json` or set via `NEARAI_SESSION_TOKEN`).
+///    from `~/.t3claw/session.json` or set via `NEARAI_SESSION_TOKEN`).
 ///
 /// Fallback (2) matters because the default onboarding flow
 /// (`api_key_login()` in `llm/session.rs`) writes the key to the
-/// `NEARAI_API_KEY` env var + `~/.ironclaw/.env`, not to the secrets
+/// `NEARAI_API_KEY` env var + `~/.t3claw/.env`, not to the secrets
 /// vault. Fallback (3) covers the OAuth path: the session-token onboarding
-/// writes only `~/.ironclaw/session.json`, so a host that has neither
+/// writes only `~/.t3claw/session.json`, so a host that has neither
 /// `NEARAI_API_KEY` nor a vaulted secret would otherwise hit the configure
 /// dialog with no Authorization header even though `has_api_key`
 /// (surfaced by `build_llm_providers`) is true.
@@ -626,7 +626,7 @@ async fn resolve_api_key_from_secrets(
     //    `NEARAI_SESSION_TOKEN` env var both end up in `SessionManager` but
     //    write nothing to `NEARAI_API_KEY` or the secrets vault, so a host
     //    where only a session token is configured (the default
-    //    `~/.ironclaw/session.json` setup) would otherwise hit the configure
+    //    `~/.t3claw/session.json` setup) would otherwise hit the configure
     //    dialog with no Authorization header. NEAR AI accepts the session
     //    token as `Bearer <token>` exactly like an API key — same wire shape
     //    used by `NearAiChatProvider::resolve_bearer_token`.
@@ -650,7 +650,7 @@ fn builtin_api_key_env_var(provider_id: &str) -> Option<String> {
     if provider_id == "nearai" {
         return Some("NEARAI_API_KEY".to_string());
     }
-    ironclaw_llm::registry::ProviderRegistry::load()
+    t3claw_llm::registry::ProviderRegistry::load()
         .find(provider_id)
         .and_then(|def| def.api_key_env.clone())
 }
@@ -772,7 +772,7 @@ mod tests {
     #[tokio::test]
     async fn test_llm_providers_nearai_has_api_key_true_when_only_session_token() {
         // Regression: a host with no `NEARAI_API_KEY` but a loaded session
-        // token (the default `~/.ironclaw/session.json` setup) was reported
+        // token (the default `~/.t3claw/session.json` setup) was reported
         // with `has_api_key: false`, so `isProviderConfigured` in
         // `static/js/surfaces/config.js` hid the Use button and rendered a
         // "Not Configured" badge — even though NEAR AI authenticates fine
@@ -1498,7 +1498,7 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     async fn test_llm_list_models_falls_back_to_session_token_for_nearai() {
         // Regression: OAuth onboarding writes the session token to
-        // ~/.ironclaw/session.json (loaded into `SessionManager`) but never
+        // ~/.t3claw/session.json (loaded into `SessionManager`) but never
         // populates `NEARAI_API_KEY` or the secrets vault. Without the
         // session-token fallback in `resolve_api_key_from_secrets`, a host
         // configured with only the session token (the canonical
@@ -1549,10 +1549,10 @@ mod tests {
         });
 
         // Build a `SessionManager` with a token seeded directly — same shape
-        // as `~/.ironclaw/session.json` having been loaded at startup.
-        let session = ironclaw_llm::SessionManager::new_async(ironclaw_llm::SessionConfig {
+        // as `~/.t3claw/session.json` having been loaded at startup.
+        let session = t3claw_llm::SessionManager::new_async(t3claw_llm::SessionConfig {
             auth_base_url: "https://private.near.ai".to_string(),
-            session_path: std::env::temp_dir().join("ironclaw-test-no-such-file.json"),
+            session_path: std::env::temp_dir().join("t3claw-test-no-such-file.json"),
         })
         .await;
         let test_token = "sess_test_session_token_xyz";

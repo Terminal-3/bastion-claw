@@ -173,7 +173,7 @@ heuristics, tool authorization, runtime dispatch, or low-level persistence
 policy.
 
 In crates, product-facing assembly currently enters through
-`ironclaw_reborn_composition::RebornRuntime`. CLI and WebUI code should treat
+`t3claw_reborn_composition::RebornRuntime`. CLI and WebUI code should treat
 that facade as the public runtime handle instead of wiring `TurnStateStore`,
 `TurnRunnerWorker`, `HostRuntimeServices`, or concrete drivers directly.
 
@@ -187,14 +187,14 @@ request capability calls, checkpoint resumable state, and eventually return a
 Loops are userland because their choices are policy-constrained requests, not
 authority. A loop can ask to call a capability, read context, write a reply, or
 spawn a subagent, but the host decides whether that request is allowed and how it
-is recorded. This is why `ironclaw_agent_loop` depends on neutral turn/host-port
+is recorded. This is why `t3claw_agent_loop` depends on neutral turn/host-port
 contracts instead of importing the dispatcher, secrets, network, or product
 adapters.
 
 ### Kernel Boundary
 
 The kernel boundary is the security and recovery perimeter. It is not a single
-`ironclaw_kernel` crate; it is the set of mediated services that enforce:
+`t3claw_kernel` crate; it is the set of mediated services that enforce:
 
 - scope and active-thread ownership;
 - runner claim/heartbeat/recovery rules;
@@ -228,11 +228,11 @@ Use this table when deciding where a new concern belongs.
 
 | Layer | May call | Must not call | Owns | Typical crates |
 | --- | --- | --- | --- | --- |
-| Products | Composition facade, product workflow, projection/read APIs | Raw stores, `RuntimeDispatcher`, concrete loop drivers, substrate internals | UX, transport normalization, user-visible replies/events, approval/auth UI | `ironclaw_reborn_cli`, `ironclaw_webui_v2`, product adapters |
-| Composition | Turn coordinator, host runtime, loop driver registry, substrates through typed constructors | Product-specific branching in lower crates, test/dev escape hatches in production | Service graph, profile mode, readiness, facade handles | `ironclaw_reborn_composition`, `ironclaw_reborn` |
-| Userland loops | `AgentLoopDriverHost` ports only | `CapabilityHost`, `RuntimeDispatcher`, secret/network stores, product adapters | Prompt/model/tool strategy, retry/stop/gate decisions, loop-local checkpoints | `ironclaw_agent_loop`, loop families |
-| Kernel boundary | Substrates and runtime lanes through typed policy/authority APIs | Product UX decisions, loop strategy internals | Authorization, approvals, exact invocation leases, active locks, runner leases, validated exits, resource/process ownership | `ironclaw_turns`, `ironclaw_host_runtime`, `ironclaw_authorization`, `ironclaw_approvals` |
-| Substrates | Lower neutral contracts and storage backends | Product facade APIs, loop behavior, direct authority escalation | Durable records, files, memory, events, projections, threads, resource stores, runtime adapters | `ironclaw_filesystem`, `ironclaw_memory`, `ironclaw_events`, `ironclaw_threads`, runtime lane crates |
+| Products | Composition facade, product workflow, projection/read APIs | Raw stores, `RuntimeDispatcher`, concrete loop drivers, substrate internals | UX, transport normalization, user-visible replies/events, approval/auth UI | `t3claw_reborn_cli`, `t3claw_webui_v2`, product adapters |
+| Composition | Turn coordinator, host runtime, loop driver registry, substrates through typed constructors | Product-specific branching in lower crates, test/dev escape hatches in production | Service graph, profile mode, readiness, facade handles | `t3claw_reborn_composition`, `t3claw_reborn` |
+| Userland loops | `AgentLoopDriverHost` ports only | `CapabilityHost`, `RuntimeDispatcher`, secret/network stores, product adapters | Prompt/model/tool strategy, retry/stop/gate decisions, loop-local checkpoints | `t3claw_agent_loop`, loop families |
+| Kernel boundary | Substrates and runtime lanes through typed policy/authority APIs | Product UX decisions, loop strategy internals | Authorization, approvals, exact invocation leases, active locks, runner leases, validated exits, resource/process ownership | `t3claw_turns`, `t3claw_host_runtime`, `t3claw_authorization`, `t3claw_approvals` |
+| Substrates | Lower neutral contracts and storage backends | Product facade APIs, loop behavior, direct authority escalation | Durable records, files, memory, events, projections, threads, resource stores, runtime adapters | `t3claw_filesystem`, `t3claw_memory`, `t3claw_events`, `t3claw_threads`, runtime lane crates |
 
 Short version:
 
@@ -278,23 +278,23 @@ authority decision.
 
 ```mermaid
 flowchart TD
-    CLI["ironclaw_reborn_cli\nUX shell"]
-    WebUI["ironclaw_webui_v2 /\nweb ingress"]
-    Runtime["ironclaw_reborn_composition::RebornRuntime\nproduct-facing handle"]
+    CLI["t3claw_reborn_cli\nUX shell"]
+    WebUI["t3claw_webui_v2 /\nweb ingress"]
+    Runtime["t3claw_reborn_composition::RebornRuntime\nproduct-facing handle"]
     Factory["build_reborn_runtime /\nbuild_reborn_services"]
-    Coordinator["ironclaw_turns::TurnCoordinator\nadapter-safe turn API"]
+    Coordinator["t3claw_turns::TurnCoordinator\nadapter-safe turn API"]
     Store["TurnStateStore + Checkpoint stores\nmemory/filesystem/libSQL/Postgres slices"]
-    Worker["ironclaw_reborn::TurnRunnerWorker\nclaim, heartbeat, invoke, apply"]
+    Worker["t3claw_reborn::TurnRunnerWorker\nclaim, heartbeat, invoke, apply"]
     Registry["DriverRegistry\nregistered loop drivers"]
     Planned["PlannedDriver\nAgentLoopDriver adapter"]
-    Executor["ironclaw_agent_loop::CanonicalAgentLoopExecutor\ncanonical tick pipeline"]
+    Executor["t3claw_agent_loop::CanonicalAgentLoopExecutor\ncanonical tick pipeline"]
     Family["LoopFamily\nsealed planner strategy composition"]
     Host["AgentLoopDriverHost\nprompt/model/capability/transcript/checkpoint ports"]
-    LoopSupport["ironclaw_loop_support\nhost-port adapters"]
-    HostRuntime["ironclaw_host_runtime\nCapabilityHost, dispatcher, processes, approvals"]
-    LLM["ironclaw_llm / model gateway\nprovider boundary"]
-    Threads["ironclaw_threads\nconversation transcript"]
-    Events["ironclaw_events + projections\nredacted events and streams"]
+    LoopSupport["t3claw_loop_support\nhost-port adapters"]
+    HostRuntime["t3claw_host_runtime\nCapabilityHost, dispatcher, processes, approvals"]
+    LLM["t3claw_llm / model gateway\nprovider boundary"]
+    Threads["t3claw_threads\nconversation transcript"]
+    Events["t3claw_events + projections\nredacted events and streams"]
 
     CLI --> Runtime
     WebUI --> Runtime
@@ -324,12 +324,12 @@ flowchart TD
 
 | Crate | Owns | Does not own |
 | --- | --- | --- |
-| `ironclaw_reborn_composition` | Product-facing runtime assembly, facade handles, local/prod profiles, WebUI/runtime integration, projection services. | Low-level policy internals or direct product traffic bypassing Reborn adapters. |
-| `ironclaw_reborn` | Concrete Reborn loop driver registry, planned/text driver adapters, turn-runner worker, loop host factory, exit applier wiring. | Loop strategy internals, neutral turn contracts, product idempotency/binding policy. |
-| `ironclaw_turns` | Turn/run IDs, scopes, coordinator API, runner transition ports, state machine contracts, loop-exit DTOs, run profiles, checkpoint contracts. | Runtime dispatch, product adapters, raw prompts/tool inputs/secrets. |
-| `ironclaw_agent_loop` | Canonical executor, loop families, sealed strategy composition, resumable loop state. | Host services, runtime lanes, product transport, provider auth. |
-| `ironclaw_loop_support` | Reusable adapters that implement loop host ports over threads, model gateways, capabilities, skills, checkpoints, cancellation, subagents. | Product-facing runtime facade or durable turn state ownership. |
-| `ironclaw_host_runtime` | Kernel-facing host runtime services: capability host, dispatcher composition, approvals, resources, processes, secrets/network mediation. | Agent-loop planning or product conversation UX. |
+| `t3claw_reborn_composition` | Product-facing runtime assembly, facade handles, local/prod profiles, WebUI/runtime integration, projection services. | Low-level policy internals or direct product traffic bypassing Reborn adapters. |
+| `t3claw_reborn` | Concrete Reborn loop driver registry, planned/text driver adapters, turn-runner worker, loop host factory, exit applier wiring. | Loop strategy internals, neutral turn contracts, product idempotency/binding policy. |
+| `t3claw_turns` | Turn/run IDs, scopes, coordinator API, runner transition ports, state machine contracts, loop-exit DTOs, run profiles, checkpoint contracts. | Runtime dispatch, product adapters, raw prompts/tool inputs/secrets. |
+| `t3claw_agent_loop` | Canonical executor, loop families, sealed strategy composition, resumable loop state. | Host services, runtime lanes, product transport, provider auth. |
+| `t3claw_loop_support` | Reusable adapters that implement loop host ports over threads, model gateways, capabilities, skills, checkpoints, cancellation, subagents. | Product-facing runtime facade or durable turn state ownership. |
+| `t3claw_host_runtime` | Kernel-facing host runtime services: capability host, dispatcher composition, approvals, resources, processes, secrets/network mediation. | Agent-loop planning or product conversation UX. |
 
 ## Dependency Direction
 
@@ -349,14 +349,14 @@ host_api / common / prompt_envelope
 ```mermaid
 flowchart BT
     Entry["CLI / WebUI / product adapters"]
-    Composition["ironclaw_reborn_composition"]
-    Reborn["ironclaw_reborn"]
-    LoopSupport["ironclaw_loop_support"]
-    AgentLoop["ironclaw_agent_loop"]
-    Turns["ironclaw_turns"]
-    Runtime["ironclaw_host_runtime\n+ dispatcher/process lanes"]
+    Composition["t3claw_reborn_composition"]
+    Reborn["t3claw_reborn"]
+    LoopSupport["t3claw_loop_support"]
+    AgentLoop["t3claw_agent_loop"]
+    Turns["t3claw_turns"]
+    Runtime["t3claw_host_runtime\n+ dispatcher/process lanes"]
     Substrates["events, filesystem, memory,\nresources, auth, approvals,\nsecrets, network"]
-    HostApi["ironclaw_host_api\nneutral vocabulary"]
+    HostApi["t3claw_host_api\nneutral vocabulary"]
 
     Entry --> Composition
     Composition --> Reborn
@@ -374,7 +374,7 @@ flowchart BT
     Turns --> HostApi
 ```
 
-Boundary rules are mechanically checked in `ironclaw_architecture`, especially
+Boundary rules are mechanically checked in `t3claw_architecture`, especially
 for Reborn dependency edges and public-surface restrictions.
 
 ## Core Data Model
@@ -384,16 +384,16 @@ refs that cross crate boundaries:
 
 | Data | Purpose | Owner |
 | --- | --- | --- |
-| `TurnScope` | Canonical tenant/agent/project/thread scope. It is the active-lock and isolation key. | `ironclaw_turns` |
-| `TurnActor` | Actor metadata for the accepted turn. It does not change the active-lock key. | `ironclaw_turns` |
-| `AcceptedMessageRef` | Durable ref to the accepted inbound message in thread/transcript storage. | `ironclaw_turns` + thread service |
+| `TurnScope` | Canonical tenant/agent/project/thread scope. It is the active-lock and isolation key. | `t3claw_turns` |
+| `TurnActor` | Actor metadata for the accepted turn. It does not change the active-lock key. | `t3claw_turns` |
+| `AcceptedMessageRef` | Durable ref to the accepted inbound message in thread/transcript storage. | `t3claw_turns` + thread service |
 | `SourceBindingRef` / `ReplyTargetBindingRef` | Canonical product binding refs for source and reply target. | Product workflow / turns |
-| `TurnId` | Accepted inbound turn identity. | `ironclaw_turns` |
-| `TurnRunId` | Executable run identity. A turn may have resumed/child run behavior around this run record. | `ironclaw_turns` |
+| `TurnId` | Accepted inbound turn identity. | `t3claw_turns` |
+| `TurnRunId` | Executable run identity. A turn may have resumed/child run behavior around this run record. | `t3claw_turns` |
 | `TurnRunState` | Current status, resolved run profile, runner lease metadata, checkpoint/gate refs, event cursor. | `TurnStateStore` |
 | `TurnActiveLockRecord` | One-active-run-per-canonical-thread lock. | `TurnStateStore` |
 | `TurnIdempotencyRecord` | Sanitized replay outcome for adapter-facing submit/resume/cancel mutations. | `TurnStateStore` |
-| `LoopExecutionState` | Loop-owned resumable strategy state, serialized only as bounded checkpoint payload bytes. | `ironclaw_agent_loop` |
+| `LoopExecutionState` | Loop-owned resumable strategy state, serialized only as bounded checkpoint payload bytes. | `t3claw_agent_loop` |
 | `LoopCheckpointStateRef` / `TurnCheckpointId` | Opaque checkpoint payload ref and public checkpoint metadata id. | checkpoint stores + turns |
 | `LoopExit` | Driver claim containing durable refs only; never trusted by itself. | loop driver / turns |
 | `LoopMessageRef` / `LoopResultRef` / `LoopGateRef` | Host-minted evidence refs used to validate exits and blocked gates. | host ports / turns |
@@ -654,7 +654,7 @@ ResolvedRunProfile.loop_driver
               -> stop/exit stage
 ```
 
-`ironclaw_agent_loop` keeps strategy slots private. Downstream crates can hold a
+`t3claw_agent_loop` keeps strategy slots private. Downstream crates can hold a
 `LoopFamily`, but cannot inspect or recompose the planner internals. The mutable
 execution data is represented by whole-state values such as:
 
@@ -869,13 +869,13 @@ their data models:
 
 ## Composition Modes
 
-`ironclaw_reborn_composition::build_reborn_runtime` is the intended assembled
+`t3claw_reborn_composition::build_reborn_runtime` is the intended assembled
 entry point for CLI, WebUI, and harness callers. It:
 
 - builds substrate services with `build_reborn_services`;
 - wires thread, turn, checkpoint, event, approval, auth, skill, and projection
   services;
-- builds the default planned runtime through `ironclaw_reborn`;
+- builds the default planned runtime through `t3claw_reborn`;
 - starts a `TurnRunnerWorker`;
 - exposes task-level methods such as `new_conversation`, `send_user_message`,
   cancellation, approval/auth interactions, WebUI handles, and skill execution.
@@ -901,8 +901,8 @@ Use these routes for common changes:
 
 | Change | Start in | Also check | Avoid |
 | --- | --- | --- | --- |
-| Add product surface | Product adapter/WebUI/CLI crate, then `ironclaw_reborn_composition` facade if a new handle is needed. | Product workflow, projection/auth/approval APIs, e2e harness. | Direct store/worker/dispatcher imports from product code. |
-| Add loop family | `ironclaw_agent_loop` family/planner/executor tests, then `ironclaw_reborn` driver registration/profile wiring. | Checkpoint schema, run profile, loop-exit validation. | Exposing strategy slots or host runtime handles to loops. |
+| Add product surface | Product adapter/WebUI/CLI crate, then `t3claw_reborn_composition` facade if a new handle is needed. | Product workflow, projection/auth/approval APIs, e2e harness. | Direct store/worker/dispatcher imports from product code. |
+| Add loop family | `t3claw_agent_loop` family/planner/executor tests, then `t3claw_reborn` driver registration/profile wiring. | Checkpoint schema, run profile, loop-exit validation. | Exposing strategy slots or host runtime handles to loops. |
 | Add capability | Descriptor/extension registry, capability surface, host runtime/handler or runtime lane. | Authorization, approvals, obligations, resource estimates, redaction, architecture tests. | Calling dispatcher directly or treating visibility as authority. |
 | Add runtime lane | Owning runtime crate + `RuntimeDispatcher` adapter + host-runtime policy handoffs. | Network/secrets/resources/process/audit contracts. | Direct network/secrets/filesystem access inside the lane. |
 | Add persistence | Owning domain trait first, then libSQL/PostgreSQL parity where production-facing. | Contract tests, migration/backfill, idempotency/recovery semantics. | Backend-only behavior divergence. |
@@ -923,7 +923,7 @@ Implemented or strongly established:
 - loop-exit validation/application model;
 - host-runtime capability path with authorization, approvals, obligations,
   dispatch, resource/process handoff, and redaction concepts;
-- dependency-boundary tests in `ironclaw_architecture`.
+- dependency-boundary tests in `t3claw_architecture`.
 
 Partial or evolving:
 
@@ -967,16 +967,16 @@ Partial or evolving:
 - `docs/reborn/contracts/network.md`
 - `docs/reborn/contracts/secrets.md`
 - `crates/AGENTS.md`
-- `crates/ironclaw_turns/src/lib.rs`
-- `crates/ironclaw_turns/src/runner.rs`
-- `crates/ironclaw_turns/src/run_profile/driver.rs`
-- `crates/ironclaw_turns/src/run_profile/host.rs`
-- `crates/ironclaw_agent_loop/src/executor.rs`
-- `crates/ironclaw_agent_loop/src/family.rs`
-- `crates/ironclaw_agent_loop/src/state.rs`
-- `crates/ironclaw_reborn/src/planned_driver.rs`
-- `crates/ironclaw_reborn/src/turn_runner.rs`
-- `crates/ironclaw_reborn/src/runtime.rs`
-- `crates/ironclaw_reborn/src/loop_driver_host.rs`
-- `crates/ironclaw_reborn_composition/src/runtime.rs`
-- `crates/ironclaw_architecture/tests/reborn_dependency_boundaries.rs`
+- `crates/t3claw_turns/src/lib.rs`
+- `crates/t3claw_turns/src/runner.rs`
+- `crates/t3claw_turns/src/run_profile/driver.rs`
+- `crates/t3claw_turns/src/run_profile/host.rs`
+- `crates/t3claw_agent_loop/src/executor.rs`
+- `crates/t3claw_agent_loop/src/family.rs`
+- `crates/t3claw_agent_loop/src/state.rs`
+- `crates/t3claw_reborn/src/planned_driver.rs`
+- `crates/t3claw_reborn/src/turn_runner.rs`
+- `crates/t3claw_reborn/src/runtime.rs`
+- `crates/t3claw_reborn/src/loop_driver_host.rs`
+- `crates/t3claw_reborn_composition/src/runtime.rs`
+- `crates/t3claw_architecture/tests/reborn_dependency_boundaries.rs`

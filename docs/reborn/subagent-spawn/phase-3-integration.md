@@ -4,8 +4,8 @@
 **Date:** 2026-05-19
 **Depends on:** all of Phase 2 (P2.A, P2.B, P2.C, P2.D), transitively all of Phase 1
 **Workstream:** P3 — single workstream, one reviewable PR
-**Crates:** `crates/ironclaw_reborn` for driver/profile/readiness additions;
-`crates/ironclaw_reborn_composition` for concrete product-live assembly,
+**Crates:** `crates/t3claw_reborn` for driver/profile/readiness additions;
+`crates/t3claw_reborn_composition` for concrete product-live assembly,
 DB-backed store construction, root-provided projection sink wiring, and
 background task spawning.
 
@@ -36,7 +36,7 @@ not exist, that behaviour is a Phase 2 gap — fix it there, not here.
 > arrive through `DefaultPlannedRuntimeParts`. Phase 3 therefore (a) extends the
 > generic composition with the family/driver/profile wiring that is genuinely
 > generic, (b) adds a *concrete* subagent assembly seam in
-> `crates/ironclaw_reborn_composition` that constructs the durable DB-backed
+> `crates/t3claw_reborn_composition` that constructs the durable DB-backed
 > goal store, the durable tombstone store, the autonomous-continuation budget,
 > the root-provided pending-gate projection sink, the spawn-capable capability port, the
 > completion observer, and spawns the `RestartReconciler` periodic task, and
@@ -53,25 +53,25 @@ not exist, that behaviour is a Phase 2 gap — fix it there, not here.
 
 | File | Change |
 |---|---|
-| `crates/ironclaw_reborn/src/runtime.rs` | Keep generic planned-runtime composition only. Wire the `subagent` family + driver/profile metadata where this is generic. Do not construct DB stores, projection adapters, or spawn background tasks here. |
-| `crates/ironclaw_reborn/src/app_loop_family.rs` | `build_loop_family_registry()` now registers **two** families: `families::default()` and `families::subagent()`. |
-| `crates/ironclaw_reborn/src/planned_driver_factory.rs` | Add `register_subagent_planned_driver`, `subagent_planned_driver_descriptor`, `subagent_planned_profile_definition`, and fold the subagent profile into `default_planned_run_profile_resolver`. |
-| `crates/ironclaw_reborn/src/production_readiness.rs` | Add `RebornLoopProductionComponent::SubagentGoalStore`, `::SubagentCompletionObserver`, `::SubagentResultTombstoneStore`, `::SubagentRestartReconciler`, `::SubagentAutonomousContinuationBudget`; extend `RebornLoopComponentGraphReadiness` with the five fields; add `subagent_driver_requirements()`. |
-| `crates/ironclaw_reborn_composition/src/lib.rs` | `pub mod` the new `subagent_runtime` and `subagent_restart_reconciler` modules (see §1.2). |
-| `crates/ironclaw_reborn_composition/CLAUDE.md` | Add entry points for concrete subagent assembly and restart reconciliation. This matches the crate guardrail that top-level production/app startup composition lives here. |
+| `crates/t3claw_reborn/src/runtime.rs` | Keep generic planned-runtime composition only. Wire the `subagent` family + driver/profile metadata where this is generic. Do not construct DB stores, projection adapters, or spawn background tasks here. |
+| `crates/t3claw_reborn/src/app_loop_family.rs` | `build_loop_family_registry()` now registers **two** families: `families::default()` and `families::subagent()`. |
+| `crates/t3claw_reborn/src/planned_driver_factory.rs` | Add `register_subagent_planned_driver`, `subagent_planned_driver_descriptor`, `subagent_planned_profile_definition`, and fold the subagent profile into `default_planned_run_profile_resolver`. |
+| `crates/t3claw_reborn/src/production_readiness.rs` | Add `RebornLoopProductionComponent::SubagentGoalStore`, `::SubagentCompletionObserver`, `::SubagentResultTombstoneStore`, `::SubagentRestartReconciler`, `::SubagentAutonomousContinuationBudget`; extend `RebornLoopComponentGraphReadiness` with the five fields; add `subagent_driver_requirements()`. |
+| `crates/t3claw_reborn_composition/src/lib.rs` | `pub mod` the new `subagent_runtime` and `subagent_restart_reconciler` modules (see §1.2). |
+| `crates/t3claw_reborn_composition/CLAUDE.md` | Add entry points for concrete subagent assembly and restart reconciliation. This matches the crate guardrail that top-level production/app startup composition lives here. |
 
 ### 1.2 Files created
 
 | File | Purpose |
 |---|---|
-| `crates/ironclaw_reborn_composition/src/subagent_runtime.rs` | The **concrete subagent assembly seam**. Owns `SubagentRuntimeParts` and `build_subagent_runtime`, which builds the durable DB-backed goal store, the durable tombstone store, the autonomous-continuation budget, accepts the root-provided pending-gate projection sink, constructs the spawn-capable capability port, wires the `SubagentCompletionObserver`, spawns the `RestartReconciler` periodic task, and returns a fully wired `RebornRuntimeLoopComposition` with a composite `TurnEventSink`. Keeps `ironclaw_reborn/src/runtime.rs` free of concrete-store construction and keeps root `src/` pending-gate types out of Reborn crates. |
-| `crates/ironclaw_reborn_composition/src/subagent_restart_reconciler.rs` | The `RestartReconciler` itself — `run_once()` (startup sweep) and `spawn_periodic(interval)` returning a `JoinHandle<()>`. Pure replay logic; idempotent via the same `external_event_id` the live observer uses. Wired by `subagent_runtime.rs`. |
-| `crates/ironclaw_reborn_composition/tests/subagent_spawn_e2e.rs` | All end-to-end integration tests (§5). |
-| `crates/ironclaw_reborn_composition/tests/subagent_runtime_wiring.rs` | Composition-level tests: family/driver registration, profile resolution, composite event-sink registration, reconciler periodic-task spawn, budget injection, tombstone-store injection, DB-backed goal store, production readiness for the subagent family. |
+| `crates/t3claw_reborn_composition/src/subagent_runtime.rs` | The **concrete subagent assembly seam**. Owns `SubagentRuntimeParts` and `build_subagent_runtime`, which builds the durable DB-backed goal store, the durable tombstone store, the autonomous-continuation budget, accepts the root-provided pending-gate projection sink, constructs the spawn-capable capability port, wires the `SubagentCompletionObserver`, spawns the `RestartReconciler` periodic task, and returns a fully wired `RebornRuntimeLoopComposition` with a composite `TurnEventSink`. Keeps `t3claw_reborn/src/runtime.rs` free of concrete-store construction and keeps root `src/` pending-gate types out of Reborn crates. |
+| `crates/t3claw_reborn_composition/src/subagent_restart_reconciler.rs` | The `RestartReconciler` itself — `run_once()` (startup sweep) and `spawn_periodic(interval)` returning a `JoinHandle<()>`. Pure replay logic; idempotent via the same `external_event_id` the live observer uses. Wired by `subagent_runtime.rs`. |
+| `crates/t3claw_reborn_composition/tests/subagent_spawn_e2e.rs` | All end-to-end integration tests (§5). |
+| `crates/t3claw_reborn_composition/tests/subagent_runtime_wiring.rs` | Composition-level tests: family/driver registration, profile resolution, composite event-sink registration, reconciler periodic-task spawn, budget injection, tombstone-store injection, DB-backed goal store, production readiness for the subagent family. |
 
-> The `subagent_runtime.rs` split exists because `crates/ironclaw_reborn_composition`
+> The `subagent_runtime.rs` split exists because `crates/t3claw_reborn_composition`
 > owns top-level production/app startup composition and keeps lower substrate
-> handles private to factories. `ironclaw_reborn` remains responsible for the
+> handles private to factories. `t3claw_reborn` remains responsible for the
 > driver/profile/readiness pieces, not product-live store construction.
 
 ---
@@ -84,7 +84,7 @@ divergence is logged in the PR description.
 
 | Phase 2 WS | Artifact Phase 3 consumes | Where it is used in Phase 3 |
 |---|---|---|
-| **P1.B / P2.C** | `ironclaw_agent_loop::families::subagent() -> LoopFamily` with `LoopFamilyId::new("subagent")` | `app_loop_family.rs::build_loop_family_registry` |
+| **P1.B / P2.C** | `t3claw_agent_loop::families::subagent() -> LoopFamily` with `LoopFamilyId::new("subagent")` | `app_loop_family.rs::build_loop_family_registry` |
 | **P1.A / P1.B** | `GateKind::AwaitDependentRun` (sealed) + `LoopGateKind::AwaitDependentRun`, `LoopBlockedKind::AwaitDependentRun`, `BlockedReason::DependentRun`, `TurnStatus::BlockedDependentRun` | flows through unchanged; asserted in §4.2 / §4.3 |
 | **P1.A** | `CapabilityOutcome::SpawnedChildRun { child_run_id, result_ref, safe_summary }`; `CapabilityOutcome::AwaitDependentRun { gate_ref, safe_summary }`; `SubmitTurnRequest` / `TurnRunRecord` lineage fields; `TurnStateStore::{children_of, get_run_record}` queries; `DefaultTurnCoordinator::with_event_sink` | capability port, observer, §4 assertions |
 | **P2.C** | `subagent_planned_driver()` building a `PlannedDriver` over the `subagent` family with its own descriptor + checkpoint schema | `planned_driver_factory.rs` |
@@ -111,9 +111,9 @@ top.
 ### 3.1 `app_loop_family.rs` — register the `subagent` family
 
 ```rust
-// crates/ironclaw_reborn/src/app_loop_family.rs
+// crates/t3claw_reborn/src/app_loop_family.rs
 
-use ironclaw_agent_loop::{families, family::{LoopFamilyRegistry, LoopFamilyRegistryError}};
+use t3claw_agent_loop::{families, family::{LoopFamilyRegistry, LoopFamilyRegistryError}};
 
 /// Build the production loop-family registry.
 ///
@@ -141,7 +141,7 @@ Mirror the `reborn:planned-default` wiring exactly. The subagent driver gets a
 (`DriverRegistry::register_driver` rejects duplicate keys).
 
 ```rust
-// crates/ironclaw_reborn/src/planned_driver_factory.rs  (additions)
+// crates/t3claw_reborn/src/planned_driver_factory.rs  (additions)
 
 pub const SUBAGENT_DRIVER_ID: &str = "reborn:subagent-default";
 pub const SUBAGENT_DRIVER_VERSION: u64 = 1;
@@ -227,7 +227,7 @@ The single change inside `build_default_planned_runtime` (after
 `register_default_planned_driver`):
 
 ```rust
-// crates/ironclaw_reborn/src/runtime.rs  (inside build_default_planned_runtime)
+// crates/t3claw_reborn/src/runtime.rs  (inside build_default_planned_runtime)
 
     let mut registry = DriverRegistry::new();
     register_default_text_only_driver(&mut registry, parts.config.text_only_driver)?;
@@ -256,7 +256,7 @@ The subagent goal store, spawn-capable capability port, and observer are
 `identity_context_source`. Add three fields:
 
 ```rust
-// crates/ironclaw_reborn/src/runtime.rs  (DefaultPlannedRuntimeParts)
+// crates/t3claw_reborn/src/runtime.rs  (DefaultPlannedRuntimeParts)
 
 pub struct DefaultPlannedRuntimeParts<T, S, G>
 where
@@ -274,11 +274,11 @@ where
 ```
 
 Concrete subagent stores, tombstone stores, budgets, projection adapters, and
-the observer live in `crates/ironclaw_reborn_composition`; `runtime.rs` only
+the observer live in `crates/t3claw_reborn_composition`; `runtime.rs` only
 receives the already-built event sink and profile/driver registrations.
 
 > **Divergence from README §5.3.** README lists the observer and goal store
-> only under "ironclaw_reborn ... + durable goal store / observer / runtime.rs
+> only under "t3claw_reborn ... + durable goal store / observer / runtime.rs
 > wiring". It does not say they enter through `DefaultPlannedRuntimeParts`. They
 > must, because `runtime.rs` is generic over `T/S/G` and cannot itself decide
 > the concrete store backend. Phase 3 makes them `Option<…>` parts, consistent
@@ -298,7 +298,7 @@ that setter is a **Phase 2 (P1.A) deliverable**, not Phase 3 — Phase 3 only
 *calls* it.
 
 ```rust
-// crates/ironclaw_reborn/src/runtime.rs  (inside build_default_planned_runtime)
+// crates/t3claw_reborn/src/runtime.rs  (inside build_default_planned_runtime)
 
     let mut coordinator = DefaultTurnCoordinator::new(Arc::clone(&parts.turn_state))
         .with_run_profile_resolver(Arc::clone(&run_profile_resolver))
@@ -332,13 +332,13 @@ from the README.
 
 Extend `ProductLiveRuntimeReadinessComponent` for the concrete
 `build_product_live_subagent_runtime` path in
-`crates/ironclaw_reborn_composition`. Do not add root-store-specific fields to
+`crates/t3claw_reborn_composition`. Do not add root-store-specific fields to
 the generic `DefaultPlannedRuntimeParts`; generic helper runtimes can still
 build without subagent product-live parts. Product-live subagent composition is
 the fail-closed boundary.
 
 ```rust
-// crates/ironclaw_reborn_composition/src/subagent_runtime.rs
+// crates/t3claw_reborn_composition/src/subagent_runtime.rs
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProductLiveRuntimeReadinessComponent {
@@ -403,14 +403,14 @@ tests that exercise only the default family still compile.
 ### 3.7 `subagent_runtime.rs` — the concrete assembly seam
 
 ```rust
-// crates/ironclaw_reborn_composition/src/subagent_runtime.rs  (new file)
+// crates/t3claw_reborn_composition/src/subagent_runtime.rs  (new file)
 
 use std::sync::Arc;
 
-use ironclaw_loop_support::SpawnCapableLoopCapabilityPortFactory; // P2.A
-use ironclaw_turns::{TurnCoordinator, ...};
+use t3claw_loop_support::SpawnCapableLoopCapabilityPortFactory; // P2.A
+use t3claw_turns::{TurnCoordinator, ...};
 
-use ironclaw_reborn::{
+use t3claw_reborn::{
     runtime::{
         DefaultPlannedRuntimeParts, RebornRuntimeLoopComposition, build_default_planned_runtime,
         DefaultPlannedRuntimeBuildError,
@@ -604,7 +604,7 @@ flavor has `allow_nesting = true`.
 ```rust
 // declared in P2.A; Phase 3 wires it into the surface resolver.
 
-pub const SPAWN_SUBAGENT_CAPABILITY_ID: &str = "ironclaw.spawn_subagent";
+pub const SPAWN_SUBAGENT_CAPABILITY_ID: &str = "t3claw.spawn_subagent";
 
 /// Surface descriptor view the parent loop receives.
 CapabilityDescriptorView {
@@ -698,7 +698,7 @@ composition** (`build_subagent_runtime`) with these substitutions:
 
 | Component | Real or test double | Why |
 |---|---|---|
-| `TurnStateStore` + `TurnRunTransitionPort` | in-memory impl from `ironclaw_turns` test support (the same one `coordinator` tests use) | needs `children_of`, `get_run_record`, `parent_run_id` — real query semantics |
+| `TurnStateStore` + `TurnRunTransitionPort` | in-memory impl from `t3claw_turns` test support (the same one `coordinator` tests use) | needs `children_of`, `get_run_record`, `parent_run_id` — real query semantics |
 | `SessionThreadService` | in-memory thread service | child threads must be creatable; transcript must be readable |
 | `HostManagedModelGateway` | **scripted** gateway — per-thread script keyed by `thread_id` | parent emits `spawn_subagent` tool calls; children emit a reply |
 | `BoundedSubagentGoalStore` | **real test backend** | fail-loud behavior + bounded eviction are under test; restart durability is covered by DB-backed goal-store contract tests |
@@ -1325,7 +1325,7 @@ projection sink is a P0 product-surface prerequisite checked by composition, not
 a subagent-family readiness component.
 
 ```rust
-// crates/ironclaw_reborn/src/production_readiness.rs  (additions)
+// crates/t3claw_reborn/src/production_readiness.rs  (additions)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RebornLoopProductionComponent {
@@ -1411,10 +1411,10 @@ failures before the Phase 3 PR is mergeable.
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all --benches --tests --examples --all-features    # zero warnings
-cargo test -p ironclaw_reborn                                     # crate unit + integration
-cargo test -p ironclaw_reborn_composition                         # product composition + E2E
-cargo test -p ironclaw_turns -p ironclaw_agent_loop -p ironclaw_loop_support
-cargo test -p ironclaw_architecture --test reborn_dependency_boundaries
+cargo test -p t3claw_reborn                                     # crate unit + integration
+cargo test -p t3claw_reborn_composition                         # product composition + E2E
+cargo test -p t3claw_turns -p t3claw_agent_loop -p t3claw_loop_support
+cargo test -p t3claw_architecture --test reborn_dependency_boundaries
 scripts/reborn-e2e-rust.sh architecture
 cargo test                                                        # full workspace
 ```
@@ -1428,11 +1428,11 @@ What must pass specifically:
   §10 (`CapabilityOutcome`, `LoopGateKind`, `LoopBlockedKind`, `BlockedReason`,
   `TurnStatus`). `CapabilityOutcome`, `BlockedReason`, and `TurnStatus` remain
   deliberately exhaustive; do not paper over them with catch-all arms.
-- **`cargo test -p ironclaw_reborn`** — driver/profile/readiness unit and
+- **`cargo test -p t3claw_reborn`** — driver/profile/readiness unit and
   integration coverage in the loop library still passes. The pre-existing
   `production_registry_binds_default_family_only` test is *renamed* and updated
   (it asserted `ids().count() == 1`).
-- **`cargo test -p ironclaw_reborn_composition`** — the eight E2E tests (§5),
+- **`cargo test -p t3claw_reborn_composition`** — the eight E2E tests (§5),
   the wiring tests (§6), product-live subagent assembly checks, durable
   pending-gate projection replay, and restart-reconciler task coverage pass.
 - **Full `cargo test`** — the new `TurnStatus::BlockedDependentRun` persisted
@@ -1442,9 +1442,9 @@ What must pass specifically:
 - **`cargo test --features integration`** — if any PostgreSQL-backed turn store
   test exists for the new `parent_run_id` / `subagent_depth` columns and
   `children_of` query (Phase 1 P1.A territory), it passes here.
-- **Architecture guardrails** — `cargo test -p ironclaw_architecture --test
+- **Architecture guardrails** — `cargo test -p t3claw_architecture --test
   reborn_dependency_boundaries` and `scripts/reborn-e2e-rust.sh architecture`
-  pass. If composition moves to `ironclaw_reborn_composition`, update the
+  pass. If composition moves to `t3claw_reborn_composition`, update the
   boundary rules intentionally in the same PR.
 - **Replay/snapshot evidence** — add deterministic subagent fixtures and run
   `scripts/replay-snap.sh test` (or the closest current replay command) before
@@ -1458,7 +1458,7 @@ What must pass specifically:
 Execute strictly top-to-bottom — each step depends on the prior. Steps marked
 **[P2]** verify a Phase 2 deliverable is present before Phase 3 can proceed.
 
-1. **[P2]** Confirm `ironclaw_agent_loop::families::subagent()` exists and
+1. **[P2]** Confirm `t3claw_agent_loop::families::subagent()` exists and
    `LoopFamilyId::new("subagent")` validates. *(P1.B / P2.C)*
 2. **[P2]** Confirm the Phase 1 contract additions are merged:
    `CapabilityOutcome::{SpawnedChildRun, AwaitDependentRun}`,
@@ -1488,10 +1488,10 @@ Execute strictly top-to-bottom — each step depends on the prior. Steps marked
     `build_default_planned_runtime` (§3.3); accept the composition-supplied
     composite `TurnEventSink` (§3.5); add the relevant readiness component
     variants + fail-closed checks (§3.6).
-11. `crates/ironclaw_reborn_composition/src/subagent_runtime.rs` (new):
+11. `crates/t3claw_reborn_composition/src/subagent_runtime.rs` (new):
     `SubagentRuntimeParts`, `SubagentSpawnCaps`, `build_subagent_runtime`,
     `build_product_live_subagent_runtime` (§3.7).
-12. `crates/ironclaw_reborn_composition/src/lib.rs`: `pub mod
+12. `crates/t3claw_reborn_composition/src/lib.rs`: `pub mod
     subagent_runtime;` and `pub mod subagent_restart_reconciler;`.
 13. `tests/subagent_runtime_wiring.rs`: the ten composition tests (§6).
 14. `tests/subagent_spawn_e2e.rs`: the `SubagentTestHarness` (§5.0) + the eight
@@ -1529,7 +1529,7 @@ must assert product-live is `ProductionReady` with `DbBacked` and `NotReady` wit
 
 `DefaultTurnCoordinator` today has `with_admission_policy`,
 `with_run_profile_resolver`, `with_wake_notifier` — **no event sink setter**,
-and `TurnEventSink` lives in `ironclaw_turns::events` but the coordinator does
+and `TurnEventSink` lives in `t3claw_turns::events` but the coordinator does
 not consume it. If P1.A did not add `with_event_sink` + the publish call sites
 inside `submit_turn` / `resume_turn` / `cancel_run` transition handling, the
 observer will never receive lifecycle events and every §5 test hangs to
@@ -1537,8 +1537,8 @@ timeout.
 
 **Mitigation:** wiring checklist step 3 makes this a hard Phase-2 gate. If P1.A
 scoped the event-sink plumbing out, it is pulled forward — it is a coordination
-contract (`ironclaw_turns`), so it belongs in P1.A, never in Phase 3's
-`ironclaw_reborn` crate.
+contract (`t3claw_turns`), so it belongs in P1.A, never in Phase 3's
+`t3claw_reborn` crate.
 
 ### 10.3 Wire-stable enum variants must be added atomically (MEDIUM)
 

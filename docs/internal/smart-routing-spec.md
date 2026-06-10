@@ -1,4 +1,4 @@
-# Smart Model Routing for IronClaw
+# Smart Model Routing for T3Claw
 
 **Status:** Implemented
 **Author:** Microwave

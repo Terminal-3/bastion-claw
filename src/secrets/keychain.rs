@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use ironclaw::secrets::keychain::{store_master_key, get_master_key, delete_master_key};
+//! use t3claw::secrets::keychain::{store_master_key, get_master_key, delete_master_key};
 //!
 //! // Generate and store a new master key
 //! let key = generate_master_key();
@@ -21,7 +21,7 @@ use crate::secrets::SecretError;
 
 /// Service name for keychain entries.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-const SERVICE_NAME: &str = "ironclaw";
+const SERVICE_NAME: &str = "t3claw";
 
 /// Account name for the master key.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -264,22 +264,21 @@ mod platform {
 /// Touching the real OS keychain during automated tests pops a macOS Keychain
 /// authorization dialog (and blocks on a locked Secret Service on Linux), which
 /// derails `cargo test`. We suppress it when compiled for tests (`cfg!(test)`,
-/// covering this crate's unit tests) or when `IRONCLAW_DISABLE_OS_KEYCHAIN` is
+/// covering this crate's unit tests) or when `T3CLAW_DISABLE_OS_KEYCHAIN` is
 /// set in the environment (covering integration/e2e tests and CI, which link
 /// the non-`cfg(test)` library). When suppressed, lookups behave as "no key
 /// present" and writes fail closed — so `resolve_master_key` falls through to
 /// `None`/the env var exactly as it would with an empty keychain, with no
 /// prompt. Production (no `cfg(test)`, env unset) is unaffected.
 fn os_keychain_suppressed() -> bool {
-    cfg!(test) || std::env::var_os("IRONCLAW_DISABLE_OS_KEYCHAIN").is_some()
+    cfg!(test) || std::env::var_os("T3CLAW_DISABLE_OS_KEYCHAIN").is_some()
 }
 
 /// Retrieve the master key from the OS keychain (suppressed in tests/headless).
 pub async fn get_master_key() -> Result<Vec<u8>, SecretError> {
     if os_keychain_suppressed() {
         return Err(SecretError::KeychainError(
-            "OS keychain access suppressed (cfg!(test) or IRONCLAW_DISABLE_OS_KEYCHAIN)"
-                .to_string(),
+            "OS keychain access suppressed (cfg!(test) or T3CLAW_DISABLE_OS_KEYCHAIN)".to_string(),
         ));
     }
     platform::get_master_key().await
@@ -297,8 +296,7 @@ pub async fn has_master_key() -> bool {
 pub async fn store_master_key(key: &[u8]) -> Result<(), SecretError> {
     if os_keychain_suppressed() {
         return Err(SecretError::KeychainError(
-            "OS keychain access suppressed (cfg!(test) or IRONCLAW_DISABLE_OS_KEYCHAIN)"
-                .to_string(),
+            "OS keychain access suppressed (cfg!(test) or T3CLAW_DISABLE_OS_KEYCHAIN)".to_string(),
         ));
     }
     platform::store_master_key(key).await
@@ -308,8 +306,7 @@ pub async fn store_master_key(key: &[u8]) -> Result<(), SecretError> {
 pub async fn delete_master_key() -> Result<(), SecretError> {
     if os_keychain_suppressed() {
         return Err(SecretError::KeychainError(
-            "OS keychain access suppressed (cfg!(test) or IRONCLAW_DISABLE_OS_KEYCHAIN)"
-                .to_string(),
+            "OS keychain access suppressed (cfg!(test) or T3CLAW_DISABLE_OS_KEYCHAIN)".to_string(),
         ));
     }
     platform::delete_master_key().await

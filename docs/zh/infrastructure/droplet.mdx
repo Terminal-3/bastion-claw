@@ -1,14 +1,14 @@
 ---
 title: DigitalOcean Droplet
-description: 在 DigitalOcean Droplet 上托管 IronClaw
+description: 在 DigitalOcean Droplet 上托管 T3Claw
 ---
 
 DigitalOcean 提供了一种简单且性价比高的云上运行方式。借助它的 Droplet 虚拟机，您可以在几分钟内完成部署。
 
-本指南会带您创建一个 DigitalOcean Droplet，并对其进行基础加固，以便安全地运行 IronClaw 并将其暴露到互联网。
+本指南会带您创建一个 DigitalOcean Droplet，并对其进行基础加固，以便安全地运行 T3Claw 并将其暴露到互联网。
 
 <Tip>
-如果您不想自己搭建基础设施，也可以在 [agent.near.ai](https://agent.near.ai) 上点几下就安装好 IronClaw。
+如果您不想自己搭建基础设施，也可以在 [agent.near.ai](https://agent.near.ai) 上点几下就安装好 T3Claw。
 </Tip>
 
 ---
@@ -19,7 +19,7 @@ DigitalOcean 提供了一种简单且性价比高的云上运行方式。借助�
 
 ![droplets landing page](/images/infrastructure/droplets/droplets-landing.png)
 
-建议选择 Ubuntu 作为操作系统，最好使用最新的 LTS 版本，并选择 `Basic` 套餐搭配 `Regular` 磁盘。目前这样的配置大约每月 $4，足以覆盖大多数 IronClaw 使用场景。
+建议选择 Ubuntu 作为操作系统，最好使用最新的 LTS 版本，并选择 `Basic` 套餐搭配 `Regular` 磁盘。目前这样的配置大约每月 $4，足以覆盖大多数 T3Claw 使用场景。
 
 ![droplets plan selection](/images/infrastructure/droplets/droplets-create.png)
 
@@ -68,32 +68,32 @@ apt update && apt upgrade -y
 
 ### 创建新用户
 
-良好的实践是创建一个具备 sudo 权限的新用户，而不是日常都使用 `root`。您可以创建一个新用户（例如 `ironclaw`），然后将它加入 sudo 组：
+良好的实践是创建一个具备 sudo 权限的新用户，而不是日常都使用 `root`。您可以创建一个新用户（例如 `t3claw`），然后将它加入 sudo 组：
 
 ```bash
-adduser ironclaw
-usermod -aG sudo ironclaw
+adduser t3claw
+usermod -aG sudo t3claw
 ```
 
 由于后续需要使用这个新用户登录，您还需要把 SSH 密钥从 `root` 复制过去：
 
 ```bash
 # 为用户创建 .ssh 目录
-mkdir -p /home/ironclaw/.ssh
+mkdir -p /home/t3claw/.ssh
 
 # 复制当前 root 的 authorized_keys（如果希望使用相同的密钥）
-cp ~/.ssh/authorized_keys /home/ironclaw/.ssh/authorized_keys
+cp ~/.ssh/authorized_keys /home/t3claw/.ssh/authorized_keys
 
 # 设置正确的权限（非常关键，否则 SSH 会忽略这些文件）
-chown -R ironclaw:ironclaw /home/ironclaw/
-chmod 700 /home/ironclaw/.ssh
-chmod 600 /home/ironclaw/.ssh/authorized_keys
+chown -R t3claw:t3claw /home/t3claw/
+chmod 700 /home/t3claw/.ssh
+chmod 600 /home/t3claw/.ssh/authorized_keys
 ```
 
 打开一个新的终端窗口，尝试用新用户登录，确认一切都能正常工作：
 
 ```bash
-ssh ironclaw@<IP_ADDRESS>
+ssh t3claw@<IP_ADDRESS>
 ```
 
 <Warning>
@@ -114,7 +114,7 @@ Port 2222                   # 修改默认端口（可选，但有帮助）
 然后重启 Droplet 以应用变更，并使用新端口再次尝试登录：
 
 ```bash
-ssh -p 2222 ironclaw@<IP_ADDRESS>
+ssh -p 2222 t3claw@<IP_ADDRESS>
 ```
 
 如果一切正常，就可以继续在 SSH 配置中设置 `PermitRootLogin no` 来禁用 root 登录，然后再次重启。
@@ -145,30 +145,30 @@ sudo ufw enable
 
 ---
 
-## 安装 IronClaw
+## 安装 T3Claw
 
-Droplet 创建并加固完成后，就可以开始安装 IronClaw 了。您可以按照[快速开始指南](/quickstart)中的安装步骤来完成部署。
-
-```
-# 安装 IronClaw
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
-```
-
-安装后，直接启动 IronClaw 并按照提示完成配置：
+Droplet 创建并加固完成后，就可以开始安装 T3Claw 了。您可以按照[快速开始指南](/quickstart)中的安装步骤来完成部署。
 
 ```
-ironclaw
+# 安装 T3Claw
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/t3claw-installer.sh | sh
+```
+
+安装后，直接启动 T3Claw 并按照提示完成配置：
+
+```
+t3claw
 ```
 
 <Tip>
-建议使用 `tmux` 或 `screen` 这样的会话管理器，以便在 SSH 会话之间轻松分离和恢复运行中的 IronClaw 进程。
+建议使用 `tmux` 或 `screen` 这样的会话管理器，以便在 SSH 会话之间轻松分离和恢复运行中的 T3Claw 进程。
 </Tip>
 
 ---
 
 ## 下一步
 
-接下来可以阅读[快速开始指南](/quickstart)，创建您的第一个智能体，把它连接到 Telegram，并开始探索 IronClaw 的能力。
+接下来可以阅读[快速开始指南](/quickstart)，创建您的第一个智能体，把它连接到 Telegram，并开始探索 T3Claw 的能力。
 
 如果您希望通过消息应用与智能体对话，请查看[频道](/channels/overview)文档，了解如何完成接入。
 

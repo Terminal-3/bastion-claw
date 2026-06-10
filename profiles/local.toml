@@ -1,12 +1,12 @@
-# IronClaw Profile: local
+# T3Claw Profile: local
 #
 # Configuration for solo developers working locally.
 # Disables server-oriented gateway and Docker sandbox features while keeping
 # personal-assistant background tasks enabled.
 #
-# Usage: set IRONCLAW_PROFILE=local in your environment or .env file.
+# Usage: set T3CLAW_PROFILE=local in your environment or .env file.
 #
-# You can override any setting here via ~/.ironclaw/config.toml or
+# You can override any setting here via ~/.t3claw/config.toml or
 # environment variables.
 
 database_backend = "libsql"

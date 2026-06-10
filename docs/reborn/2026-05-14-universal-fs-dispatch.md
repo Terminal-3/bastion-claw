@@ -8,14 +8,14 @@ PR lands).
 
 ## Context
 
-Before this ADR every persistence concern in the IronClaw workspace owned
+Before this ADR every persistence concern in the T3Claw workspace owned
 its own `Store`/`Repository` trait with a per-backend dispatch for libSQL
 and PostgreSQL:
 
-- `ironclaw_secrets`, `ironclaw_authorization`, `ironclaw_memory`,
-  `ironclaw_processes`, `ironclaw_run_state`, `ironclaw_outbound`,
-  `ironclaw_conversations`, `ironclaw_reborn_event_store`,
-  `ironclaw_engine` (`Store` trait), plus `src/db/` (composite `Database`
+- `t3claw_secrets`, `t3claw_authorization`, `t3claw_memory`,
+  `t3claw_processes`, `t3claw_run_state`, `t3claw_outbound`,
+  `t3claw_conversations`, `t3claw_reborn_event_store`,
+  `t3claw_engine` (`Store` trait), plus `src/db/` (composite `Database`
   trait, 7 sub-traits, ~78 methods), `src/secrets/`, `src/workspace/`,
   `src/history/`.
 
@@ -34,7 +34,7 @@ stays small and every backend is interchangeable behind one trait.
 
 There is **one universal filesystem dispatch fabric**:
 
-1. **One trait:** `RootFilesystem` (in `crates/ironclaw_filesystem/`).
+1. **One trait:** `RootFilesystem` (in `crates/t3claw_filesystem/`).
    Every backend (local file, libSQL, PostgreSQL, HSM, in-memory,
    encrypted-decorator, object-store, …) implements it. The composite
    dispatcher (`CompositeRootFilesystem`) also implements it; it *is*
@@ -103,7 +103,7 @@ consumer chooses to.
   one method.
 - Feature-flag dispatch (`#[cfg(feature = "libsql")]` /
   `#[cfg(feature = "postgres")]`) concentrates in
-  `crates/ironclaw_filesystem/`; consumer crates lose their per-backend
+  `crates/t3claw_filesystem/`; consumer crates lose their per-backend
   branches.
 
 **Costs:**
@@ -153,4 +153,4 @@ consumer chooses to.
 - Architecture sprawl rule: `.claude/rules/architecture.md` — "duplicate
   dispatch pipelines" is the smell this rework eliminates at the
   storage layer.
-- Filesystem crate guardrails: `crates/ironclaw_filesystem/CLAUDE.md`.
+- Filesystem crate guardrails: `crates/t3claw_filesystem/CLAUDE.md`.

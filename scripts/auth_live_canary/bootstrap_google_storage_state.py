@@ -18,7 +18,7 @@ Usage:
     python3 scripts/auth_live_canary/bootstrap_google_storage_state.py
     # follow the prompt, log in once, then press Enter
 
-    export AUTH_BROWSER_GOOGLE_STORAGE_STATE_PATH=~/.ironclaw/auth-canary/google_storage_state.json
+    export AUTH_BROWSER_GOOGLE_STORAGE_STATE_PATH=~/.t3claw/auth-canary/google_storage_state.json
     LANE=auth-browser-consent PROVIDER=browser ./scripts/live-canary/run.sh
 
 Re-run this when canary failures hint at an expired session — Google sessions
@@ -34,7 +34,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-DEFAULT_OUTPUT = Path.home() / ".ironclaw" / "auth-canary" / "google_storage_state.json"
+DEFAULT_OUTPUT = Path.home() / ".t3claw" / "auth-canary" / "google_storage_state.json"
 
 
 def parse_args() -> argparse.Namespace:

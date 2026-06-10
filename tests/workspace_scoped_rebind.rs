@@ -15,10 +15,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use ironclaw::db::Database;
-use ironclaw::db::libsql::LibSqlBackend;
-use ironclaw::workspace::layer::{LayerSensitivity, MemoryLayer};
-use ironclaw::workspace::{Workspace, paths};
+use t3claw::db::Database;
+use t3claw::db::libsql::LibSqlBackend;
+use t3claw::workspace::layer::{LayerSensitivity, MemoryLayer};
+use t3claw::workspace::{Workspace, paths};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 

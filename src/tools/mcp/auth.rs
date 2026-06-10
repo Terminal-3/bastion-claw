@@ -687,7 +687,7 @@ pub async fn register_client(
     let client = oauth_http_client()?;
 
     let request = ClientRegistrationRequest {
-        client_name: "IronClaw".to_string(),
+        client_name: "T3Claw".to_string(),
         redirect_uris: vec![redirect_uri.to_string()],
         grant_types: vec![
             "authorization_code".to_string(),
@@ -1756,7 +1756,7 @@ mod tests {
     #[test]
     fn test_client_registration_request_serialization() {
         let req = ClientRegistrationRequest {
-            client_name: "IronClaw".to_string(),
+            client_name: "T3Claw".to_string(),
             redirect_uris: vec!["http://localhost:9876/callback".to_string()],
             grant_types: vec![
                 "authorization_code".to_string(),
@@ -1768,7 +1768,7 @@ mod tests {
 
         let value: serde_json::Value = serde_json::to_value(&req).unwrap();
 
-        assert_eq!(value["client_name"], "IronClaw");
+        assert_eq!(value["client_name"], "T3Claw");
         assert_eq!(value["redirect_uris"][0], "http://localhost:9876/callback");
         assert_eq!(value["grant_types"][0], "authorization_code");
         assert_eq!(value["grant_types"][1], "refresh_token");
@@ -2276,12 +2276,12 @@ mod tests {
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn test_refresh_access_token_direct_includes_stored_client_secret() {
-        // Serialize against any other test that mutates IRONCLAW_OAUTH_* env vars,
+        // Serialize against any other test that mutates T3CLAW_OAUTH_* env vars,
         // and explicitly clear them so refresh_access_token takes the direct path
         // instead of routing through whatever proxy URL a parallel test left set.
         let _env_guard = lock_env();
-        let _proxy_url_guard = set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", None);
-        let _proxy_token_guard = set_env_var("IRONCLAW_OAUTH_PROXY_AUTH_TOKEN", None);
+        let _proxy_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", None);
+        let _proxy_token_guard = set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", None);
 
         let secrets = test_secrets_store();
         let user_id = "test-user";
@@ -2346,11 +2346,9 @@ mod tests {
         let Some((base_url, state)) = start_refresh_server().await else {
             return;
         };
-        let _proxy_url_guard = set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", Some(&base_url));
-        let _proxy_token_guard = set_env_var(
-            "IRONCLAW_OAUTH_PROXY_AUTH_TOKEN",
-            Some("gateway-test-token"),
-        );
+        let _proxy_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", Some(&base_url));
+        let _proxy_token_guard =
+            set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", Some("gateway-test-token"));
         let expected_token_url = format!("{base_url}/token");
 
         let secrets = test_secrets_store();
@@ -2403,8 +2401,8 @@ mod tests {
     #[tokio::test]
     async fn test_refresh_access_token_serializes_concurrent_refreshes() {
         let _env_guard = lock_env();
-        let _proxy_url_guard = set_env_var("IRONCLAW_OAUTH_EXCHANGE_URL", None);
-        let _proxy_token_guard = set_env_var("IRONCLAW_OAUTH_PROXY_AUTH_TOKEN", None);
+        let _proxy_url_guard = set_env_var("T3CLAW_OAUTH_EXCHANGE_URL", None);
+        let _proxy_token_guard = set_env_var("T3CLAW_OAUTH_PROXY_AUTH_TOKEN", None);
         let secrets = test_secrets_store();
         let user_id = "test-user";
         let Some((base_url, state)) = start_refresh_server().await else {

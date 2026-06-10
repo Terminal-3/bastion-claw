@@ -53,7 +53,7 @@ use async_trait::async_trait;
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 
-use ironclaw_safety::sensitive_paths::is_sensitive_path;
+use t3claw_safety::sensitive_paths::is_sensitive_path;
 
 use crate::context::JobContext;
 use crate::sandbox::{SandboxManager, SandboxPolicy};
@@ -1672,7 +1672,7 @@ mod tests {
     async fn test_env_scrubbing_hides_secrets() {
         let _env_lock = EnvLockGuard::new();
         // Set a fake secret in the current process environment.
-        let secret_var = "IRONCLAW_TEST_SECRET_KEY";
+        let secret_var = "T3CLAW_TEST_SECRET_KEY";
         let _secret_guard = EnvVarGuard::set(secret_var, "super_secret_value_12345");
 
         let tool = ShellTool::new();
@@ -1870,7 +1870,7 @@ mod tests {
         let ctx = JobContext::default();
 
         // Set a fake secret in the parent process env
-        let _secret_guard = EnvVarGuard::set("IRONCLAW_QA_TEST_SECRET", "supersecret123");
+        let _secret_guard = EnvVarGuard::set("T3CLAW_QA_TEST_SECRET", "supersecret123");
 
         let result = tool
             .execute(serde_json::json!({"command": "env"}), &ctx)
@@ -1879,7 +1879,7 @@ mod tests {
 
         let output = result.result.get("output").unwrap().as_str().unwrap();
         assert!(
-            !output.contains("IRONCLAW_QA_TEST_SECRET"),
+            !output.contains("T3CLAW_QA_TEST_SECRET"),
             "env scrubbing must hide non-safe vars from child processes"
         );
         assert!(

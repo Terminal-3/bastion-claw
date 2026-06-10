@@ -7,7 +7,7 @@ use crate::channels::web::GatewayChannel;
 use crate::channels::web::sse::DEFAULT_BROADCAST_BUFFER;
 use crate::config::GatewayConfig;
 use futures::StreamExt;
-use ironclaw_common::AppEvent;
+use t3claw_common::AppEvent;
 
 fn test_gateway() -> GatewayChannel {
     GatewayChannel::new(

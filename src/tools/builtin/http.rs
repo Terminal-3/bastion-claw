@@ -15,7 +15,7 @@ use crate::db::UserStore;
 use crate::secrets::SecretsStore;
 use crate::tools::tool::{ApprovalRequirement, Tool, ToolError, ToolOutput, require_str};
 use crate::tools::wasm::{InjectedCredentials, SharedCredentialRegistry, inject_credential};
-use ironclaw_safety::LeakDetector;
+use t3claw_safety::LeakDetector;
 
 #[cfg(feature = "html-to-markdown")]
 use crate::tools::builtin::convert_html_to_markdown;
@@ -44,7 +44,7 @@ const MAX_REDIRECTS: usize = 3;
 
 /// Descriptive User-Agent so public APIs don't reject bare requests.
 const USER_AGENT: &str = concat!(
-    "IronClaw-Agent/",
+    "T3Claw-Agent/",
     env!("CARGO_PKG_VERSION"),
     " (https://github.com/nearai/ironclaw)"
 );
@@ -770,13 +770,13 @@ impl Tool for HttpTool {
         // API keys, and injected query-param/URL-path credentials never
         // reach the recorder. Replay matching uses `method` + `url` only,
         // so omitting the injected values is safe for determinism.
-        let intercept_req = ironclaw_llm::recording::HttpExchangeRequest {
+        let intercept_req = t3claw_llm::recording::HttpExchangeRequest {
             method: method_upper,
             url: caller_url.to_string(),
             headers: caller_headers,
             body: body_bytes
                 .as_ref()
-                .map(|b| ironclaw_llm::recording::redact_body(&String::from_utf8_lossy(b))),
+                .map(|b| t3claw_llm::recording::redact_body(&String::from_utf8_lossy(b))),
         };
 
         // Check HTTP interceptor (replay mode returns pre-recorded response)
@@ -1070,7 +1070,7 @@ impl Tool for HttpTool {
             interceptor
                 .after_response(
                     &intercept_req,
-                    &ironclaw_llm::recording::HttpExchangeResponse {
+                    &t3claw_llm::recording::HttpExchangeResponse {
                         status,
                         headers: resp_headers,
                         body: body_text.clone(),
@@ -1114,7 +1114,7 @@ impl Tool for HttpTool {
     }
 
     fn requires_approval(&self, params: &serde_json::Value) -> ApprovalRequirement {
-        let has_credentials = ironclaw_safety::params_contain_manual_credentials(params)
+        let has_credentials = t3claw_safety::params_contain_manual_credentials(params)
             || (self.credential_registry.as_ref().is_some_and(|registry| {
                 extract_host_from_params(params)
                     .is_some_and(|host| registry.has_credentials_for_host(&host))
@@ -1797,16 +1797,16 @@ mod tests {
 
     #[test]
     fn test_save_to_accepts_simple_tmp_path() {
-        let path = validate_save_to_path("/tmp/test_ironclaw_photo.jpg").unwrap();
+        let path = validate_save_to_path("/tmp/test_t3claw_photo.jpg").unwrap();
         assert!(path.starts_with("/tmp"));
         let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_save_to_accepts_nested_tmp_path() {
-        let path = validate_save_to_path("/tmp/ironclaw_test_subdir/nested/file.png").unwrap();
+        let path = validate_save_to_path("/tmp/t3claw_test_subdir/nested/file.png").unwrap();
         assert!(path.starts_with("/tmp"));
-        let _ = std::fs::remove_dir_all("/tmp/ironclaw_test_subdir");
+        let _ = std::fs::remove_dir_all("/tmp/t3claw_test_subdir");
     }
 
     #[test]
@@ -1891,7 +1891,7 @@ mod tests {
     /// no real HTTP call is made.
     #[derive(Debug)]
     struct SpyInterceptor {
-        captured: tokio::sync::Mutex<Option<ironclaw_llm::recording::HttpExchangeRequest>>,
+        captured: tokio::sync::Mutex<Option<t3claw_llm::recording::HttpExchangeRequest>>,
     }
 
     impl SpyInterceptor {
@@ -1901,19 +1901,19 @@ mod tests {
             }
         }
 
-        async fn captured_request(&self) -> Option<ironclaw_llm::recording::HttpExchangeRequest> {
+        async fn captured_request(&self) -> Option<t3claw_llm::recording::HttpExchangeRequest> {
             self.captured.lock().await.clone()
         }
     }
 
     #[async_trait::async_trait]
-    impl ironclaw_llm::recording::HttpInterceptor for SpyInterceptor {
+    impl t3claw_llm::recording::HttpInterceptor for SpyInterceptor {
         async fn before_request(
             &self,
-            request: &ironclaw_llm::recording::HttpExchangeRequest,
-        ) -> Option<ironclaw_llm::recording::HttpExchangeResponse> {
+            request: &t3claw_llm::recording::HttpExchangeRequest,
+        ) -> Option<t3claw_llm::recording::HttpExchangeResponse> {
             *self.captured.lock().await = Some(request.clone());
-            Some(ironclaw_llm::recording::HttpExchangeResponse {
+            Some(t3claw_llm::recording::HttpExchangeResponse {
                 status: 200,
                 headers: vec![],
                 body: r#"{"ok":true}"#.to_string(),
@@ -1922,8 +1922,8 @@ mod tests {
 
         async fn after_response(
             &self,
-            _request: &ironclaw_llm::recording::HttpExchangeRequest,
-            _response: &ironclaw_llm::recording::HttpExchangeResponse,
+            _request: &t3claw_llm::recording::HttpExchangeRequest,
+            _response: &t3claw_llm::recording::HttpExchangeResponse,
         ) {
         }
     }
@@ -1973,8 +1973,7 @@ mod tests {
 
         let spy = Arc::new(SpyInterceptor::new());
         let mut ctx = crate::context::JobContext::new("test", "test");
-        ctx.http_interceptor =
-            Some(spy.clone() as Arc<dyn ironclaw_llm::recording::HttpInterceptor>);
+        ctx.http_interceptor = Some(spy.clone() as Arc<dyn t3claw_llm::recording::HttpInterceptor>);
 
         // `api.github.com` chosen because DNS resolution runs before the
         // interceptor short-circuits (see `validate_and_resolve_url` in
@@ -2049,8 +2048,7 @@ mod tests {
 
         let spy = Arc::new(SpyInterceptor::new());
         let mut ctx = crate::context::JobContext::new("test", "test");
-        ctx.http_interceptor =
-            Some(spy.clone() as Arc<dyn ironclaw_llm::recording::HttpInterceptor>);
+        ctx.http_interceptor = Some(spy.clone() as Arc<dyn t3claw_llm::recording::HttpInterceptor>);
 
         let params = serde_json::json!({
             "method": "GET",

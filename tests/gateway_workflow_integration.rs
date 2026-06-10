@@ -16,12 +16,12 @@ mod tests {
 
     use async_trait::async_trait;
     use chrono::Utc;
-    use ironclaw::agent::routine::{
+    use t3claw::agent::routine::{
         NotifyConfig, Routine, RoutineAction, RoutineGuardrails, Trigger,
         reset_routine_verification_state, routine_verification_fingerprint,
     };
-    use ironclaw::context::JobContext;
-    use ironclaw::tools::{Tool, ToolError, ToolOutput};
+    use t3claw::context::JobContext;
+    use t3claw::tools::{Tool, ToolError, ToolOutput};
     use uuid::Uuid;
 
     use crate::support::gateway_workflow_harness::GatewayWorkflowHarness;

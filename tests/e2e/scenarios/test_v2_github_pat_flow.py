@@ -20,7 +20,7 @@ Wire-shape assertions (P1, issue #4112):
 - ``account_label`` present for manual-token challenges
 
 Browser tests (P2, issue #4112):
-- Require ``webui-v2-beta`` feature compiled in and ``IRONCLAW_REBORN_WEBUI``
+- Require ``webui-v2-beta`` feature compiled in and ``T3CLAW_REBORN_WEBUI``
   env wired; skipped via ``pytest.mark.skip`` until E2E binary is updated.
 """
 
@@ -57,7 +57,7 @@ from fixtures.mock_bearer_api import start_mock_bearer_api
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-# GitHub PAT pattern used in ironclaw_safety::leak_detector (line 1190).
+# GitHub PAT pattern used in t3claw_safety::leak_detector (line 1190).
 # Any string matching this should NEVER appear in SSE frames or history.
 _GITHUB_PAT_RE = re.compile(
     r"(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]+",
@@ -135,17 +135,17 @@ def _reset_mock_bearer(mock_bearer):
 
 
 @pytest.fixture(scope="module")
-async def v2_pat_server(ironclaw_binary, mock_llm_server, mock_bearer, tmp_path_factory):
-    """Start ironclaw with ENGINE_V2=true for GitHub PAT E2E tests."""
+async def v2_pat_server(t3claw_binary, mock_llm_server, mock_bearer, tmp_path_factory):
+    """Start t3claw with ENGINE_V2=true for GitHub PAT E2E tests."""
     home_dir = str(tmp_path_factory.mktemp("pat-home"))
     db_dir = str(tmp_path_factory.mktemp("pat-db"))
-    skills_dir = os.path.join(home_dir, ".ironclaw", "skills")
+    skills_dir = os.path.join(home_dir, ".t3claw", "skills")
     os.makedirs(skills_dir, exist_ok=True)
     _write_github_skill(skills_dir, mock_bearer._mock_host)
 
     port = _reserve_loopback_port()
     async with _start_engine_v2_server(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server=mock_llm_server,
         port=port,
         home_dir=home_dir,
@@ -327,8 +327,8 @@ class TestGitHubPatWireShape:
 
 @pytest.mark.skip(
     reason=(
-        "Playwright browser test requires ironclaw binary compiled with "
-        "webui-v2-beta feature and IRONCLAW_REBORN_WEBUI_TOKEN env wired. "
+        "Playwright browser test requires t3claw binary compiled with "
+        "webui-v2-beta feature and T3CLAW_REBORN_WEBUI_TOKEN env wired. "
         "Enable by building: cargo build --features libsql,webui-v2-beta"
     )
 )

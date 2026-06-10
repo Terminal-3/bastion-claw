@@ -11,11 +11,11 @@
 //! variant, so adding a `#[non_exhaustive]` variant in the future fails
 //! compilation of the test binary (forcing an explicit decision).
 
-use ironclaw_host_api::runtime_policy::{
+use t3claw_host_api::runtime_policy::{
     ApprovalPolicy, AuditMode, DeploymentMode, EffectiveRuntimePolicy, FilesystemBackendKind,
     NetworkMode, ProcessBackendKind, RuntimeProfile, SecretMode,
 };
-use ironclaw_runtime_policy::{OrgPolicyConstraints, ResolveRequest, resolve};
+use t3claw_runtime_policy::{OrgPolicyConstraints, ResolveRequest, resolve};
 
 /// JSON round-trip + serialized form matches `as_str()` (snake_case wire name).
 fn assert_round_trip<T>(value: T, expected_wire: &str)
@@ -200,7 +200,7 @@ fn effective_runtime_policy_round_trips_serde_for_a_representative_matrix() {
     // Build at least nine representative policies via the resolver covering
     // the deployment × profile combinations highlighted in PR #3243's body.
     // Resolver-produced policies are the only sanctioned source per the
-    // ironclaw_runtime_policy guardrail; round-tripping these locks every
+    // t3claw_runtime_policy guardrail; round-tripping these locks every
     // backend enum's serde simultaneously.
     let policies = [
         // Local family

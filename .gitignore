@@ -46,7 +46,7 @@ artifacts/
 
 # WASM build artifacts (loaded from disk, not bundled)
 *.wasm
-!crates/ironclaw_first_party_extensions/assets/*/wasm/*.wasm
+!crates/t3claw_first_party_extensions/assets/*/wasm/*.wasm
 
 # Traces
 trace_*.json
@@ -54,7 +54,7 @@ trace_*.json
 # Local Claude Code settings (machine-specific, should not be committed)
 .claude/settings.local.json
 .worktrees/
-.ironclaw/
+.t3claw/
 .review/
 
 # Python cache

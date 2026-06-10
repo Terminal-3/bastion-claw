@@ -10,9 +10,9 @@ SCRIPT_DIR="$REPO_ROOT/scripts/ci"
 "$SCRIPT_DIR/quality_gate.sh"
 
 # Optional strict delta lint (env-gated)
-if [ "${IRONCLAW_STRICT_DELTA_LINT:-0}" = "1" ]; then
+if [ "${T3CLAW_STRICT_DELTA_LINT:-0}" = "1" ]; then
     "$SCRIPT_DIR/delta_lint.sh" "$1"
-elif [ "${IRONCLAW_STRICT_LINT:-0}" = "1" ]; then
+elif [ "${T3CLAW_STRICT_LINT:-0}" = "1" ]; then
     echo "==> clippy (strict: all warnings)"
     cargo clippy --locked --all-targets -- -D warnings
 fi

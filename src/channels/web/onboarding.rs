@@ -1,6 +1,6 @@
 use crate::channels::web::types::{AppEvent, ChannelOnboardingState, OnboardingStateDto};
 use crate::extensions::ConfigureResult;
-use ironclaw_common::ExtensionName;
+use t3claw_common::ExtensionName;
 
 pub(crate) enum ConfigureFlowOutcome {
     Ready,
@@ -84,7 +84,7 @@ mod tests {
     use super::{ConfigureFlowOutcome, classify_configure_result, event_from_configure_result};
     use crate::channels::web::types::ChannelOnboardingState;
     use crate::extensions::ConfigureResult;
-    use ironclaw_common::ExtensionName;
+    use t3claw_common::ExtensionName;
 
     #[test]
     fn classify_configure_result_treats_oauth_continuation_as_auth_required() {

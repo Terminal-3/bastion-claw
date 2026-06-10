@@ -6,18 +6,18 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use ironclaw_filesystem::{FilesystemError, LocalFilesystem, RootFilesystem, ScopedFilesystem};
-use ironclaw_host_api::{
+use serde::{Serialize, de::DeserializeOwned};
+use sha2::{Digest, Sha256};
+use t3claw_filesystem::{FilesystemError, LocalFilesystem, RootFilesystem, ScopedFilesystem};
+use t3claw_host_api::{
     AgentId, HostApiError, MountAlias, MountGrant, MountPermissions, MountView, ProjectId,
     ResourceScope, ScopedPath, TenantId, ThreadId, UserId, VirtualPath,
 };
-use ironclaw_product_workflow::{
+use t3claw_product_workflow::{
     ActionFingerprintKey, ActionPhase, ConversationBindingService, IdempotencyDecision,
     IdempotencyLedger, ProductConversationRouteKind, ProductInboundAction, ProductWorkflowError,
     ResolveBindingRequest, ResolvedBinding,
 };
-use serde::{Serialize, de::DeserializeOwned};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -618,6 +618,6 @@ pub fn resource_scope(
         project_id,
         mission_id: None,
         thread_id: None,
-        invocation_id: ironclaw_host_api::InvocationId::new(),
+        invocation_id: t3claw_host_api::InvocationId::new(),
     }
 }

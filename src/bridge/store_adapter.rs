@@ -34,7 +34,7 @@ use serde::de::DeserializeOwned;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
-use ironclaw_engine::{
+use t3claw_engine::{
     CapabilityLease, ConversationId, ConversationSurface, DocId, DocType, EngineError, LeaseId,
     MemoryDoc, Project, ProjectId, Step, Store, Thread, ThreadEvent, ThreadId, ThreadState,
     types::mission::{Mission, MissionId, MissionStatus},
@@ -92,7 +92,7 @@ const FIX_PATTERN_TITLE: &str = "fix_pattern_database";
 /// gate reads the same value as the engine loop, the memory tool, and the
 /// self-improvement mission.
 fn self_modify_enabled() -> bool {
-    ironclaw_engine::runtime::self_modify_enabled()
+    t3claw_engine::runtime::self_modify_enabled()
 }
 
 /// Workspace-backed engine store.
@@ -1020,7 +1020,7 @@ fn synthesize_orchestrator_doc_from_py(path: &str, content: &str) -> Option<Memo
     Some(MemoryDoc {
         id: DocId(uuid::Uuid::new_v4()),
         project_id: ProjectId(uuid::Uuid::nil()),
-        user_id: ironclaw_engine::types::shared_owner_id().to_string(),
+        user_id: t3claw_engine::types::shared_owner_id().to_string(),
         doc_type: DocType::Note,
         title: ORCHESTRATOR_MAIN_TITLE.to_string(),
         content: content.to_string(),
@@ -1051,7 +1051,7 @@ fn is_protected_orchestrator_doc(doc: &MemoryDoc) -> bool {
 /// user; a bare project under `shared_owner_id` would be invisible to its
 /// real owner and globally visible to everyone else.
 fn synth_bare_project(raw_slug: &str, user_id: &str) -> Option<Project> {
-    let slug = ironclaw_engine::types::slugify_simple(raw_slug);
+    let slug = t3claw_engine::types::slugify_simple(raw_slug);
     if slug.is_empty() {
         return None;
     }
@@ -1099,7 +1099,7 @@ fn is_globally_shared(doc: &MemoryDoc) -> bool {
 fn validate_orchestrator_content(doc: &MemoryDoc) -> Result<(), EngineError> {
     if doc.title.starts_with("orchestrator:")
         && doc.title != ORCHESTRATOR_FAILURES_TITLE
-        && let Err(reason) = ironclaw_engine::executor::validate_python_syntax(&doc.content)
+        && let Err(reason) = t3claw_engine::executor::validate_python_syntax(&doc.content)
     {
         return Err(EngineError::InvalidInput {
             reason: format!(
@@ -1115,7 +1115,7 @@ fn validate_orchestrator_content(doc: &MemoryDoc) -> Result<(), EngineError> {
 /// name (no UUID suffix) so the user-facing path `projects/<slug>/` is
 /// predictable and doesn't churn when the project's ID changes.
 fn project_slug_for_name(name: &str) -> String {
-    let slug = ironclaw_engine::types::slugify_simple(name);
+    let slug = t3claw_engine::types::slugify_simple(name);
     if slug.is_empty() {
         "untitled".to_string()
     } else {
@@ -1431,7 +1431,7 @@ fn compact_thread_summary(thread: &Thread) -> ThreadArchiveSummary {
         .messages
         .iter()
         .rev()
-        .find(|m| matches!(m.role, ironclaw_engine::MessageRole::Assistant))
+        .find(|m| matches!(m.role, t3claw_engine::MessageRole::Assistant))
         .map(|m| truncate_for_readme(&m.content, 200))
         .unwrap_or_default();
 
@@ -1470,12 +1470,12 @@ fn thread_from_archive(summary: &ThreadArchiveSummary) -> Option<Thread> {
         id: ThreadId(id),
         goal: summary.goal.clone(),
         title: summary.title.clone(),
-        thread_type: ironclaw_engine::ThreadType::Mission,
+        thread_type: t3claw_engine::ThreadType::Mission,
         state,
-        project_id: ironclaw_engine::ProjectId(uuid::Uuid::nil()),
+        project_id: t3claw_engine::ProjectId(uuid::Uuid::nil()),
         user_id: "default".to_string(),
         parent_id: None,
-        config: ironclaw_engine::ThreadConfig::default(),
+        config: t3claw_engine::ThreadConfig::default(),
         messages: Vec::new(),
         internal_messages: Vec::new(),
         events: Vec::new(),
@@ -1709,7 +1709,7 @@ impl Store for HybridStore {
         // The failure-tracker writes (`record_orchestrator_failure`,
         // `reset_orchestrator_failures`) enter the scope at the call site.
         if is_protected_orchestrator_doc(doc) {
-            let trusted = ironclaw_engine::runtime::is_trusted_internal_write_active();
+            let trusted = t3claw_engine::runtime::is_trusted_internal_write_active();
 
             // The failure tracker is a *system-internal* accounting doc — no
             // LLM-reachable code path should ever write it. Reject untrusted
@@ -1749,7 +1749,7 @@ impl Store for HybridStore {
         // MissionManager carries the writing project's id and is invisible
         // to other projects until the workspace is reloaded.
         if is_globally_shared(&stamped)
-            && ironclaw_engine::types::is_shared_owner(&stamped.user_id)
+            && t3claw_engine::types::is_shared_owner(&stamped.user_id)
             && !stamped.project_id.0.is_nil()
         {
             stamped.project_id = ProjectId(uuid::Uuid::nil());
@@ -1814,7 +1814,7 @@ impl Store for HybridStore {
         let mut out: Vec<MemoryDoc> = docs
             .values()
             .filter(|doc| {
-                let owner_shared = ironclaw_engine::types::is_shared_owner(&doc.user_id);
+                let owner_shared = t3claw_engine::types::is_shared_owner(&doc.user_id);
                 if !owner_shared {
                     return false;
                 }
@@ -1965,7 +1965,7 @@ impl Store for HybridStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_engine::types::shared_owner_id;
+    use t3claw_engine::types::shared_owner_id;
 
     // ── normalize_path / is_orchestrator_code_path ─────────────
 
@@ -2043,7 +2043,7 @@ mod tests {
     /// Parity test: the store adapter's `normalize_path` and the memory
     /// tool's `normalize_workspace_path` both sit on the orchestrator
     /// self-modify security boundary. They are independent copies of the
-    /// same normalization logic (one lives in the `ironclaw` bridge layer,
+    /// same normalization logic (one lives in the `t3claw` bridge layer,
     /// the other in a tool module) — if they ever diverge, a path-traversal
     /// or dot-segment bypass reopens on one side.
     ///
@@ -2275,7 +2275,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_shared_surfaces_global_orchestrator_for_any_project() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
         let store = HybridStore::new(None);
 
@@ -2305,7 +2305,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_shared_surfaces_project_scoped_orchestrator_for_matching_project() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
         let store = HybridStore::new(None);
         let project = ProjectId::new();
@@ -2342,9 +2342,9 @@ mod tests {
 
     #[tokio::test]
     async fn save_rejects_llm_orchestrator_when_self_modify_disabled() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let store = HybridStore::new(None);
 
         // The reviewer-flagged forgeable bypass: previously, an LLM-authored
@@ -2378,10 +2378,10 @@ mod tests {
 
     #[tokio::test]
     async fn save_allows_trusted_seed_when_self_modify_disabled() {
-        use ironclaw_engine::Store;
-        use ironclaw_engine::runtime::with_trusted_internal_writes;
+        use t3claw_engine::Store;
+        use t3claw_engine::runtime::with_trusted_internal_writes;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let store = HybridStore::new(None);
 
         // System-internal seed inside the trusted-write scope must succeed
@@ -2407,9 +2407,9 @@ mod tests {
 
     #[tokio::test]
     async fn save_validates_python_when_self_modify_enabled() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let store = HybridStore::new(None);
 
         let doc = MemoryDoc {
@@ -2447,14 +2447,14 @@ mod tests {
     /// tracker must be rejected.
     #[tokio::test]
     async fn save_rejects_untrusted_failure_tracker_writes() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
         // Self-modify *enabled* is the interesting case — under the old
         // title-based exemption the write would bypass even the
         // `validate_orchestrator_content` step (the validator also skipped
         // the failures title). With the fix, untrusted callers are blocked
         // regardless of self-modify state.
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let store = HybridStore::new(None);
 
         let doc = MemoryDoc {
@@ -2486,10 +2486,10 @@ mod tests {
     /// still succeed — they enter the trusted-write scope at the call site.
     #[tokio::test]
     async fn save_allows_trusted_failure_tracker_writes() {
-        use ironclaw_engine::Store;
-        use ironclaw_engine::runtime::with_trusted_internal_writes;
+        use t3claw_engine::Store;
+        use t3claw_engine::runtime::with_trusted_internal_writes;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let store = HybridStore::new(None);
 
         let doc = MemoryDoc {
@@ -2512,9 +2512,9 @@ mod tests {
 
     #[tokio::test]
     async fn save_stamps_content_hash_on_protected_docs() {
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let store = HybridStore::new(None);
 
         let doc = MemoryDoc {
@@ -2553,19 +2553,19 @@ mod tests {
     // reconstruct) and legacy compatibility (archive files written before
     // this field existed still deserialize, falling back to 0.0).
 
-    fn archive_thread_fixture(cost: f64) -> ironclaw_engine::Thread {
-        let mut thread = ironclaw_engine::Thread::new(
+    fn archive_thread_fixture(cost: f64) -> t3claw_engine::Thread {
+        let mut thread = t3claw_engine::Thread::new(
             "archive-round-trip",
-            ironclaw_engine::ThreadType::Mission,
-            ironclaw_engine::ProjectId::new(),
+            t3claw_engine::ThreadType::Mission,
+            t3claw_engine::ProjectId::new(),
             "u1",
-            ironclaw_engine::ThreadConfig::default(),
+            t3claw_engine::ThreadConfig::default(),
         );
         thread.step_count = 3;
         thread.total_tokens_used = 1500;
         thread.total_cost_usd = cost;
         thread.completed_at = Some(thread.created_at);
-        thread.state = ironclaw_engine::ThreadState::Completed;
+        thread.state = t3claw_engine::ThreadState::Completed;
         thread
     }
 
@@ -2649,7 +2649,7 @@ mod tests {
                 // Only names that slugify to empty produce None; assert
                 // the helper and Project::new agree on emptiness too.
                 assert!(
-                    ironclaw_engine::types::slugify_simple(raw_slug).is_empty(),
+                    t3claw_engine::types::slugify_simple(raw_slug).is_empty(),
                     "synth_bare_project returned None for non-empty slug {raw_slug:?}"
                 );
                 continue;
@@ -2663,7 +2663,7 @@ mod tests {
             // `save_project` lands at the same directory as the raw dir
             // only if that raw dir is already canonical, which is the
             // guarantee we want for workspace round-tripping.
-            assert_eq!(stub.name, ironclaw_engine::types::slugify_simple(raw_slug));
+            assert_eq!(stub.name, t3claw_engine::types::slugify_simple(raw_slug));
         }
     }
 
@@ -2997,11 +2997,11 @@ mod migration_tests {
 
     #[tokio::test]
     async fn orchestrator_py_round_trips_through_restart() {
-        use ironclaw_engine::Store;
-        use ironclaw_engine::runtime::with_trusted_internal_writes;
-        use ironclaw_engine::types::shared_owner_id;
+        use t3claw_engine::Store;
+        use t3claw_engine::runtime::with_trusted_internal_writes;
+        use t3claw_engine::types::shared_owner_id;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let (ws, _dir) = fresh_workspace().await;
 
         // ── Phase 1: write an orchestrator v3 through the trusted path
@@ -3099,9 +3099,9 @@ mod migration_tests {
         // `project_id` nor `user_id`, so `deserialize_knowledge_doc`
         // restored them as `nil`/`"legacy"` and `list_memory_docs` (which
         // filters by exact pair) returned nothing after restart.
-        use ironclaw_engine::Store;
+        use t3claw_engine::Store;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::disable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::disable();
         let (ws, _dir) = fresh_workspace().await;
 
         let project = ProjectId::new();
@@ -3370,10 +3370,10 @@ mod migration_tests {
         // Reviewer finding: the validator must run *before* the doc is
         // persisted, otherwise broken patches consume failure-budget slots
         // (3 failures trigger auto-rollback) and corrupt the version chain.
-        use ironclaw_engine::Store;
-        use ironclaw_engine::types::shared_owner_id;
+        use t3claw_engine::Store;
+        use t3claw_engine::types::shared_owner_id;
 
-        let _guard = ironclaw_engine::runtime::SelfModifyTestGuard::enable();
+        let _guard = t3claw_engine::runtime::SelfModifyTestGuard::enable();
         let (ws, _dir) = fresh_workspace().await;
 
         let store = HybridStore::new(Some(Arc::clone(&ws)));

@@ -452,7 +452,7 @@ mod tests {
         // for the specific leak shapes the fix is meant to prevent.
         let raw_a = "execution failed: store error: connection \
             'postgres://bob:hunter2@db:5432/x' refused: \
-            File \"/home/runner/.ironclaw/state.db\" not found";
+            File \"/home/runner/.t3claw/state.db\" not found";
         // Deliberately avoid any substring that the classifier recognises
         // (no `upstream`, no `http 5xx`, no `rate limited`, etc.) so both
         // inputs fall into the `Unknown` category — the test is about

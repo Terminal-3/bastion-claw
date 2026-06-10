@@ -179,17 +179,17 @@ async def test_search_filters_extension_cards(page):
     assert await hidden.count() == 1
 
 
-async def test_search_filters_user_rows(page, ironclaw_server):
+async def test_search_filters_user_rows(page, t3claw_server):
     """Search filters user table rows in the Users subtab."""
     # Seed two users via the admin API
     suffix = uuid.uuid4().hex[:8]
-    alice = await api_post(ironclaw_server, "/api/admin/users", json={
+    alice = await api_post(t3claw_server, "/api/admin/users", json={
         "display_name": f"Alice Searchtest {suffix}",
         "email": f"alice-searchtest-{suffix}@example.test",
         "role": "member",
     })
     assert alice.status_code == 200, alice.text
-    bob = await api_post(ironclaw_server, "/api/admin/users", json={
+    bob = await api_post(t3claw_server, "/api/admin/users", json={
         "display_name": f"Bob Searchtest {suffix}",
         "email": f"bob-searchtest-{suffix}@example.test",
         "role": "member",
@@ -198,7 +198,7 @@ async def test_search_filters_user_rows(page, ironclaw_server):
 
     expected_ids = {alice.json()["id"], bob.json()["id"]}
     for _ in range(20):
-        listed = await api_get(ironclaw_server, "/api/admin/users")
+        listed = await api_get(t3claw_server, "/api/admin/users")
         assert listed.status_code == 200, listed.text
         listed_ids = {u["id"] for u in listed.json().get("users", [])}
         if expected_ids <= listed_ids:

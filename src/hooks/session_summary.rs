@@ -6,14 +6,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::sync::Semaphore;
 
-use ironclaw_safety::Sanitizer;
+use t3claw_safety::Sanitizer;
 
 use crate::db::ConversationStore;
 use crate::hooks::hook::{
     Hook, HookContext, HookError, HookEvent, HookFailureMode, HookOutcome, HookPoint,
 };
 use crate::tools::builtin::memory::WorkspaceResolver;
-use ironclaw_llm::{ChatMessage, CompletionRequest, LlmProvider};
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider};
 
 /// Maximum number of concurrent LLM summarization calls.
 /// Prevents thundering herd when many sessions expire at once (e.g. restart after idle).
@@ -137,7 +137,7 @@ impl Hook for SessionSummaryHook {
 
         let llm_messages = vec![
             ChatMessage::system(include_str!(
-                "../../crates/ironclaw_engine/prompts/session_summary.md"
+                "../../crates/t3claw_engine/prompts/session_summary.md"
             )),
             ChatMessage::user(truncated.to_string()),
         ];
@@ -210,10 +210,10 @@ mod tests {
     use crate::history::{ConversationMessage, ConversationSummary};
     use crate::workspace::Workspace;
     use chrono::Utc;
-    use ironclaw_llm::{
+    use rust_decimal::Decimal;
+    use t3claw_llm::{
         CompletionResponse, FinishReason, LlmError, ToolCompletionRequest, ToolCompletionResponse,
     };
-    use rust_decimal::Decimal;
     use uuid::Uuid;
 
     // ── Mock ConversationStore ──────────────────────────────────────

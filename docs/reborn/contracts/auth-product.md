@@ -2,8 +2,8 @@
 
 - **Status:** contract and composition seam
 - **Issue:** #3289 / #3810 / #3811 / #3812 / #3881 / #3882 / #3883 / #3884
-- **Crate:** `crates/ironclaw_auth`
-- **Composition:** `ironclaw_reborn_composition::RebornProductAuthServices`
+- **Crate:** `crates/t3claw_auth`
+- **Composition:** `t3claw_reborn_composition::RebornProductAuthServices`
 
 ---
 
@@ -14,12 +14,12 @@ selecting, refreshing, and cleaning up credentials for integrations,
 providers, extensions, MCP servers, WASM tools/channels, and future identity
 login flows.
 
-This slice is contract-first. `ironclaw_auth` defines Reborn-native vocabulary,
-traits, validation helpers, and fake services. `ironclaw_reborn_composition`
+This slice is contract-first. `t3claw_auth` defines Reborn-native vocabulary,
+traits, validation helpers, and fake services. `t3claw_reborn_composition`
 owns the production filesystem-backed adapter and factory wiring. #3811 adds a
 Reborn composition seam, #3812 adds callback completion handling, #3881 mounts
 the first Reborn-native OAuth start/callback HTTP routes through
-`ironclaw_reborn_composition`, #3882 adds the composition-facing manual-token
+`t3claw_reborn_composition`, #3882 adds the composition-facing manual-token
 secure-submit entrypoint, #3883 adds recovery/selection facade coverage, and
 #3884 adds refresh/cleanup lifecycle contracts. It does not migrate production
 extension setup routes, CLI/setup flows, a production refresh scheduler/HTTP
@@ -76,7 +76,7 @@ need host-only client metadata; the Google setup route builds the Google
 authorization URL from configured Reborn product-auth client metadata and keeps
 the static redirect URI aligned with the provider exchange client.
 
-`ironclaw_product_workflow::ProductAuthTurnGateResumeDispatcher` is the
+`t3claw_product_workflow::ProductAuthTurnGateResumeDispatcher` is the
 product-workflow bridge for `AuthContinuationRef::TurnGateResume`. It converts
 that specific typed auth continuation into a `TurnCoordinator::resume_turn` call
 using the canonical turn scope, actor, run id, and gate ref carried by the auth
@@ -85,7 +85,7 @@ continuation dispatch. Setup-only, lifecycle-activation, and product-action
 continuations remain explicit non-turn cases for their owning handlers and must
 not be performed inline by the OAuth callback route.
 
-`ironclaw_product_workflow::AuthInteractionService` owns the product/WebUI
+`t3claw_product_workflow::AuthInteractionService` owns the product/WebUI
 blocked-auth interaction loop from #3094. It reads auth-required gates from
 scoped blocked run-state plus auth-flow records, returns redacted
 adapter/UI-safe DTOs, and routes credential/callback/cancel decisions back
@@ -121,8 +121,8 @@ V1 pending maps.
 
 ## Durable Production Slice (#4175)
 
-Production product-auth records use the `ironclaw_auth` contract types and are
-stored by the `ironclaw_reborn_composition` filesystem adapter under the normal
+Production product-auth records use the `t3claw_auth` contract types and are
+stored by the `t3claw_reborn_composition` filesystem adapter under the normal
 Reborn scoped filesystem substrate, rooted at the caller's
 `/secrets/product-auth/{surface}` tree. The production factory constructs
 `FilesystemAuthProductServices` over the same libSQL/PostgreSQL-backed
@@ -131,7 +131,7 @@ longer need to inject `InMemoryAuthProductServices` or an external product-auth
 facade for production.
 
 The storage-home decision is deliberately **not** to make
-`ironclaw_secrets::CredentialAccountStore` own product-auth UX records. Runtime
+`t3claw_secrets::CredentialAccountStore` own product-auth UX records. Runtime
 credential broker accounts and product-auth account records have different
 semantics. Product-auth durable records store provider id, label, ownership,
 owner extension, grants, status, provider scopes, and access/refresh secret
@@ -438,7 +438,7 @@ pretending cleanup succeeded.
 
 The Reborn composition mounts host-owned HTTP routes that enter
 `RebornProductAuthServices` (see
-`crates/ironclaw_reborn_composition/src/product_auth_serve/mod.rs`). All mutation
+`crates/t3claw_reborn_composition/src/product_auth_serve/mod.rs`). All mutation
 routes share the same `LocalGateway` + `BearerToken` + per-caller body and
 rate-limit posture as the original `oauth/start` route and derive
 `AuthProductScope` from the authenticated caller, never from caller-supplied
@@ -469,10 +469,10 @@ Rules:
   `invocation_id` round-tripped through the browser, matching the OAuth
   start/callback pattern.
 - Google OAuth setup is configured in the Reborn host process from env-only
-  values: `IRONCLAW_REBORN_GOOGLE_CLIENT_ID`,
-  `IRONCLAW_REBORN_GOOGLE_OAUTH_REDIRECT_URI`, optional
-  `IRONCLAW_REBORN_GOOGLE_CLIENT_SECRET`, and optional
-  `IRONCLAW_REBORN_GOOGLE_HOSTED_DOMAIN_HINT`. For bootstrap compatibility, Reborn
+  values: `T3CLAW_REBORN_GOOGLE_CLIENT_ID`,
+  `T3CLAW_REBORN_GOOGLE_OAUTH_REDIRECT_URI`, optional
+  `T3CLAW_REBORN_GOOGLE_CLIENT_SECRET`, and optional
+  `T3CLAW_REBORN_GOOGLE_HOSTED_DOMAIN_HINT`. For bootstrap compatibility, Reborn
   also accepts `GOOGLE_CLIENT_ID`, `GOOGLE_OAUTH_REDIRECT_URI`,
   `GOOGLE_CLIENT_SECRET`, and `GOOGLE_ALLOWED_HD` as a hosted-domain hint when
   the redirect URI opt-in is present. The hint only adds Google's `hd=`
@@ -515,7 +515,7 @@ Rules:
 
 ## First-Slice Tests
 
-`ironclaw_auth` contract tests cover:
+`t3claw_auth` contract tests cover:
 
 - OAuth start, provider exchange, callback success, callback replay, stale,
   canceled, malformed, denied, and cross-scope callback behavior;
@@ -541,7 +541,7 @@ Rules:
 
 ## AuthPromptView v2 enrichment (issue #4112)
 
-`AuthPromptView` in `crates/ironclaw_product_adapters/src/outbound.rs` carries
+`AuthPromptView` in `crates/t3claw_product_adapters/src/outbound.rs` carries
 five new optional fields added in #4112 for WebUI v2 OAuth/PAT rendering:
 
 | Field | Type | Present when |
@@ -586,7 +586,7 @@ token, `interaction_id`.
 
 ### Wire-shape tests
 
-`crates/ironclaw_reborn_composition/tests/webui_v2_product_auth_4201.rs`
+`crates/t3claw_reborn_composition/tests/webui_v2_product_auth_4201.rs`
 covers:
 - Serialisation of the new optional fields when present.
 - Omission of all new fields when absent (backward-compat check).

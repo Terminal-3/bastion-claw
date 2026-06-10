@@ -1,6 +1,6 @@
 # Reborn Harness Map
 
-Reborn is IronClaw's host/runtime integration work. This page is the agent-facing map for Reborn harness, validation, and local evidence.
+Reborn is T3Claw's host/runtime integration work. This page is the agent-facing map for Reborn harness, validation, and local evidence.
 
 This page is intentionally short. Use it for progressive disclosure: start here, then follow the smallest relevant repo-local source instead of loading every Reborn file into context.
 
@@ -15,24 +15,24 @@ The `reborn-integration` branch currently exposes Reborn structure primarily thr
 | Standalone Reborn Slack setup | `docs/reborn/setup-slack-for-reborn-binary.md` |
 | Porting v1 channels to Reborn surfaces/ProductAdapters | `docs/reborn/how-to-port-channel-to-reborn.md` |
 | Proposed subagent spawn design | `docs/reborn/subagent-spawn/README.md` |
-| Host API vocabulary | `crates/ironclaw_host_api/` |
-| Host API local rules | `crates/ironclaw_host_api/CLAUDE.md` |
-| Host/runtime composition and shared runtime HTTP egress | `crates/ironclaw_host_runtime/` |
-| Architecture dependency guardrails | `crates/ironclaw_architecture/` |
-| Reborn dependency-boundary tests | `crates/ironclaw_architecture/tests/reborn_dependency_boundaries.rs` |
-| Events substrate | `crates/ironclaw_events/` |
-| Event projection read models | `crates/ironclaw_event_projections/` |
-| Standalone durable event/audit stores | `crates/ironclaw_reborn_event_store/` |
-| Filesystem substrate | `crates/ironclaw_filesystem/` |
-| Network policy and HTTP transport substrate | `crates/ironclaw_network/` |
-| Secrets metadata and one-shot leases | `crates/ironclaw_secrets/` |
-| Resource governor substrate | `crates/ironclaw_resources/` |
-| Authorization substrate | `crates/ironclaw_authorization/` |
-| Approval substrate | `crates/ironclaw_approvals/` |
-| Run-state substrate | `crates/ironclaw_run_state/` |
-| WASM runtime lane and WIT HTTP adapter | `crates/ironclaw_wasm/` |
-| Script runtime lane and host HTTP adapter | `crates/ironclaw_scripts/` |
-| MCP runtime lane and host-mediated HTTP/fail-closed process policy | `crates/ironclaw_mcp/` |
+| Host API vocabulary | `crates/t3claw_host_api/` |
+| Host API local rules | `crates/t3claw_host_api/CLAUDE.md` |
+| Host/runtime composition and shared runtime HTTP egress | `crates/t3claw_host_runtime/` |
+| Architecture dependency guardrails | `crates/t3claw_architecture/` |
+| Reborn dependency-boundary tests | `crates/t3claw_architecture/tests/reborn_dependency_boundaries.rs` |
+| Events substrate | `crates/t3claw_events/` |
+| Event projection read models | `crates/t3claw_event_projections/` |
+| Standalone durable event/audit stores | `crates/t3claw_reborn_event_store/` |
+| Filesystem substrate | `crates/t3claw_filesystem/` |
+| Network policy and HTTP transport substrate | `crates/t3claw_network/` |
+| Secrets metadata and one-shot leases | `crates/t3claw_secrets/` |
+| Resource governor substrate | `crates/t3claw_resources/` |
+| Authorization substrate | `crates/t3claw_authorization/` |
+| Approval substrate | `crates/t3claw_approvals/` |
+| Run-state substrate | `crates/t3claw_run_state/` |
+| WASM runtime lane and WIT HTTP adapter | `crates/t3claw_wasm/` |
+| Script runtime lane and host HTTP adapter | `crates/t3claw_scripts/` |
+| MCP runtime lane and host-mediated HTTP/fail-closed process policy | `crates/t3claw_mcp/` |
 | Replay fixtures | `tests/fixtures/llm_traces/README.md` |
 | Replay workflow | `.github/workflows/replay-gate.yml` |
 | E2E test harness | `tests/e2e/README.md` |
@@ -68,7 +68,7 @@ Until then, use the crate-local `CLAUDE.md` files, public crate APIs, and archit
 
 ## Existing harness assets
 
-Reborn should reuse the existing IronClaw harness where possible:
+Reborn should reuse the existing T3Claw harness where possible:
 
 - `scripts/replay-snap.sh`
 - `scripts/trace-coverage.sh`
@@ -94,8 +94,8 @@ Reborn should reuse the existing IronClaw harness where possible:
 
 Preserve these Reborn boundaries unless the relevant contract or architecture test is deliberately changed:
 
-1. `ironclaw_host_api` stays vocabulary/contract-only.
-2. `ironclaw_architecture` stays test-only architecture enforcement.
+1. `t3claw_host_api` stays vocabulary/contract-only.
+2. `t3claw_architecture` stays test-only architecture enforcement.
 3. Low-level substrate crates should not depend upward on product/runtime orchestration.
 4. Product flows should not bypass authorization, approval, resource, network, secret, or event boundaries.
 5. Secrets and credential material must not appear in user-facing errors, logs, events, snapshots, or debug bundles.

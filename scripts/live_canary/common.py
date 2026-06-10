@@ -158,7 +158,7 @@ def reserve_loopback_port() -> int:
     party that ever binds.
 
     This helper remains for callers whose subprocess expects a
-    pre-chosen port via env var (e.g. the ironclaw gateway, which
+    pre-chosen port via env var (e.g. the t3claw gateway, which
     reads `GATEWAY_PORT` as a fixed u16 and does not support
     port-0 discovery). The race window there is on the order of
     milliseconds on an otherwise idle canary runner; if you see
@@ -289,10 +289,10 @@ def build_gateway_env(
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": str(home_dir),
-        "IRONCLAW_BASE_DIR": str(home_dir / ".ironclaw"),
-        "RUST_LOG": os.environ.get("RUST_LOG", "ironclaw=info"),
+        "T3CLAW_BASE_DIR": str(home_dir / ".t3claw"),
+        "RUST_LOG": os.environ.get("RUST_LOG", "t3claw=info"),
         "RUST_BACKTRACE": "1",
-        "IRONCLAW_OWNER_ID": owner_user_id,
+        "T3CLAW_OWNER_ID": owner_user_id,
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
         "GATEWAY_PORT": str(gateway_port),
@@ -376,7 +376,7 @@ def _drain_to_file(stream: Any, path: Path) -> threading.Thread:
     Without this, ``subprocess.Popen(stdout=PIPE)`` deadlocks: the kernel
     pipe buffer (64 KiB on Linux, varies on macOS) fills under sustained
     log output and the child blocks on its next write. That manifests on
-    CI as IronClaw freezing mid-request — locally the pipe fills more
+    CI as T3Claw freezing mid-request — locally the pipe fills more
     slowly so the symptom is masked. See PR #2978-ish (this fix).
     """
 
@@ -449,9 +449,9 @@ async def start_gateway_stack(
 
         if oauth_proxy:
             proxy_env = {
-                "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_url,
-                "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-                "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+                "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_url,
+                "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+                "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
             }
             extra_gateway_env = {**(extra_gateway_env or {}), **proxy_env}
 
@@ -474,7 +474,7 @@ async def start_gateway_stack(
             extra_env=extra_gateway_env,
         )
         gateway_proc = subprocess.Popen(
-            [str(ROOT / "target" / "debug" / "ironclaw"), "--no-onboard"],
+            [str(ROOT / "target" / "debug" / "t3claw"), "--no-onboard"],
             cwd=ROOT,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -482,7 +482,7 @@ async def start_gateway_stack(
             bufsize=1,
             env=env,
         )
-        # Same deadlock guard as mock_llm above — drain ironclaw's
+        # Same deadlock guard as mock_llm above — drain t3claw's
         # stdout/stderr so a chatty `RUST_LOG=info` doesn't fill the pipe
         # buffer and freeze the request handler mid-response.
         if log_dir is not None and gateway_proc.stdout is not None:
@@ -492,7 +492,7 @@ async def start_gateway_stack(
         await wait_for_ready(f"{base_url}/api/health", timeout=60.0)
 
         # Pin the LLM provider via the settings API. Setting LLM_BACKEND /
-        # LLM_BASE_URL / LLM_MODEL via env is not enough — IronClaw's DB
+        # LLM_BASE_URL / LLM_MODEL via env is not enough — T3Claw's DB
         # setting takes priority over env, and the freshly-seeded DB
         # defaults llm_backend to `nearai`, so the env config is ignored
         # and the agent attempts an interactive NearAI auth flow that

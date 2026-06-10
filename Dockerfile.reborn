@@ -1,15 +1,15 @@
 # Multi-stage Dockerfile for the standalone Reborn CLI HTTP service.
 #
 # Build:
-#   docker build -f Dockerfile.reborn -t ironclaw-reborn:latest .
+#   docker build -f Dockerfile.reborn -t t3claw-reborn:latest .
 #
 # Run locally:
-#   docker run --rm --env-file .env.reborn -p 127.0.0.1:3000:3000 ironclaw-reborn:latest
+#   docker run --rm --env-file .env.reborn -p 127.0.0.1:3000:3000 t3claw-reborn:latest
 #
 # Railway:
-#   Set Dockerfile path to Dockerfile.reborn and IRONCLAW_REBORN_SERVE_HOST=0.0.0.0.
-#   Railway supplies PORT. Set IRONCLAW_REBORN_PROFILE=production plus
-#   IRONCLAW_REBORN_POSTGRES_URL and IRONCLAW_REBORN_SECRET_MASTER_KEY for
+#   Set Dockerfile path to Dockerfile.reborn and T3CLAW_REBORN_SERVE_HOST=0.0.0.0.
+#   Railway supplies PORT. Set T3CLAW_REBORN_PROFILE=production plus
+#   T3CLAW_REBORN_POSTGRES_URL and T3CLAW_REBORN_SECRET_MASTER_KEY for
 #   durable production storage.
 
 FROM rust:1.92-bookworm AS chef
@@ -40,7 +40,7 @@ ENV CARGO_PROFILE_DIST_PANIC=abort \
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook \
     --profile dist \
-    --package ironclaw_reborn_cli \
+    --package t3claw_reborn_cli \
     --features webui-v2-beta,slack-v2-host-beta,postgres \
     --recipe-path recipe.json
 
@@ -59,9 +59,9 @@ RUN mkdir -p src \
 
 RUN cargo build \
     --profile dist \
-    --package ironclaw_reborn_cli \
+    --package t3claw_reborn_cli \
     --features webui-v2-beta,slack-v2-host-beta,postgres \
-    --bin ironclaw-reborn
+    --bin t3claw-reborn
 
 FROM debian:bookworm-slim AS runtime
 
@@ -69,24 +69,24 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/dist/ironclaw-reborn /usr/local/bin/ironclaw-reborn
-COPY docker/reborn/config.toml /opt/ironclaw/reborn/config.toml
-COPY docker/reborn/config.production.toml /opt/ironclaw/reborn/config.production.toml
-COPY docker/reborn/entrypoint.sh /usr/local/bin/ironclaw-reborn-entrypoint
+COPY --from=builder /app/target/dist/t3claw-reborn /usr/local/bin/t3claw-reborn
+COPY docker/reborn/config.toml /opt/t3claw/reborn/config.toml
+COPY docker/reborn/config.production.toml /opt/t3claw/reborn/config.production.toml
+COPY docker/reborn/entrypoint.sh /usr/local/bin/t3claw-reborn-entrypoint
 
-ENV HOME=/home/ironclaw \
-    IRONCLAW_REBORN_LOG=info \
-    IRONCLAW_REBORN_SERVE_HOST=127.0.0.1
+ENV HOME=/home/t3claw \
+    T3CLAW_REBORN_LOG=info \
+    T3CLAW_REBORN_SERVE_HOST=127.0.0.1
 
-RUN useradd -m -d /home/ironclaw -u 1000 ironclaw \
-    && mkdir -p /data/ironclaw-reborn /workspace \
-    && chown -R ironclaw:ironclaw /home/ironclaw /data/ironclaw-reborn /workspace \
-    && chmod +x /usr/local/bin/ironclaw-reborn-entrypoint
+RUN useradd -m -d /home/t3claw -u 1000 t3claw \
+    && mkdir -p /data/t3claw-reborn /workspace \
+    && chown -R t3claw:t3claw /home/t3claw /data/t3claw-reborn /workspace \
+    && chmod +x /usr/local/bin/t3claw-reborn-entrypoint
 
 WORKDIR /workspace
 
 EXPOSE 3000
 
-USER ironclaw
+USER t3claw
 
-ENTRYPOINT ["ironclaw-reborn-entrypoint"]
+ENTRYPOINT ["t3claw-reborn-entrypoint"]

@@ -208,26 +208,25 @@ mod tests {
     // runtime, so holding `ENV_MUTEX` across awaits here cannot deadlock
     // other tasks — there are none scheduled concurrently on this
     // runtime. The serialization guarantee against sibling tests
-    // reading `IRONCLAW_TEST_TELEGRAM_API_BASE_URL` is worth the lint
+    // reading `T3CLAW_TEST_TELEGRAM_API_BASE_URL` is worth the lint
     // suppression.
     #[tokio::test(flavor = "current_thread")]
     #[ignore] // requires prebuilt telegram WASM binary (not checked in, *.wasm is gitignored)
     #[allow(clippy::await_holding_lock)]
     async fn propagate_approval_restores_runtime_state_when_on_start_fails() {
         // Hold ENV_MUTEX for the duration so the runtime-env overlay mutation
-        // here cannot race with other tests reading IRONCLAW_TEST_TELEGRAM_API_BASE_URL
+        // here cannot race with other tests reading T3CLAW_TEST_TELEGRAM_API_BASE_URL
         // (e.g. extensions::manager::tests::test_telegram_token_colon_preserved_in_validation_url).
         let _env_lock = crate::config::helpers::lock_env();
-        let original =
-            crate::config::helpers::env_or_override("IRONCLAW_TEST_TELEGRAM_API_BASE_URL");
+        let original = crate::config::helpers::env_or_override("T3CLAW_TEST_TELEGRAM_API_BASE_URL");
         crate::config::helpers::set_runtime_env(
-            "IRONCLAW_TEST_TELEGRAM_API_BASE_URL",
+            "T3CLAW_TEST_TELEGRAM_API_BASE_URL",
             "http://127.0.0.1:1",
         );
 
         let Some(telegram_wasm_path) = telegram_wasm_path() else {
             crate::config::helpers::set_runtime_env(
-                "IRONCLAW_TEST_TELEGRAM_API_BASE_URL",
+                "T3CLAW_TEST_TELEGRAM_API_BASE_URL",
                 original.as_deref().unwrap_or(""),
             );
             return;
@@ -293,7 +292,7 @@ mod tests {
         assert_eq!(channel.config_json_snapshot().await, original_config);
 
         crate::config::helpers::set_runtime_env(
-            "IRONCLAW_TEST_TELEGRAM_API_BASE_URL",
+            "T3CLAW_TEST_TELEGRAM_API_BASE_URL",
             original.as_deref().unwrap_or(""),
         );
     }

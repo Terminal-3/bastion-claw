@@ -3,8 +3,6 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_loop_support::HostManagedModelResponse;
-use ironclaw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
 use reborn_support::{
     harness::{
         RebornBinaryE2EHarness, RecordingTestCapabilityPort, assert_milestone_order,
@@ -12,6 +10,8 @@ use reborn_support::{
     },
     model_replay::RebornTraceReplayModelGateway,
 };
+use t3claw_loop_support::HostManagedModelResponse;
+use t3claw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
 
 #[tokio::test]
 async fn reborn_approval_traces_parity() {

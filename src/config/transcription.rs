@@ -92,7 +92,7 @@ impl TranscriptionConfig {
     /// Create the transcription provider if enabled and configured.
     pub fn create_provider(
         &self,
-    ) -> Option<Box<dyn ironclaw_llm::transcription::TranscriptionProvider>> {
+    ) -> Option<Box<dyn t3claw_llm::transcription::TranscriptionProvider>> {
         if !self.enabled {
             return None;
         }
@@ -107,7 +107,7 @@ impl TranscriptionConfig {
                 );
 
                 let mut provider =
-                    ironclaw_llm::transcription::ChatCompletionsTranscriptionProvider::new(
+                    t3claw_llm::transcription::ChatCompletionsTranscriptionProvider::new(
                         api_key.clone(),
                     )
                     .with_model(&self.model);
@@ -125,7 +125,7 @@ impl TranscriptionConfig {
                 );
 
                 let mut provider =
-                    ironclaw_llm::transcription::OpenAiWhisperProvider::new(api_key.clone())
+                    t3claw_llm::transcription::OpenAiWhisperProvider::new(api_key.clone())
                         .with_model(&self.model);
 
                 if let Some(ref base_url) = self.base_url {

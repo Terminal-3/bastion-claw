@@ -19,12 +19,12 @@ use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use ironclaw::channels::IncomingMessage;
-use ironclaw::channels::web::platform::router::start_server;
-use ironclaw::channels::web::platform::state::GatewayState;
-use ironclaw::channels::web::sse::SseManager;
-use ironclaw::channels::web::ws::WsConnectionTracker;
-use ironclaw_common::AppEvent;
+use t3claw::channels::IncomingMessage;
+use t3claw::channels::web::platform::router::start_server;
+use t3claw::channels::web::platform::state::GatewayState;
+use t3claw::channels::web::sse::SseManager;
+use t3claw::channels::web::ws::WsConnectionTracker;
+use t3claw_common::AppEvent;
 
 const AUTH_TOKEN: &str = "test-token-12345";
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -64,19 +64,15 @@ async fn start_test_server() -> (
         skill_registry: None,
         skill_catalog: None,
         auth_manager: None,
-        chat_rate_limiter: ironclaw::channels::web::platform::state::PerUserRateLimiter::new(
-            30, 60,
-        ),
-        oauth_rate_limiter: ironclaw::channels::web::platform::state::PerUserRateLimiter::new(
-            20, 60,
-        ),
-        webhook_rate_limiter: ironclaw::channels::web::platform::state::RateLimiter::new(10, 60),
+        chat_rate_limiter: t3claw::channels::web::platform::state::PerUserRateLimiter::new(30, 60),
+        oauth_rate_limiter: t3claw::channels::web::platform::state::PerUserRateLimiter::new(20, 60),
+        webhook_rate_limiter: t3claw::channels::web::platform::state::RateLimiter::new(10, 60),
         registry_entries: Vec::new(),
         cost_guard: None,
         routine_engine: Arc::new(tokio::sync::RwLock::new(None)),
         startup_time: std::time::Instant::now(),
         active_config: Arc::new(tokio::sync::RwLock::new(
-            ironclaw::channels::web::platform::state::ActiveConfigSnapshot::default(),
+            t3claw::channels::web::platform::state::ActiveConfigSnapshot::default(),
         )),
         secrets_store: None,
         db_auth: None,
@@ -93,7 +89,7 @@ async fn start_test_server() -> (
         tool_dispatcher: None,
     });
 
-    let auth = ironclaw::channels::web::auth::MultiAuthState::single(
+    let auth = t3claw::channels::web::auth::MultiAuthState::single(
         AUTH_TOKEN.to_string(),
         "test-user".to_string(),
     );
@@ -407,7 +403,7 @@ async fn test_ws_multiple_events_in_sequence() {
 /// without deadlock. If locks are heavily contended, the test will timeout.
 #[tokio::test]
 async fn test_session_lock_not_held_during_api_operations() {
-    use ironclaw::agent::SessionManager;
+    use t3claw::agent::SessionManager;
 
     let (_addr, _state, _agent_rx) = start_test_server().await;
 

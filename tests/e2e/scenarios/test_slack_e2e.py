@@ -1,6 +1,6 @@
 """Full-process Slack E2E tests.
 
-Boot IronClaw -> activate Slack via setup API -> POST webhook events
+Boot T3Claw -> activate Slack via setup API -> POST webhook events
 -> verify chat.postMessage round-trip through mock LLM to fake Slack API.
 """
 
@@ -263,7 +263,7 @@ async def post_slack_webhook(
     *,
     signing_secret: str | None = SIGNING_SECRET,
 ) -> httpx.Response:
-    """POST a Slack event to IronClaw's webhook endpoint with HMAC signing."""
+    """POST a Slack event to T3Claw's webhook endpoint with HMAC signing."""
     body_bytes = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
 

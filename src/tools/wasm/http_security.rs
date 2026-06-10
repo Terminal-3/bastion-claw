@@ -61,7 +61,7 @@ pub(crate) async fn validate_and_resolve_http_target(
 
     if let Ok(ip) = host.parse::<IpAddr>() {
         return if is_private_ip(ip) {
-            // Test escape hatch: when `IRONCLAW_TEST_HTTP_REWRITE_MAP`
+            // Test escape hatch: when `T3CLAW_TEST_HTTP_REWRITE_MAP`
             // is set, the URL has been rewritten by
             // `rewrite_http_url_for_tool_testing` to a loopback target
             // (the rewrite itself enforces loopback-only). Mirror that
@@ -71,14 +71,14 @@ pub(crate) async fn validate_and_resolve_http_target(
             // active in debug/test builds (the env var is checked by
             // `rewrite_http_url_for_tool_testing`'s `cfg`).
             if cfg!(any(test, debug_assertions))
-                && std::env::var("IRONCLAW_TEST_HTTP_REWRITE_MAP")
+                && std::env::var("T3CLAW_TEST_HTTP_REWRITE_MAP")
                     .map(|v| !v.trim().is_empty())
                     .unwrap_or(false)
                 && ip.is_loopback()
             {
                 tracing::debug!(
                     %ip,
-                    "Allowing loopback target — IRONCLAW_TEST_HTTP_REWRITE_MAP is set"
+                    "Allowing loopback target — T3CLAW_TEST_HTTP_REWRITE_MAP is set"
                 );
                 Ok(ValidatedHttpTarget {
                     host,

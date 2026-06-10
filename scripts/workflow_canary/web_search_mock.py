@@ -1,7 +1,7 @@
 """Mock web search backend for workflow-canary scenarios.
 
 Single-port aiohttp; ``MOCK_WEB_SEARCH_PORT=<n>`` on stdout. Routes
-via ``IRONCLAW_TEST_HTTP_REMAP=api.search.brave.com=<mock_url>`` (the
+via ``T3CLAW_TEST_HTTP_REMAP=api.search.brave.com=<mock_url>`` (the
 canary's chosen web-search backend host — Brave Search v3 shape).
 
 Surface:
@@ -128,7 +128,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock web-search backend for IronClaw workflow-canary."
+        description="Mock web-search backend for T3Claw workflow-canary."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

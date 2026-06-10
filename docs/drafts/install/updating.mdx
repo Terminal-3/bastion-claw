@@ -1,16 +1,16 @@
 ---
-title: Updating IronClaw
+title: Updating T3Claw
 sidebarTitle: Updating
-description: How to update IronClaw to the latest version
+description: How to update T3Claw to the latest version
 ---
 
-Keep IronClaw up to date for the latest features and security patches.
+Keep T3Claw up to date for the latest features and security patches.
 
 ## Check Current Version
 
 ```bash
-ironclaw --version
-# ironclaw 0.13.0
+t3claw --version
+# t3claw 0.13.0
 ```
 
 ## Update by Installation Method
@@ -19,36 +19,36 @@ ironclaw --version
   <Tab title="Linux (Shell Script)">
     ```bash
     # Re-run the install script (updates in place)
-    curl -fsSL https://install.ironclaw.ai | bash
+    curl -fsSL https://install.t3claw.ai | bash
 
     # Verify update
-    ironclaw --version
+    t3claw --version
     ```
   </Tab>
 
   <Tab title="Ubuntu/Debian (APT)">
     ```bash
     sudo apt update
-    sudo apt upgrade ironclaw
+    sudo apt upgrade t3claw
     ```
   </Tab>
 
   <Tab title="macOS (Homebrew)">
     ```bash
     brew update
-    brew upgrade ironclaw
+    brew upgrade t3claw
     ```
   </Tab>
 
   <Tab title="Docker">
     ```bash
     # Pull latest image
-    docker pull nearaidev/ironclaw:latest
+    docker pull nearaidev/t3claw:latest
 
     # Recreate container
-    docker stop ironclaw
-    docker rm ironclaw
-    docker run -d --name ironclaw ...
+    docker stop t3claw
+    docker rm t3claw
+    docker run -d --name t3claw ...
 
     # Or with docker compose
     docker compose pull
@@ -58,10 +58,10 @@ ironclaw --version
 
   <Tab title="From Source">
     ```bash
-    cd /path/to/ironclaw
+    cd /path/to/t3claw
     git pull origin main
     cargo build --release
-    sudo cp target/release/ironclaw /usr/local/bin/
+    sudo cp target/release/t3claw /usr/local/bin/
     ```
   </Tab>
 </Tabs>
@@ -74,7 +74,7 @@ Check what changed in the new version:
 
 ```bash
 # View changelog (if installed from source)
-cat /usr/local/share/ironclaw/CHANGELOG.md
+cat /usr/local/share/t3claw/CHANGELOG.md
 
 # Or online
 open https://github.com/nearai/ironclaw/releases
@@ -85,7 +85,7 @@ open https://github.com/nearai/ironclaw/releases
 Database migrations run automatically on startup, but verify:
 
 ```bash
-ironclaw run
+t3claw run
 # Look for: "Running migrations..." in logs
 ```
 
@@ -95,14 +95,14 @@ If running as a service:
 
 ```bash
 # systemd (Linux)
-sudo systemctl restart ironclaw
+sudo systemctl restart t3claw
 
 # launchd (macOS)
-launchctl unload ~/Library/LaunchAgents/ai.ironclaw.service.plist
-launchctl load ~/Library/LaunchAgents/ai.ironclaw.service.plist
+launchctl unload ~/Library/LaunchAgents/ai.t3claw.service.plist
+launchctl load ~/Library/LaunchAgents/ai.t3claw.service.plist
 
 # Homebrew
-brew services restart ironclaw
+brew services restart t3claw
 ```
 
 ## Downgrading
@@ -112,10 +112,10 @@ If you need to rollback:
 ```bash
 # Linux/macOS shell script
 # Download specific version
-curl -fsSL https://install.ironclaw.ai | bash -s -- --version 0.12.0
+curl -fsSL https://install.t3claw.ai | bash -s -- --version 0.12.0
 
 # Docker
-docker pull nearaidev/ironclaw:v0.12.0
+docker pull nearaidev/t3claw:v0.12.0
 ```
 
 <Warning>
@@ -127,18 +127,18 @@ Downgrading may require manual database rollback if migrations were applied. Alw
 ### systemd Timer (Linux)
 
 ```bash
-sudo tee /etc/systemd/system/ironclaw-update.service <<EOF
+sudo tee /etc/systemd/system/t3claw-update.service <<EOF
 [Unit]
-Description=IronClaw Update Check
+Description=T3Claw Update Check
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c 'curl -fsSL https://install.ironclaw.ai | bash'
+ExecStart=/bin/bash -c 'curl -fsSL https://install.t3claw.ai | bash'
 EOF
 
-sudo tee /etc/systemd/system/ironclaw-update.timer <<EOF
+sudo tee /etc/systemd/system/t3claw-update.timer <<EOF
 [Unit]
-Description=Run IronClaw update check daily
+Description=Run T3Claw update check daily
 
 [Timer]
 OnCalendar=daily
@@ -148,7 +148,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-sudo systemctl enable --now ironclaw-update.timer
+sudo systemctl enable --now t3claw-update.timer
 ```
 
 ## Troubleshooting Updates
@@ -157,31 +157,31 @@ sudo systemctl enable --now ironclaw-update.timer
   <Accordion title="Update fails with permission denied" icon="lock">
     ```bash
     # Fix permissions
-    sudo chown -R $USER:$USER ~/.local/bin/ironclaw
+    sudo chown -R $USER:$USER ~/.local/bin/t3claw
 
     # Or update with sudo
-    sudo curl -fsSL https://install.ironclaw.ai | bash
+    sudo curl -fsSL https://install.t3claw.ai | bash
     ```
   </Accordion>
 
   <Accordion title="Database migration fails" icon="database">
-    1. Stop IronClaw
+    1. Stop T3Claw
     2. Backup database
-    3. Run with debug logging: `RUST_LOG=debug ironclaw run`
+    3. Run with debug logging: `RUST_LOG=debug t3claw run`
     4. Check specific migration error
   </Accordion>
 
   <Accordion title="Service won't start after update" icon="x-circle">
     ```bash
     # Check logs
-    sudo journalctl -u ironclaw -n 50
+    sudo journalctl -u t3claw -n 50
 
     # Verify binary
-    which ironclaw
-    ironclaw --version
+    which t3claw
+    t3claw --version
 
     # Reinstall if corrupted
-    curl -fsSL https://install.ironclaw.ai | bash
+    curl -fsSL https://install.t3claw.ai | bash
     ```
   </Accordion>
 </AccordionGroup>

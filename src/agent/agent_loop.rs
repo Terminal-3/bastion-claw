@@ -34,9 +34,9 @@ use crate::generated_images::GeneratedImageSentinel;
 use crate::hooks::HookRegistry;
 use crate::tools::ToolRegistry;
 use crate::workspace::Workspace;
-use ironclaw_llm::LlmProvider;
-use ironclaw_safety::SafetyLayer;
-use ironclaw_skills::SkillRegistry;
+use t3claw_llm::LlmProvider;
+use t3claw_safety::SafetyLayer;
+use t3claw_skills::SkillRegistry;
 
 const TRACE_QUEUE_WORKER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(300);
 const TRACE_QUEUE_WORKER_FLUSH_LIMIT: usize = 25;
@@ -406,7 +406,7 @@ async fn submission_response_to_handle_outcome(
     // Suppress silent replies only when there is truly nothing else to deliver.
     // Image-only generated responses intentionally have empty text plus staged
     // attachments, and must still reach the originating channel.
-    if ironclaw_llm::is_silent_reply(&content) {
+    if t3claw_llm::is_silent_reply(&content) {
         if !has_attachments {
             tracing::debug!("Suppressing silent reply token");
             return HandleOutcome::Shutdown;
@@ -478,7 +478,7 @@ fn should_fallback_routine_notification(error: &ChannelError) -> bool {
 }
 
 fn setup_markers_for_skills(
-    skills: &[ironclaw_skills::LoadedSkill],
+    skills: &[t3claw_skills::LoadedSkill],
 ) -> std::collections::HashSet<String> {
     let mut markers = std::collections::HashSet::new();
     for skill in skills {
@@ -508,7 +508,7 @@ pub struct AgentDeps {
     pub workspace: Option<Arc<Workspace>>,
     pub extension_manager: Option<Arc<ExtensionManager>>,
     pub skill_registry: Option<Arc<std::sync::RwLock<SkillRegistry>>>,
-    pub skill_catalog: Option<Arc<ironclaw_skills::catalog::SkillCatalog>>,
+    pub skill_catalog: Option<Arc<t3claw_skills::catalog::SkillCatalog>>,
     pub skills_config: SkillsConfig,
     pub hooks: Arc<HookRegistry>,
     pub auth_manager: Option<Arc<crate::auth::extension::AuthManager>>,
@@ -517,9 +517,9 @@ pub struct AgentDeps {
     /// SSE manager for live job event streaming to the web gateway.
     pub sse_tx: Option<Arc<crate::channels::web::sse::SseManager>>,
     /// HTTP interceptor for trace recording/replay.
-    pub http_interceptor: Option<Arc<dyn ironclaw_llm::recording::HttpInterceptor>>,
+    pub http_interceptor: Option<Arc<dyn t3claw_llm::recording::HttpInterceptor>>,
     /// Audio transcription middleware for voice messages.
-    pub transcription: Option<Arc<ironclaw_llm::transcription::TranscriptionMiddleware>>,
+    pub transcription: Option<Arc<t3claw_llm::transcription::TranscriptionMiddleware>>,
     /// Document text extraction middleware for PDF, DOCX, PPTX, etc.
     pub document_extraction: Option<Arc<crate::document_extraction::DocumentExtractionMiddleware>>,
     /// Sandbox readiness state for full-job routine dispatch.
@@ -539,7 +539,7 @@ pub struct AgentDeps {
     /// `ToolRegistry::tool_definitions_visible_under(policy)` so
     /// hosted-multi-tenant deployments cannot expose provider-host shell
     /// affordances to the model.
-    pub runtime_policy: Option<ironclaw_host_api::runtime_policy::EffectiveRuntimePolicy>,
+    pub runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
 }
 
 /// The main agent that coordinates all components.
@@ -561,7 +561,7 @@ pub struct Agent {
         Arc<tokio::sync::RwLock<Option<Arc<crate::agent::routine_engine::RoutineEngine>>>>,
     /// Engine v2 mission manager for firing learning missions (set after engine init).
     pub(crate) mission_manager_slot:
-        Arc<tokio::sync::RwLock<Option<Arc<ironclaw_engine::MissionManager>>>>,
+        Arc<tokio::sync::RwLock<Option<Arc<t3claw_engine::MissionManager>>>>,
 }
 
 impl Agent {
@@ -659,11 +659,11 @@ impl Agent {
     }
 
     /// Set the engine v2 mission manager (called after engine init).
-    pub async fn set_mission_manager(&self, mgr: Arc<ironclaw_engine::MissionManager>) {
+    pub async fn set_mission_manager(&self, mgr: Arc<t3claw_engine::MissionManager>) {
         *self.mission_manager_slot.write().await = Some(mgr);
     }
 
-    pub(crate) async fn mission_manager(&self) -> Option<Arc<ironclaw_engine::MissionManager>> {
+    pub(crate) async fn mission_manager(&self) -> Option<Arc<t3claw_engine::MissionManager>> {
         self.mission_manager_slot.read().await.clone()
     }
 
@@ -775,12 +775,12 @@ impl Agent {
     }
 
     /// Build platform metadata for self-awareness in system prompts.
-    pub(crate) async fn platform_info(&self) -> ironclaw_engine::PlatformInfo {
+    pub(crate) async fn platform_info(&self) -> t3claw_engine::PlatformInfo {
         let active_channels = self.channels.channel_names().await;
         let database_backend = std::env::var("DATABASE_BACKEND")
             .ok()
             .or_else(|| self.deps.store.as_ref().map(|_| "postgres".to_string()));
-        ironclaw_engine::PlatformInfo {
+        t3claw_engine::PlatformInfo {
             version: Some(env!("CARGO_PKG_VERSION").to_string()),
             llm_backend: Some(self.deps.llm_backend.clone()),
             model_name: Some(self.deps.llm.active_model_name()),
@@ -868,7 +868,7 @@ impl Agent {
         self.deps.skill_registry.as_ref()
     }
 
-    pub(super) fn skill_catalog(&self) -> Option<&Arc<ironclaw_skills::catalog::SkillCatalog>> {
+    pub(super) fn skill_catalog(&self) -> Option<&Arc<t3claw_skills::catalog::SkillCatalog>> {
         self.deps.skill_catalog.as_ref()
     }
 
@@ -892,7 +892,7 @@ impl Agent {
         &self,
         message_content: &str,
         user_id: &str,
-    ) -> (Vec<ironclaw_skills::LoadedSkill>, String, Vec<String>) {
+    ) -> (Vec<t3claw_skills::LoadedSkill>, String, Vec<String>) {
         let Some(registry) = self.skill_registry() else {
             return (vec![], message_content.to_string(), vec![]);
         };
@@ -932,17 +932,17 @@ impl Agent {
 
         // Phase 1: Extract explicit /skill-name mentions
         let (explicit, rewritten) =
-            ironclaw_skills::extract_skill_mentions(message_content, &available);
+            t3claw_skills::extract_skill_mentions(message_content, &available);
 
         // Phase 2: Score-based selection on the rewritten message
         let skills_cfg = &self.deps.skills_config;
-        let outcome = ironclaw_skills::prefilter_skills_with_options(
+        let outcome = t3claw_skills::prefilter_skills_with_options(
             &rewritten,
             &available,
             skills_cfg.max_active_skills,
             skills_cfg.max_context_tokens,
             &satisfied,
-            ironclaw_skills::SkillSelectionOptions {
+            t3claw_skills::SkillSelectionOptions {
                 regex_activation_enabled: skills_cfg.regex_activation_enabled,
             },
         );
@@ -958,8 +958,7 @@ impl Agent {
         feedback.extend(outcome.notes);
 
         // Merge: explicit mentions first, then scored (dedup by name)
-        let mut selected: Vec<ironclaw_skills::LoadedSkill> =
-            explicit.into_iter().cloned().collect();
+        let mut selected: Vec<t3claw_skills::LoadedSkill> = explicit.into_iter().cloned().collect();
         for skill in outcome.selected {
             if !selected
                 .iter()
@@ -988,7 +987,7 @@ impl Agent {
         &self,
         registry: &Arc<std::sync::RwLock<SkillRegistry>>,
         user_id: &str,
-    ) -> Option<Vec<ironclaw_skills::LoadedSkill>> {
+    ) -> Option<Vec<t3claw_skills::LoadedSkill>> {
         if self.config.multi_tenant {
             let mut scoped = match registry.read() {
                 Ok(guard) => guard.clone_config_for_tenant_user_scope(self.owner_id(), user_id),
@@ -2581,14 +2580,14 @@ mod tests {
     use crate::error::ChannelError;
     use crate::hooks::HookRegistry;
     use crate::tools::ToolRegistry;
-    use ironclaw_llm::{
-        CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
-        ToolCompletionResponse,
-    };
-    use ironclaw_safety::SafetyLayer;
     use rust_decimal::Decimal;
     use std::sync::Arc;
     use std::time::Duration;
+    use t3claw_llm::{
+        CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
+        ToolCompletionResponse,
+    };
+    use t3claw_safety::SafetyLayer;
     use uuid::Uuid;
 
     struct StaticLlmProvider;
@@ -2703,7 +2702,7 @@ mod tests {
     #[tokio::test]
     async fn select_active_skills_uses_scoped_user_registry_in_multi_tenant_mode() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let registry = ironclaw_skills::SkillRegistry::new(temp.path().join("owner-skills"))
+        let registry = t3claw_skills::SkillRegistry::new(temp.path().join("owner-skills"))
             .with_installed_dir(temp.path().join("owner-installed"));
         let scoped = registry.clone_config_for_tenant_user_scope("owner", "alice");
         let skill_content = r#"---
@@ -2713,7 +2712,7 @@ description: Tenant runtime skill
 
 Only Alice should be able to activate this skill.
 "#;
-        ironclaw_skills::SkillRegistry::prepare_install_to_disk(
+        t3claw_skills::SkillRegistry::prepare_install_to_disk(
             scoped.install_target_dir(),
             "tenant-skill",
             skill_content,

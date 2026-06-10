@@ -2,13 +2,13 @@
 
 **Status:** Draft implementation contract
 **Date:** 2026-04-24
-**Depends on:** `docs/reborn/contracts/host-api.md`, `crates/ironclaw_host_api`
+**Depends on:** `docs/reborn/contracts/host-api.md`, `crates/t3claw_host_api`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_resources` is the host-level governor for cost, quota, and scarce runtime capacity.
+`t3claw_resources` is the host-level governor for cost, quota, and scarce runtime capacity.
 
 It answers one question before costed or quota-limited work starts:
 
@@ -44,7 +44,7 @@ Applies to:
 
 ## 3. Scope cascade
 
-Resource scope comes from `ironclaw_host_api::ResourceScope`.
+Resource scope comes from `t3claw_host_api::ResourceScope`.
 
 Canonical cascade:
 
@@ -184,7 +184,7 @@ This supports user messaging, approval requests, and audit/provenance without pa
 
 ## 10. Process resource lifecycle
 
-Spawned/background capability processes can own reservations through `ironclaw_processes::ResourceManagedProcessStore`:
+Spawned/background capability processes can own reservations through `t3claw_processes::ResourceManagedProcessStore`:
 
 ```text
 ProcessStart.estimated_resources
@@ -223,7 +223,7 @@ Audit records should include:
 - denial dimension and account when denied
 - reservation ID when granted/reconciled/released
 
-`ironclaw_resources` may emit audit/event records later; the first crate can expose structured receipts that callers can turn into audit envelopes.
+`t3claw_resources` may emit audit/event records later; the first crate can expose structured receipts that callers can turn into audit envelopes.
 
 ---
 
@@ -290,7 +290,7 @@ Local contract tests should prove:
 
 ## 13. Non-goals
 
-Do not add in `ironclaw_resources` V1:
+Do not add in `t3claw_resources` V1:
 
 - payment processing
 - subscription plans

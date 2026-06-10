@@ -1,6 +1,6 @@
-# IronClaw Development Guide
+# T3Claw Development Guide
 
-**IronClaw** is a secure personal AI assistant — user-first security, self-expanding tools, defense in depth, multi-channel access with proactive background execution.
+**T3Claw** is a secure personal AI assistant — user-first security, self-expanding tools, defense in depth, multi-channel access with proactive background execution.
 
 ## Build & Test
 
@@ -9,7 +9,7 @@ cargo fmt                                                    # format
 cargo clippy --all --benches --tests --examples --all-features  # lint (zero warnings)
 cargo test                                                   # unit tests
 cargo test --features integration                            # + PostgreSQL tests
-RUST_LOG=ironclaw=debug cargo run                            # run with logging
+RUST_LOG=t3claw=debug cargo run                            # run with logging
 ```
 
 E2E tests: see `tests/e2e/CLAUDE.md`.
@@ -24,7 +24,7 @@ E2E tests: see `tests/e2e/CLAUDE.md`.
 - Prefer strong types over strings (enums, newtypes)
 - Keep functions focused, extract helpers when logic is reused
 - Comments for non-obvious logic only
-- **Prompt templates live in files, not Rust code**: Multi-line prompt strings (mission goals, system prompts, CodeAct preambles) go in `crates/ironclaw_engine/prompts/*.md` and are loaded via `include_str!()`. Never inline large prompt templates as Rust string constants — they're hard to read, review, and iterate on. Single-line format strings are fine inline.
+- **Prompt templates live in files, not Rust code**: Multi-line prompt strings (mission goals, system prompts, CodeAct preambles) go in `crates/t3claw_engine/prompts/*.md` and are loaded via `include_str!()`. Never inline large prompt templates as Rust string constants — they're hard to read, review, and iterate on. Single-line format strings are fine inline.
 - **Logging levels matter for REPL/TUI**: `info!` and `warn!` output appears in the REPL and corrupts the terminal UI. Use `debug!` for internal diagnostics (trace analysis, reflection results, engine internals). Reserve `info!` for user-facing status that the REPL intentionally renders. Background tasks (reflection, trace analysis) must NEVER use `info!` — it breaks the interactive display.
 - **Test through the caller, not just the helper**: When a predicate/classifier/transform helper gates a side effect (HTTP, DB write, OAuth, UI mutation, tool execution) and has any wrapper or computed input between it and that side effect, a unit test on the helper alone is *not* sufficient regression coverage. Add a test that drives the call site — typically a `*_handler`, `factory::create_*`, or `manager::*` — at the integration tier (`cargo test --features integration`) or higher. The same applies to test mocks: if you mock a multi-arg runtime API like `window.open(url, target, features)`, the mock must capture every argument the production caller passes. See `.claude/rules/testing.md` ("Test Through the Caller, Not Just the Helper") for the full rule and the bug examples that motivated it.
 
@@ -61,7 +61,7 @@ Current ownership:
 - `src/bridge/auth_manager.rs`: canonical auth-flow extension-name resolver
 - `src/bridge/router.rs`: auth gate display + submit routing
 - `src/channels/web/server.rs`: pending-gate/history rehydration
-- `crates/ironclaw_gateway/static/js/core/onboarding.js`: unified onboarding controller and configure-modal routing (previously in the monolithic `app.js`, now split — see `crates/ironclaw_gateway/src/assets.rs` for the concat order)
+- `crates/t3claw_gateway/static/js/core/onboarding.js`: unified onboarding controller and configure-modal routing (previously in the monolithic `app.js`, now split — see `crates/t3claw_gateway/src/assets.rs` for the concat order)
 
 Temporary compatibility boundary:
 
@@ -78,21 +78,21 @@ All I/O is async with tokio. Use `Arc<T>` for shared state, `RwLock` for concurr
 
 ## Extracted Crates
 
-Safety logic lives in `crates/ironclaw_safety/`, skills in `crates/ironclaw_skills/`, multi-provider LLM integration in `crates/ironclaw_llm/`. **Import directly from the extracted crate** (e.g. `use ironclaw_safety::SafetyLayer`, `use ironclaw_skills::SkillRegistry`, `use ironclaw_llm::{LlmProvider, LlmError}`). Do not use `crate::safety::`, `crate::skills::`, or `crate::llm::` for types that originate in extracted crates — `src/llm/` was deleted in the LLM extraction, and `src/safety/mod.rs` / `src/skills/mod.rs` no longer glob-re-export. Local items defined in those modules (e.g. `crate::skills::attenuate_tools`) are fine. The `crate::error::LlmError` alias and `crate::config::*Config` re-exports are kept as a thin convenience: they forward to `ironclaw_llm::*` so existing call sites compile, but new code should import from the extracted crate.
+Safety logic lives in `crates/t3claw_safety/`, skills in `crates/t3claw_skills/`, multi-provider LLM integration in `crates/t3claw_llm/`. **Import directly from the extracted crate** (e.g. `use t3claw_safety::SafetyLayer`, `use t3claw_skills::SkillRegistry`, `use t3claw_llm::{LlmProvider, LlmError}`). Do not use `crate::safety::`, `crate::skills::`, or `crate::llm::` for types that originate in extracted crates — `src/llm/` was deleted in the LLM extraction, and `src/safety/mod.rs` / `src/skills/mod.rs` no longer glob-re-export. Local items defined in those modules (e.g. `crate::skills::attenuate_tools`) are fine. The `crate::error::LlmError` alias and `crate::config::*Config` re-exports are kept as a thin convenience: they forward to `t3claw_llm::*` so existing call sites compile, but new code should import from the extracted crate.
 
 ## Project Structure
 
 ```
 crates/
-├── ironclaw_safety/    # Extracted: prompt injection, validation, leak detection, policy
-└── ironclaw_llm/       # Extracted: multi-provider LLM integration (rig-core, OpenAI, Anthropic, NEAR AI, Bedrock, …)
+├── t3claw_safety/    # Extracted: prompt injection, validation, leak detection, policy
+└── t3claw_llm/       # Extracted: multi-provider LLM integration (rig-core, OpenAI, Anthropic, NEAR AI, Bedrock, …)
 
 src/
 ├── lib.rs              # Library root, module declarations
 ├── main.rs             # Entry point, CLI args, startup
 ├── app.rs              # App startup orchestration (channel wiring, DB init)
-├── bootstrap.rs        # Base directory resolution (~/.ironclaw), early .env loading
-├── settings.rs         # User settings persistence (~/.ironclaw/settings.json)
+├── bootstrap.rs        # Base directory resolution (~/.t3claw), early .env loading
+├── settings.rs         # User settings persistence (~/.t3claw/settings.json)
 ├── service.rs          # OS service management (launchd/systemd daemon install)
 ├── tracing_fmt.rs      # Custom tracing formatter
 ├── util.rs             # Shared utilities
@@ -155,9 +155,9 @@ src/
 │   ├── claude_bridge.rs # Claude Code bridge (spawns claude CLI)
 │   └── proxy_llm.rs    # LlmProvider that proxies through orchestrator
 │
-├── safety/             # Re-export shim for crates/ironclaw_safety (see Extracted Crates)
+├── safety/             # Re-export shim for crates/t3claw_safety (see Extracted Crates)
 │
-├── (llm/  was extracted to crates/ironclaw_llm/ — see Extracted Crates)
+├── (llm/  was extracted to crates/t3claw_llm/ — see Extracted Crates)
 │
 ├── tools/              # Extensible tool system
 │   ├── tool.rs         # Tool trait, ToolOutput, ToolError
@@ -231,13 +231,13 @@ When modifying a module with a spec, read the spec first. Code follows spec; spe
 | `src/agent/` | `src/agent/CLAUDE.md` |
 | `src/channels/web/` | `src/channels/web/CLAUDE.md` |
 | `src/db/` | `src/db/CLAUDE.md` |
-| `crates/ironclaw_llm/` | `crates/ironclaw_llm/CLAUDE.md` |
-| `crates/ironclaw_embeddings/` | `crates/ironclaw_embeddings/AGENTS.md` |
+| `crates/t3claw_llm/` | `crates/t3claw_llm/CLAUDE.md` |
+| `crates/t3claw_embeddings/` | `crates/t3claw_embeddings/AGENTS.md` |
 | `src/setup/` | `src/setup/README.md` |
 | `src/tools/` | `src/tools/README.md` |
 | `src/workspace/` | `src/workspace/README.md` |
-| `crates/ironclaw_engine/` | `crates/ironclaw_engine/CLAUDE.md` |
-| `crates/ironclaw_reborn_webui_ingress/` | `crates/ironclaw_reborn_webui_ingress/CLAUDE.md` |
+| `crates/t3claw_engine/` | `crates/t3claw_engine/CLAUDE.md` |
+| `crates/t3claw_reborn_webui_ingress/` | `crates/t3claw_reborn_webui_ingress/CLAUDE.md` |
 | `tests/e2e/` | `tests/e2e/CLAUDE.md` |
 
 ## Job State Machine
@@ -253,13 +253,13 @@ Pending -> InProgress -> Completed -> Submitted -> Accepted
 
 SKILL.md files extend the agent's prompt with domain-specific instructions. See `.claude/rules/skills.md` for full details.
 
-- **Trust model**: Trusted (user-placed in `~/.ironclaw/skills/` or workspace `skills/`, full tool access) vs Installed (registry, read-only tools)
+- **Trust model**: Trusted (user-placed in `~/.t3claw/skills/` or workspace `skills/`, full tool access) vs Installed (registry, read-only tools)
 - **Selection pipeline**: gating (check bin/env/config requirements) -> scoring (keywords/patterns/tags) -> budget (fit within `SKILLS_MAX_TOKENS`) -> attenuation (trust-based tool ceiling)
 - **Skill tools**: `skill_list`, `skill_search`, `skill_install`, `skill_remove`
 
 ## Configuration
 
-See `.env.example` for all environment variables. LLM backends (`nearai`, `openai`, `anthropic`, `ollama`, `openai_compatible`, `tinfoil`, `bedrock`) documented in `crates/ironclaw_llm/CLAUDE.md`.
+See `.env.example` for all environment variables. LLM backends (`nearai`, `openai`, `anthropic`, `ollama`, `openai_compatible`, `tinfoil`, `bedrock`) documented in `crates/t3claw_llm/CLAUDE.md`.
 
 ## Adding a New Channel
 
@@ -301,14 +301,14 @@ and migration status. The dispatcher itself lives in
 When `SANDBOX_ENABLED=true`, engine v2 routes the five filesystem/shell tools
 (`file_read`, `file_write`, `list_dir`, `apply_patch`, `shell`) for `/project/`
 paths through a per-project Docker container instead of the host filesystem.
-The host's directory at `~/.ironclaw/projects/<user_id>/<project_id>/` is bind-mounted at
+The host's directory at `~/.t3claw/projects/<user_id>/<project_id>/` is bind-mounted at
 `/project/` inside the container, and a `sandbox_daemon` binary inside the
 container speaks NDJSON over `docker exec -i`.
 
 When unset, the same code path uses a host-filesystem `MountBackend` —
 behavior is unchanged. See `docs/plans/2026-04-10-engine-v2-sandbox.md`.
 
-Build the sandbox image: `docker build -f crates/Dockerfile.sandbox -t ironclaw/sandbox:dev .`
+Build the sandbox image: `docker build -f crates/Dockerfile.sandbox -t t3claw/sandbox:dev .`
 
 ## Workspace & Memory
 
@@ -317,9 +317,9 @@ Persistent memory with hybrid search (FTS + vector via RRF). Four tools: `memory
 ## Debugging
 
 ```bash
-RUST_LOG=ironclaw=trace cargo run           # verbose
-RUST_LOG=ironclaw::agent=debug cargo run    # agent module only
-RUST_LOG=ironclaw=debug,tower_http=debug cargo run  # + HTTP request logging
+RUST_LOG=t3claw=trace cargo run           # verbose
+RUST_LOG=t3claw::agent=debug cargo run    # agent module only
+RUST_LOG=t3claw=debug,tower_http=debug cargo run  # + HTTP request logging
 ```
 
 ## Current Limitations

@@ -60,7 +60,7 @@ env:
   DATABASE_BACKEND: libsql
   ALLOW_LOCAL_TOOLS: "true"
   AGENT_AUTO_APPROVE_TOOLS: "true"
-  RUST_LOG: ironclaw=info
+  RUST_LOG: t3claw=info
 
 jobs:
   auth-smoke:
@@ -434,7 +434,7 @@ jobs:
           SCENARIO: ${{ inputs.scenario }}
           PROVIDER: replay
           COMMAND_TIMEOUT: 90m
-          LIBSQL_PATH: ${{ runner.temp }}/ironclaw-live-replay.db
+          LIBSQL_PATH: ${{ runner.temp }}/t3claw-live-replay.db
         run: scripts/live-canary/run.sh
       - name: Scrub artifacts
         if: always()
@@ -480,7 +480,7 @@ jobs:
           SCENARIO: ${{ inputs.scenario }}
           PROVIDER: anthropic
           COMMAND_TIMEOUT: 90m
-          LIBSQL_PATH: ${{ runner.temp }}/ironclaw-live-public-smoke.db
+          LIBSQL_PATH: ${{ runner.temp }}/t3claw-live-public-smoke.db
         run: scripts/live-canary/run.sh
       - name: Scrub artifacts
         if: always()
@@ -537,7 +537,7 @@ jobs:
           SCENARIO: ${{ inputs.scenario || 'auto' }}
           PROVIDER: anthropic
           COMMAND_TIMEOUT: 150m
-          LIBSQL_PATH: ${{ runner.temp }}/ironclaw-live-persona.db
+          LIBSQL_PATH: ${{ runner.temp }}/t3claw-live-persona.db
         run: scripts/live-canary/run.sh
       - name: Scrub artifacts
         if: always()
@@ -555,7 +555,7 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' && (inputs.lane == 'all' || inputs.lane == 'private-oauth')) ||
       (github.event_name == 'schedule' && github.event.schedule == '0 */6 * * *' && vars.LIVE_CANARY_PRIVATE_OAUTH_ENABLED == 'true')
-    runs-on: [self-hosted, ironclaw-live]
+    runs-on: [self-hosted, t3claw-live]
     timeout-minutes: 120
     env:
       LANE: private-oauth
@@ -668,7 +668,7 @@ jobs:
           PROVIDER_TEST_TARGET: ${{ matrix.test_target }}
           SCENARIO: ${{ inputs.scenario || matrix.scenario }}
           COMMAND_TIMEOUT: 90m
-          LIBSQL_PATH: ${{ runner.temp }}/ironclaw-live-provider-${{ matrix.provider }}.db
+          LIBSQL_PATH: ${{ runner.temp }}/t3claw-live-provider-${{ matrix.provider }}.db
         run: scripts/live-canary/run.sh
       - name: Scrub artifacts
         if: always()
@@ -712,7 +712,7 @@ jobs:
           LANE: release-public-full
           PROVIDER: anthropic
           COMMAND_TIMEOUT: 300m
-          LIBSQL_PATH: ${{ runner.temp }}/ironclaw-live-release.db
+          LIBSQL_PATH: ${{ runner.temp }}/t3claw-live-release.db
         run: scripts/live-canary/run.sh
       - name: Scrub artifacts
         if: always()

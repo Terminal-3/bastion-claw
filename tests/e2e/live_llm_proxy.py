@@ -2,7 +2,7 @@
 
 This is the Python tier's analogue to the Rust `LiveTestHarnessBuilder`
 trace-recording infrastructure (`tests/support/live_harness.rs`). It
-sits between ironclaw and a real LLM (NearAI / OpenAI / Anthropic) and:
+sits between t3claw and a real LLM (NearAI / OpenAI / Anthropic) and:
 
 - In **record** mode, forwards each `/v1/chat/completions` request to
   the upstream LLM, captures the request + response pair, and appends
@@ -23,16 +23,16 @@ Usage in a test:
         async for url in live_proxy_for(request.node.name):
             yield url
 
-    # ironclaw_server fixture sets:
+    # t3claw_server fixture sets:
     #   LLM_BASE_URL = url
     # The proxy auto-detects record vs replay based on
-    # IRONCLAW_LIVE_TEST and the fixture file's existence.
+    # T3CLAW_LIVE_TEST and the fixture file's existence.
 
 Environment variables:
 
-- ``IRONCLAW_LIVE_TEST=1`` — record mode. Requires upstream LLM
-  credentials (``IRONCLAW_LIVE_LLM_BASE_URL``, ``IRONCLAW_LIVE_LLM_API_KEY``,
-  ``IRONCLAW_LIVE_LLM_MODEL``). Writes / overwrites the fixture file.
+- ``T3CLAW_LIVE_TEST=1`` — record mode. Requires upstream LLM
+  credentials (``T3CLAW_LIVE_LLM_BASE_URL``, ``T3CLAW_LIVE_LLM_API_KEY``,
+  ``T3CLAW_LIVE_LLM_MODEL``). Writes / overwrites the fixture file.
 - (unset) — replay mode. Reads the committed fixture file. Skips
   the test (with ``pytest.skip``) when the fixture is missing so a
   fresh checkout doesn't fail before someone has recorded one.
@@ -409,12 +409,12 @@ async def _record(
     upstream_key = state["upstream_key"]
     if not upstream_url:
         return web.json_response(
-            {"error": "live_llm_proxy: record mode requires IRONCLAW_LIVE_LLM_BASE_URL"},
+            {"error": "live_llm_proxy: record mode requires T3CLAW_LIVE_LLM_BASE_URL"},
             status=500,
         )
 
     # Override the model with the upstream model when configured. This
-    # lets ironclaw send the literal "mock-model" string while the
+    # lets t3claw send the literal "mock-model" string while the
     # proxy sends a real model name to the upstream.
     forwarded_body = dict(body)
     if state.get("upstream_model"):
@@ -475,7 +475,7 @@ async def _record(
 
 async def _emit_streamed_response(body: dict[str, Any]) -> web.Response:
     """Re-emit a non-streaming chat-completions JSON body as a single
-    SSE chunk plus the [DONE] sentinel. Good enough for ironclaw's
+    SSE chunk plus the [DONE] sentinel. Good enough for t3claw's
     streaming consumer — every test we run here uses the chunk-or-text
     accumulator, not delta-by-delta token rendering.
 
@@ -547,7 +547,7 @@ async def models(request: web.Request) -> web.Response:
     return web.json_response(
         {
             "object": "list",
-            "data": [{"id": model_id, "object": "model", "owned_by": "ironclaw-test"}],
+            "data": [{"id": model_id, "object": "model", "owned_by": "t3claw-test"}],
         }
     )
 
@@ -572,7 +572,7 @@ async def state_handler(request: web.Request) -> web.Response:
 def _resolve_mode(args: argparse.Namespace) -> str:
     if args.mode:
         return args.mode
-    if os.environ.get("IRONCLAW_LIVE_TEST", "").strip() in ("1", "true"):
+    if os.environ.get("T3CLAW_LIVE_TEST", "").strip() in ("1", "true"):
         return "record"
     return "replay"
 
@@ -584,19 +584,19 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=("record", "replay"),
-        help="Override the IRONCLAW_LIVE_TEST-derived default.",
+        help="Override the T3CLAW_LIVE_TEST-derived default.",
     )
     args = parser.parse_args()
 
     mode = _resolve_mode(args)
-    upstream_url = os.environ.get("IRONCLAW_LIVE_LLM_BASE_URL")
-    upstream_key = os.environ.get("IRONCLAW_LIVE_LLM_API_KEY")
-    upstream_model = os.environ.get("IRONCLAW_LIVE_LLM_MODEL")
+    upstream_url = os.environ.get("T3CLAW_LIVE_LLM_BASE_URL")
+    upstream_key = os.environ.get("T3CLAW_LIVE_LLM_API_KEY")
+    upstream_model = os.environ.get("T3CLAW_LIVE_LLM_MODEL")
 
     if mode == "record" and not upstream_url:
         print(
             "live_llm_proxy: record mode requires "
-            "IRONCLAW_LIVE_LLM_BASE_URL (and usually IRONCLAW_LIVE_LLM_API_KEY).",
+            "T3CLAW_LIVE_LLM_BASE_URL (and usually T3CLAW_LIVE_LLM_API_KEY).",
             file=sys.stderr,
         )
         sys.exit(2)

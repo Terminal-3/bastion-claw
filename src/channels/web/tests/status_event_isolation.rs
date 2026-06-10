@@ -18,7 +18,7 @@
 //! Plus the cross-cutting case: if `metadata.user_id` IS present, the
 //! event is delivered ONLY to that user's stream, regardless of mode.
 
-use ironclaw_common::AppEvent;
+use t3claw_common::AppEvent;
 use tokio_stream::StreamExt;
 
 use crate::channels::web::dispatch_status_event;
@@ -267,7 +267,7 @@ async fn unscoped_drop_holds_for_every_status_variant_in_multi_tenant() {
 /// the dispatcher's drop-in-multi-tenant rule could silently ship.
 ///
 /// The match must list every variant explicitly; do not add a `_` arm.
-/// `event_type()` in `crates/ironclaw_common/src/event.rs` follows the
+/// `event_type()` in `crates/t3claw_common/src/event.rs` follows the
 /// same pattern for the same reason.
 #[allow(dead_code)]
 fn _compile_time_appevent_variant_check(e: AppEvent) {

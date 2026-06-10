@@ -2,13 +2,13 @@
 //!
 //! Owns the browser-facing extension lifecycle surface: list / readiness /
 //! tools / install / activate / remove / registry / setup / setup-submit.
-//! Migrated from `server.rs` in ironclaw#2599 stage 4d (final feature
+//! Migrated from `server.rs` in t3claw#2599 stage 4d (final feature
 //! slice before the `server.rs` shim can be retired).
 //!
 //! # Identity boundary
 //!
 //! Every handler that takes an extension name from the URL path validates
-//! it through [`ironclaw_common::ExtensionName::new`] before the value
+//! it through [`t3claw_common::ExtensionName::new`] before the value
 //! reaches extension lookup, SSE broadcast, or any `from_trusted` wrap.
 //! Path-traversal / malformed slugs return 400 at the boundary. The rule
 //! is enforced by check #8 in `scripts/pre-commit-safety.sh`; see the
@@ -260,12 +260,12 @@ pub(crate) async fn extensions_install_handler(
     // URL-path handlers (`activate`, `remove`, `setup`, `setup_submit`)
     // already enforce. Rejects path-traversal, invalid characters, and
     // malformed slugs with a 400 before the value reaches registry
-    // lookup, filesystem path construction under `~/.ironclaw/extensions/`,
+    // lookup, filesystem path construction under `~/.t3claw/extensions/`,
     // or any downstream extension-manager call. The canonical form
     // (hyphens folded to underscores) is used everywhere the previous
     // raw `req.name` was read, keeping the error messages and registry
     // lookup keyed off the same identity the install pipeline sees.
-    let name = ironclaw_common::ExtensionName::new(&req.name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&req.name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -281,7 +281,7 @@ pub(crate) async fn extensions_install_handler(
                 crate::extensions::ExtensionSource::WasmBuildable { .. } => {
                     format!(
                         "'{name_str}' requires building from source. \
-                         Run `ironclaw registry install {name_str}` from the CLI."
+                         Run `t3claw registry install {name_str}` from the CLI."
                     )
                 }
                 _ => format!(
@@ -387,7 +387,7 @@ pub(crate) async fn extensions_activate_handler(
     // The URL path segment is user input — validate at the boundary via
     // `ExtensionName::new` and use the canonical form for all downstream
     // extension-manager calls and response formatting.
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -428,7 +428,7 @@ pub(crate) async fn extensions_remove_handler(
     // Validate user-controlled path segment before it reaches the extension
     // manager — rejects path-traversal, invalid characters, and malformed
     // slugs with a 400.
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -516,7 +516,7 @@ pub(crate) async fn extensions_setup_handler(
 ) -> Result<Json<ExtensionSetupResponse>, (StatusCode, String)> {
     // Validate user-controlled path segment at entry. Downstream lookups
     // (`get_setup_schema`, `list().find(...)`) consume the canonical form.
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -557,7 +557,7 @@ pub(crate) async fn extensions_login_start_handler(
     Path(name): Path<String>,
     Json(_req): Json<ExtensionInteractiveLoginStartRequest>,
 ) -> Result<Json<ExtensionInteractiveLoginResponse>, (StatusCode, String)> {
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -599,7 +599,7 @@ pub(crate) async fn extensions_login_poll_handler(
     Path(name): Path<String>,
     Json(req): Json<ExtensionInteractiveLoginPollRequest>,
 ) -> Result<Json<ExtensionInteractiveLoginResponse>, (StatusCode, String)> {
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -671,7 +671,7 @@ pub(crate) async fn extensions_setup_submit_handler(
     // `ExtensionName::new`. Reject path-traversal, invalid characters, or
     // malformed slugs with a 400 before the value reaches extension
     // lookup, SSE broadcast, or any `from_trusted` wrap below.
-    let name = ironclaw_common::ExtensionName::new(&name).map_err(|e| {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid extension name: {e}"),
@@ -1105,7 +1105,7 @@ mod tests {
         // Each of these is the JSON-body `name` the handler now validates
         // through `ExtensionName::new`. Previously `req.name` was taken
         // verbatim into `ext_mgr.install(&req.name, ...)` which constructs
-        // filesystem paths under `~/.ironclaw/extensions/` — so path-traversal
+        // filesystem paths under `~/.t3claw/extensions/` — so path-traversal
         // / separators / control characters could silently reach the
         // filesystem layer before failing deep in the install pipeline.
         for bad in ["..", "../traversal", "slash/name", "BadCase", "has space"] {
@@ -1327,7 +1327,7 @@ mod tests {
         use tower::ServiceExt;
 
         // DB-backed manager so the install path does not fall back to the
-        // developer's real `~/.ironclaw/mcp-servers.json` (which would
+        // developer's real `~/.t3claw/mcp-servers.json` (which would
         // panic with `AlreadyInstalled("notion")` on dev machines that
         // already have a notion entry configured).
         let (ext_mgr, _wasm_tools_dir, _wasm_channels_dir, _db_dir) = test_ext_mgr_with_db().await;

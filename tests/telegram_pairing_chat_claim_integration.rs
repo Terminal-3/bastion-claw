@@ -25,7 +25,7 @@ mod pairing_chat_claim_tests {
     use tokio::sync::Mutex;
 
     use crate::support::test_rig::TestRigBuilder;
-    use ironclaw::db::UserRecord;
+    use t3claw::db::UserRecord;
 
     /// Seed the test-channel user into the users table so the FK on
     /// `channel_identities.owner_id` is satisfied during pairing approval.
@@ -98,7 +98,7 @@ mod pairing_chat_claim_tests {
 
         // Type the pairing claim into the chat surface — this is the
         // same path users naturally try after seeing the bot's reply
-        // ("type `approve telegram CODE` in any IronClaw chat").
+        // ("type `approve telegram CODE` in any T3Claw chat").
         rig.send_message(&format!("approve telegram {}", pairing.code))
             .await;
 

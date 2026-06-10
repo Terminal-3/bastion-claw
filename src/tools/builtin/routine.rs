@@ -2222,7 +2222,7 @@ mod tests {
                 "filters": {
                     "repository": {
                         "owner": "nearai",
-                        "name": "ironclaw"
+                        "name": "t3claw"
                     }
                 }
             }

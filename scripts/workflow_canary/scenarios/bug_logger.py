@@ -11,7 +11,7 @@ Phase 1 coverage (this scenario):
    ``[CANARY-WORKFLOW-SHEET-APPEND]`` sentinel.
 3. The mock LLM matches that sentinel and emits a deterministic
    ``http`` POST to ``sheets.googleapis.com/v4/spreadsheets/.../
-   values/Sheet1:append``. ``IRONCLAW_TEST_HTTP_REMAP`` (set in
+   values/Sheet1:append``. ``T3CLAW_TEST_HTTP_REMAP`` (set in
    ``run_workflow_canary.py``) routes the call to ``sheets_mock``.
 4. Poll mock_sheets ``/__mock/spreadsheets`` until the canary row
    appears. Assert the shape: timestamp / message / source.

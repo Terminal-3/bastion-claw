@@ -29,8 +29,8 @@ use crate::tools::wasm::host::{HostState, LogLevel};
 use crate::tools::wasm::limits::{ResourceLimits, WasmResourceLimiter};
 use crate::tools::wasm::runtime::{EPOCH_TICK_INTERVAL, PreparedModule, WasmToolRuntime};
 use crate::tools::wasm::{ssrf_safe_client_builder_for_target, validate_and_resolve_http_target};
-use ironclaw_llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
-use ironclaw_safety::LeakDetector;
+use t3claw_llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
+use t3claw_safety::LeakDetector;
 
 // Generate component model bindings from the WIT file.
 //
@@ -392,7 +392,7 @@ impl near::agent::host::Host for StoreData {
             self.inject_host_credentials(&host, &mut headers, &mut url);
         }
 
-        // Apply IRONCLAW_TEST_HTTP_REWRITE_MAP for tests (parallel to
+        // Apply T3CLAW_TEST_HTTP_REWRITE_MAP for tests (parallel to
         // the WASM-channel path in `src/channels/wasm/wrapper.rs`).
         // Without this, a test fixture's rewrite of e.g.
         // gmail.googleapis.com → mock_llm doesn't apply to WASM tools'
@@ -1318,7 +1318,7 @@ impl Tool for WasmToolWrapper {
         if !resolution.missing_required.is_empty() {
             return Err(ToolError::ExecutionFailed(format!(
                 "WASM tool '{}' requires credentials that are not configured for user '{}': {}. \
-                 Configure the missing credentials with `ironclaw secrets set` and re-run the tool.",
+                 Configure the missing credentials with `t3claw secrets set` and re-run the tool.",
                 self.name(),
                 credential_user_id,
                 resolution.missing_required.join(", ")
@@ -1571,7 +1571,7 @@ async fn resolve_host_credentials(
     }
 }
 
-/// Apply `IRONCLAW_TEST_HTTP_REWRITE_MAP` to a WASM-tool HTTP request.
+/// Apply `T3CLAW_TEST_HTTP_REWRITE_MAP` to a WASM-tool HTTP request.
 ///
 /// Mirrors the WASM-channel rewrite at
 /// `src/channels/wasm/wrapper.rs::rewrite_http_url_for_testing`. The
@@ -1586,7 +1586,7 @@ async fn resolve_host_credentials(
 /// test.
 #[cfg(any(test, debug_assertions))]
 pub(crate) fn rewrite_http_url_for_tool_testing(url: &str) -> Option<String> {
-    let raw = std::env::var("IRONCLAW_TEST_HTTP_REWRITE_MAP").ok()?;
+    let raw = std::env::var("T3CLAW_TEST_HTTP_REWRITE_MAP").ok()?;
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return None;
@@ -1607,7 +1607,7 @@ pub(crate) fn rewrite_http_url_for_tool_testing(url: &str) -> Option<String> {
         tracing::warn!(
             host = %host,
             base = %base,
-            "IRONCLAW_TEST_HTTP_REWRITE_MAP: ignoring non-loopback target"
+            "T3CLAW_TEST_HTTP_REWRITE_MAP: ignoring non-loopback target"
         );
         return None;
     }
@@ -3209,16 +3209,16 @@ mod tests {
                 unsafe {
                     match &self.original {
                         Some(value) => {
-                            std::env::set_var("IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK", value)
+                            std::env::set_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK", value)
                         }
-                        None => std::env::remove_var("IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK"),
+                        None => std::env::remove_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK"),
                     }
                 };
             }
         }
-        let original = std::env::var_os("IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK");
+        let original = std::env::var_os("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK");
         // SAFETY: Tests serialize env access with lock_env().
-        unsafe { std::env::set_var("IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK", "1") };
+        unsafe { std::env::set_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK", "1") };
         let _proxy_loopback_guard = EnvGuard { original };
 
         let proxy = MockProxyServer::start().await;
@@ -3752,7 +3752,7 @@ mod tests {
     /// tool's own legitimate outbound request.
     #[test]
     fn test_leak_scan_runs_before_credential_injection() {
-        use ironclaw_safety::LeakDetector;
+        use t3claw_safety::LeakDetector;
 
         // Simulate pre-injection headers: WASM only sees the placeholder, not the real token.
         let raw_headers: Vec<(String, String)> = vec![
@@ -4262,12 +4262,12 @@ mod tests {
         // hardcoded `http://...` prefix matches and silently rejected valid
         // https-loopback bases that the channel-side helper accepts.
         let _guard = crate::config::helpers::lock_env();
-        let original = std::env::var("IRONCLAW_TEST_HTTP_REWRITE_MAP").ok();
+        let original = std::env::var("T3CLAW_TEST_HTTP_REWRITE_MAP").ok();
 
         // SAFETY: guarded by lock_env() — no concurrent env access.
         unsafe {
             std::env::set_var(
-                "IRONCLAW_TEST_HTTP_REWRITE_MAP",
+                "T3CLAW_TEST_HTTP_REWRITE_MAP",
                 r#"{"gmail.googleapis.com":"https://localhost:8443"}"#,
             );
         }
@@ -4283,7 +4283,7 @@ mod tests {
         // Non-loopback target is still rejected.
         unsafe {
             std::env::set_var(
-                "IRONCLAW_TEST_HTTP_REWRITE_MAP",
+                "T3CLAW_TEST_HTTP_REWRITE_MAP",
                 r#"{"gmail.googleapis.com":"https://attacker.example.com"}"#,
             );
         }
@@ -4298,9 +4298,9 @@ mod tests {
         // SAFETY: restore original env var under the same lock.
         unsafe {
             if let Some(ref val) = original {
-                std::env::set_var("IRONCLAW_TEST_HTTP_REWRITE_MAP", val);
+                std::env::set_var("T3CLAW_TEST_HTTP_REWRITE_MAP", val);
             } else {
-                std::env::remove_var("IRONCLAW_TEST_HTTP_REWRITE_MAP");
+                std::env::remove_var("T3CLAW_TEST_HTTP_REWRITE_MAP");
             }
         }
     }

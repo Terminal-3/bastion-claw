@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 use crate::channels::{Channel, IncomingMessage, MessageStream, OutgoingResponse, StatusUpdate};
 use crate::config::SignalConfig;
 use crate::error::ChannelError;
@@ -613,10 +613,10 @@ impl SignalChannel {
     /// Uses the shared path validation logic from path_utils to ensure:
     /// - No path traversal attacks (../, URL-encoded, null bytes)
     /// - Paths are canonicalized and symlinks resolved
-    /// - All paths are within ~/.ironclaw/ sandbox
+    /// - All paths are within ~/.t3claw/ sandbox
     fn validate_attachment_paths(paths: &[String]) -> Result<(), ChannelError> {
         // Get the sandbox base directory (same as MessageTool uses)
-        let base_dir = ironclaw_base_dir();
+        let base_dir = t3claw_base_dir();
 
         for path in paths {
             crate::tools::builtin::path_utils::validate_path(path, Some(&base_dir)).map_err(
@@ -2064,7 +2064,7 @@ mod tests {
         let expected_thread_id = SignalChannel::thread_id_from_identifier("group:testgroup");
         assert_eq!(
             msg.thread_id,
-            Some(ironclaw_common::ExternalThreadId::from_trusted(
+            Some(t3claw_common::ExternalThreadId::from_trusted(
                 expected_thread_id
             ))
         );
@@ -2528,7 +2528,7 @@ mod tests {
         let expected_thread_id = SignalChannel::thread_id_from_identifier("+1111111111");
         assert_eq!(
             msg.thread_id,
-            Some(ironclaw_common::ExternalThreadId::from_trusted(
+            Some(t3claw_common::ExternalThreadId::from_trusted(
                 expected_thread_id
             )),
             "DMs should set thread_id to UUID"
@@ -2569,7 +2569,7 @@ mod tests {
         let expected_thread_id = SignalChannel::thread_id_from_identifier("group:grp999");
         assert_eq!(
             msg.thread_id,
-            Some(ironclaw_common::ExternalThreadId::from_trusted(
+            Some(t3claw_common::ExternalThreadId::from_trusted(
                 expected_thread_id
             )),
             "Groups should set thread_id to UUID"
@@ -2870,7 +2870,7 @@ mod tests {
         use std::fs;
 
         // Create test files in sandbox
-        let base_dir = crate::bootstrap::ironclaw_base_dir();
+        let base_dir = crate::bootstrap::t3claw_base_dir();
 
         // Create sandbox directory if it doesn't exist (needed for CI)
         let _ = fs::create_dir_all(&base_dir);

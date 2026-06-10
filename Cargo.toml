@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/ironclaw_common", "crates/ironclaw_host_api", "crates/ironclaw_filesystem", "crates/ironclaw_memory", "crates/ironclaw_events", "crates/ironclaw_event_projections", "crates/ironclaw_event_streams", "crates/ironclaw_reborn_event_store", "crates/ironclaw_extensions", "crates/ironclaw_processes", "crates/ironclaw_dispatcher", "crates/ironclaw_scripts", "crates/ironclaw_process_sandbox", "crates/ironclaw_mcp", "crates/ironclaw_wasm", "crates/ironclaw_wasm_sandbox_core", "crates/ironclaw_wasm_limiter", "crates/ironclaw_capabilities", "crates/ironclaw_secrets", "crates/ironclaw_network", "crates/ironclaw_host_runtime", "crates/ironclaw_runtime_policy", "crates/ironclaw_authorization", "crates/ironclaw_run_state", "crates/ironclaw_approvals", "crates/ironclaw_resources", "crates/ironclaw_auth", "crates/ironclaw_trust", "crates/ironclaw_turns", "crates/ironclaw_agent_loop", "crates/ironclaw_threads", "crates/ironclaw_prompt_envelope", "crates/ironclaw_hooks", "crates/ironclaw_hooks_postgres", "crates/ironclaw_hooks_libsql", "crates/ironclaw_hooks_parity", "crates/ironclaw_loop_support", "crates/ironclaw_reborn", "crates/ironclaw_reborn_config", "crates/ironclaw_reborn_composition", "crates/ironclaw_reborn_identity", "crates/ironclaw_first_party_extensions", "crates/ironclaw_reborn_cli", "crates/ironclaw_reborn_traces", "crates/ironclaw_reborn_webui_ingress", "crates/ironclaw_reborn_openai_compat", "crates/ironclaw_reborn_openai_compat_storage", "crates/ironclaw_conversations", "crates/ironclaw_product_adapters", "crates/ironclaw_product_workflow", "crates/ironclaw_product_workflow_storage", "crates/ironclaw_product_adapter_registry", "crates/ironclaw_wasm_product_adapters", "crates/ironclaw_telegram_v2_adapter", "crates/ironclaw_slack_v2_adapter", "crates/ironclaw_outbound", "crates/ironclaw_triggers", "crates/ironclaw_architecture", "crates/ironclaw_safety", "crates/ironclaw_skills", "crates/ironclaw_oauth", "crates/ironclaw_llm", "crates/ironclaw_embeddings", "crates/ironclaw_engine", "crates/ironclaw_gateway", "crates/ironclaw_tui", "crates/ironclaw_webui_v2", "crates/ironclaw_webui_v2_static"]
+members = [".", "crates/t3claw_common", "crates/t3claw_host_api", "crates/t3claw_filesystem", "crates/t3claw_memory", "crates/t3claw_events", "crates/t3claw_event_projections", "crates/t3claw_event_streams", "crates/t3claw_reborn_event_store", "crates/t3claw_extensions", "crates/t3claw_processes", "crates/t3claw_dispatcher", "crates/t3claw_scripts", "crates/t3claw_process_sandbox", "crates/t3claw_mcp", "crates/t3claw_wasm", "crates/t3claw_wasm_sandbox_core", "crates/t3claw_wasm_limiter", "crates/t3claw_capabilities", "crates/t3claw_secrets", "crates/t3claw_network", "crates/t3claw_host_runtime", "crates/t3claw_runtime_policy", "crates/t3claw_authorization", "crates/t3claw_run_state", "crates/t3claw_approvals", "crates/t3claw_resources", "crates/t3claw_auth", "crates/t3claw_trust", "crates/t3claw_turns", "crates/t3claw_agent_loop", "crates/t3claw_threads", "crates/t3claw_prompt_envelope", "crates/t3claw_hooks", "crates/t3claw_hooks_postgres", "crates/t3claw_hooks_libsql", "crates/t3claw_hooks_parity", "crates/t3claw_loop_support", "crates/t3claw_reborn", "crates/t3claw_reborn_config", "crates/t3claw_reborn_composition", "crates/t3claw_reborn_identity", "crates/t3claw_first_party_extensions", "crates/t3claw_reborn_cli", "crates/t3claw_reborn_traces", "crates/t3claw_reborn_webui_ingress", "crates/t3claw_reborn_openai_compat", "crates/t3claw_reborn_openai_compat_storage", "crates/t3claw_conversations", "crates/t3claw_product_adapters", "crates/t3claw_product_workflow", "crates/t3claw_product_workflow_storage", "crates/t3claw_product_adapter_registry", "crates/t3claw_wasm_product_adapters", "crates/t3claw_telegram_v2_adapter", "crates/t3claw_slack_v2_adapter", "crates/t3claw_outbound", "crates/t3claw_triggers", "crates/t3claw_architecture", "crates/t3claw_safety", "crates/t3claw_skills", "crates/t3claw_oauth", "crates/t3claw_llm", "crates/t3claw_embeddings", "crates/t3claw_engine", "crates/t3claw_gateway", "crates/t3claw_tui", "crates/t3claw_webui_v2", "crates/t3claw_webui_v2_static"]
 exclude = [
     "channels-src/discord",
     "channels-src/feishu",
@@ -7,7 +7,7 @@ exclude = [
     "channels-src/slack",
     "channels-src/wechat",
     "channels-src/whatsapp",
-    "crates/ironclaw_silk_decoder",
+    "crates/t3claw_silk_decoder",
     "tools-src/composio",
     "tools-src/github",
     "tools-src/gmail",
@@ -19,7 +19,7 @@ exclude = [
     "tools-src/slack",
     "tools-src/telegram",
     "fuzz",
-    "crates/ironclaw_safety/fuzz",
+    "crates/t3claw_safety/fuzz",
 ]
 
 # Maintainability guardrails against dead/speculative public API
@@ -39,15 +39,15 @@ unreachable_pub = "warn"
 dead_code = "warn"
 
 [package]
-name = "ironclaw"
+name = "t3claw"
 version = "0.29.1"
 edition = "2024"
 rust-version = "1.92"
 description = "Secure personal AI assistant that protects your data and expands its capabilities on the fly"
 authors = ["NEAR AI <support@near.ai>"]
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/nearai/ironclaw"
-repository = "https://github.com/nearai/ironclaw"
+homepage = "https://github.com/Terminal-3/t3-claw"
+repository = "https://github.com/Terminal-3/t3-claw"
 
 [package.metadata.wix]
 upgrade-guid = "D0156E61-BA37-451E-8AB9-1A2ECCCFA48F"
@@ -132,24 +132,24 @@ cron = "0.13"
 jsonschema = { version = "0.45", default-features = false }
 
 # Shared types
-ironclaw_common = { path = "crates/ironclaw_common", version = "0.4.2" }
-ironclaw_host_api = { path = "crates/ironclaw_host_api", version = "0.1.0" }
-ironclaw_loop_support = { path = "crates/ironclaw_loop_support", version = "0.1.0" }
-ironclaw_memory = { path = "crates/ironclaw_memory", version = "0.1.0" }
-ironclaw_resources = { path = "crates/ironclaw_resources", version = "0.1.0" }
-ironclaw_runtime_policy = { path = "crates/ironclaw_runtime_policy", version = "0.1.0" }
-ironclaw_turns = { path = "crates/ironclaw_turns", version = "0.1.0" }
+t3claw_common = { path = "crates/t3claw_common", version = "0.4.2" }
+t3claw_host_api = { path = "crates/t3claw_host_api", version = "0.1.0" }
+t3claw_loop_support = { path = "crates/t3claw_loop_support", version = "0.1.0" }
+t3claw_memory = { path = "crates/t3claw_memory", version = "0.1.0" }
+t3claw_resources = { path = "crates/t3claw_resources", version = "0.1.0" }
+t3claw_runtime_policy = { path = "crates/t3claw_runtime_policy", version = "0.1.0" }
+t3claw_turns = { path = "crates/t3claw_turns", version = "0.1.0" }
 
 # Safety/sanitization
-ironclaw_engine = { path = "crates/ironclaw_engine", version = "0.1.0" }
-ironclaw_gateway = { path = "crates/ironclaw_gateway", version = "0.1.0" }
-ironclaw_llm = { path = "crates/ironclaw_llm", version = "0.1.0" }
-ironclaw_embeddings = { path = "crates/ironclaw_embeddings", version = "0.1.0" }
-ironclaw_oauth = { path = "crates/ironclaw_oauth", version = "0.1.0" }
-ironclaw_reborn_traces = { path = "crates/ironclaw_reborn_traces", version = "0.1.0" }
-ironclaw_safety = { path = "crates/ironclaw_safety", version = "0.2.2" }
-ironclaw_skills = { path = "crates/ironclaw_skills", version = "0.3.0" }
-ironclaw_tui = { path = "crates/ironclaw_tui", optional = true, version = "0.1.0" }
+t3claw_engine = { path = "crates/t3claw_engine", version = "0.1.0" }
+t3claw_gateway = { path = "crates/t3claw_gateway", version = "0.1.0" }
+t3claw_llm = { path = "crates/t3claw_llm", version = "0.1.0" }
+t3claw_embeddings = { path = "crates/t3claw_embeddings", version = "0.1.0" }
+t3claw_oauth = { path = "crates/t3claw_oauth", version = "0.1.0" }
+t3claw_reborn_traces = { path = "crates/t3claw_reborn_traces", version = "0.1.0" }
+t3claw_safety = { path = "crates/t3claw_safety", version = "0.2.2" }
+t3claw_skills = { path = "crates/t3claw_skills", version = "0.3.0" }
+t3claw_tui = { path = "crates/t3claw_tui", optional = true, version = "0.1.0" }
 regex = "1"
 aho-corasick = "1"
 
@@ -200,8 +200,8 @@ subtle = "2"  # Constant-time comparisons for token validation
 # Multi-provider LLM support
 rig-core = { version = "0.30", default-features = false, features = ["reqwest-rustls"] }
 
-# AWS Bedrock: deps now live in `ironclaw_llm` (LLM provider) and
-# `ironclaw_embeddings` (Titan embeddings); the top-level `bedrock` feature
+# AWS Bedrock: deps now live in `t3claw_llm` (LLM provider) and
+# `t3claw_embeddings` (Titan embeddings); the top-level `bedrock` feature
 # (below) re-exposes both via crate-feature forwarding.
 
 # Docker sandbox
@@ -262,27 +262,27 @@ tempfile = "3"
 insta = { version = "1.46.3", features = ["yaml"] }
 # Pull the LLM crate's `testing` feature in only for tests so `StubLlm` and
 # fault-injection helpers don't ship in release binaries.
-ironclaw_llm = { path = "crates/ironclaw_llm", version = "0.1.0", features = ["testing"] }
-ironclaw_approvals = { path = "crates/ironclaw_approvals", version = "0.1.0" }
-ironclaw_authorization = { path = "crates/ironclaw_authorization", version = "0.1.0" }
-ironclaw_extensions = { path = "crates/ironclaw_extensions", version = "0.1.0" }
-ironclaw_filesystem = { path = "crates/ironclaw_filesystem", version = "0.1.0" }
-ironclaw_host_runtime = { path = "crates/ironclaw_host_runtime", version = "0.1.0" }
-ironclaw_network = { path = "crates/ironclaw_network", version = "0.1.0" }
-ironclaw_processes = { path = "crates/ironclaw_processes", version = "0.1.0" }
-ironclaw_resources = { path = "crates/ironclaw_resources", version = "0.1.0" }
-ironclaw_secrets = { path = "crates/ironclaw_secrets", version = "0.1.0" }
-ironclaw_product_adapters = { path = "crates/ironclaw_product_adapters", version = "0.1.0", features = ["test-support"] }
-ironclaw_product_workflow = { path = "crates/ironclaw_product_workflow", version = "0.1.0", features = ["test-support"] }
-ironclaw_reborn = { path = "crates/ironclaw_reborn", version = "0.1.0" }
-ironclaw_reborn_composition = { path = "crates/ironclaw_reborn_composition", version = "0.1.0", features = ["test-support"] }
-ironclaw_run_state = { path = "crates/ironclaw_run_state", version = "0.1.0" }
-ironclaw_threads = { path = "crates/ironclaw_threads", version = "0.1.0" }
-ironclaw_triggers = { path = "crates/ironclaw_triggers", version = "0.1.0" }
-ironclaw_trust = { path = "crates/ironclaw_trust", version = "0.1.0" }
-ironclaw_wasm = { path = "crates/ironclaw_wasm", version = "0.1.0" }
+t3claw_llm = { path = "crates/t3claw_llm", version = "0.1.0", features = ["testing"] }
+t3claw_approvals = { path = "crates/t3claw_approvals", version = "0.1.0" }
+t3claw_authorization = { path = "crates/t3claw_authorization", version = "0.1.0" }
+t3claw_extensions = { path = "crates/t3claw_extensions", version = "0.1.0" }
+t3claw_filesystem = { path = "crates/t3claw_filesystem", version = "0.1.0" }
+t3claw_host_runtime = { path = "crates/t3claw_host_runtime", version = "0.1.0" }
+t3claw_network = { path = "crates/t3claw_network", version = "0.1.0" }
+t3claw_processes = { path = "crates/t3claw_processes", version = "0.1.0" }
+t3claw_resources = { path = "crates/t3claw_resources", version = "0.1.0" }
+t3claw_secrets = { path = "crates/t3claw_secrets", version = "0.1.0" }
+t3claw_product_adapters = { path = "crates/t3claw_product_adapters", version = "0.1.0", features = ["test-support"] }
+t3claw_product_workflow = { path = "crates/t3claw_product_workflow", version = "0.1.0", features = ["test-support"] }
+t3claw_reborn = { path = "crates/t3claw_reborn", version = "0.1.0" }
+t3claw_reborn_composition = { path = "crates/t3claw_reborn_composition", version = "0.1.0", features = ["test-support"] }
+t3claw_run_state = { path = "crates/t3claw_run_state", version = "0.1.0" }
+t3claw_threads = { path = "crates/t3claw_threads", version = "0.1.0" }
+t3claw_triggers = { path = "crates/t3claw_triggers", version = "0.1.0" }
+t3claw_trust = { path = "crates/t3claw_trust", version = "0.1.0" }
+t3claw_wasm = { path = "crates/t3claw_wasm", version = "0.1.0" }
 # Same idea for embeddings: `MockEmbeddings` is only reachable in dev builds.
-ironclaw_embeddings = { path = "crates/ironclaw_embeddings", version = "0.1.0", features = ["testing"] }
+t3claw_embeddings = { path = "crates/t3claw_embeddings", version = "0.1.0", features = ["testing"] }
 
 [features]
 default = ["postgres", "libsql", "html-to-markdown", "tui"]
@@ -307,8 +307,8 @@ integration = []
 # test rig can spin up its embedded database.
 replay = ["libsql"]
 html-to-markdown = ["dep:html-to-markdown-rs", "dep:readabilityrs"]
-bedrock = ["ironclaw_llm/bedrock", "ironclaw_embeddings/bedrock"]
-tui = ["dep:ironclaw_tui"]
+bedrock = ["t3claw_llm/bedrock", "t3claw_embeddings/bedrock"]
+tui = ["dep:t3claw_tui"]
 import = ["dep:json5", "libsql"]
 # Conditional gate for memory-substrate regression tests that anticipate
 # specific guards: `ensure_path_matches_context`/`ensure_scope_matches_context`
@@ -318,7 +318,7 @@ import = ["dep:json5", "libsql"]
 # skeleton but NOT these specific behaviors — the followup PR(s) that
 # implement them must enable this feature in their merge commit so the
 # gated tests fire in CI. Mirrors the same-named feature on
-# `ironclaw_memory`.
+# `t3claw_memory`.
 #
 # Empirical note (2026-05-12): enabling `pr3180-ready` on the current
 # `reborn-integration` HEAD surfaces 7 gated tests as failing, because
@@ -328,7 +328,7 @@ pr3180-ready = []
 # Conditional gate for caller-tier (tool-dispatcher → substrate) tests.
 # Distinct from `pr3180-ready` because the substrate-level guards and
 # the tool-routing migration are separate landings: PR 7 routes
-# `memory_write` through `ironclaw_memory`'s `PromptWriteSafetyPolicy`,
+# `memory_write` through `t3claw_memory`'s `PromptWriteSafetyPolicy`,
 # so until PR 7 lands, tool-layer rejection tests run against the
 # legacy host-workspace path which doesn't consult the substrate.
 # PR 7 must enable this feature in its merge commit.

@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-25
 **Status:** Ready for implementation
-**Goal:** Add WeChat support to IronClaw using the same upstream iLink Bot protocol as `@tencent-weixin/openclaw-weixin`, while keeping the implementation aligned with IronClaw's extension-first channel architecture.
+**Goal:** Add WeChat support to T3Claw using the same upstream iLink Bot protocol as `@tencent-weixin/openclaw-weixin`, while keeping the implementation aligned with T3Claw's extension-first channel architecture.
 
 ---
 
@@ -29,15 +29,15 @@ This design treats that upstream behavior as the capability boundary. We should 
 
 ## Implementation Direction
 
-IronClaw should **not** try to load the upstream OpenClaw plugin directly.
+T3Claw should **not** try to load the upstream OpenClaw plugin directly.
 
-Instead, IronClaw should implement a **native channel extension** under `channels-src/wechat/` and only extend the host/runtime where that support is generic and reusable.
+Instead, T3Claw should implement a **native channel extension** under `channels-src/wechat/` and only extend the host/runtime where that support is generic and reusable.
 
 ### Why not host the npm plugin directly
 
-- The upstream package depends on `openclaw/plugin-sdk/*` APIs and runtime contracts that IronClaw does not have.
+- The upstream package depends on `openclaw/plugin-sdk/*` APIs and runtime contracts that T3Claw does not have.
 - It assumes OpenClaw-specific lifecycle concepts such as `gateway.startAccount`.
-- Recreating an OpenClaw-compatible Node plugin host inside IronClaw would be more work and more fragile than implementing the protocol directly.
+- Recreating an OpenClaw-compatible Node plugin host inside T3Claw would be more work and more fragile than implementing the protocol directly.
 
 ### Why `channels-src/wechat/`
 
@@ -127,7 +127,7 @@ flowchart LR
 
 ### Host responsibilities
 
-IronClaw core should only own reusable pieces:
+T3Claw core should only own reusable pieces:
 
 - installing and activating the WASM channel
 - generic secret persistence
@@ -203,7 +203,7 @@ Phase 1 should be **web-first**, because the target user is a normal WeChat user
 5. User scans and confirms on their phone.
 6. Host stores `wechat_bot_token`.
 7. Channel reloads and starts polling.
-8. User sends a DM in WeChat and receives IronClaw replies there.
+8. User sends a DM in WeChat and receives T3Claw replies there.
 
 CLI support can still exist for development, but it should not be the primary Phase 1 UX.
 

@@ -1,6 +1,6 @@
 //! Inline gate-await bridge controller.
 //!
-//! Implements [`ironclaw_engine::GateController`] for the bridge layer.
+//! Implements [`t3claw_engine::GateController`] for the bridge layer.
 //! When the engine hits an `Approval` gate inside a live execution
 //! (Tier 0 batch or Tier 1 CodeAct VM), it calls
 //! [`BridgeGateController::pause`] which:
@@ -35,12 +35,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ironclaw_common::AppEvent;
-use ironclaw_common::ExternalThreadId;
-use ironclaw_engine::{
+use serde_json::Value as JsonValue;
+use t3claw_common::AppEvent;
+use t3claw_common::ExternalThreadId;
+use t3claw_engine::{
     ConversationId, GateController, GatePauseRequest, GateResolution, ResumeKind, ThreadId,
 };
-use serde_json::Value as JsonValue;
 use tokio::sync::{Mutex, oneshot};
 use tracing::debug;
 use uuid::Uuid;
@@ -823,9 +823,9 @@ mod tests {
     /// 30-minute gate expiry before the engine task observed the stop.
     #[tokio::test]
     async fn cancel_thread_wakes_parked_pause_with_cancelled_resolution() {
-        use ironclaw_engine::GateController;
-        use ironclaw_engine::ResumeKind;
-        use ironclaw_engine::ThreadId;
+        use t3claw_engine::GateController;
+        use t3claw_engine::ResumeKind;
+        use t3claw_engine::ThreadId;
 
         let controller = Arc::new(BridgeGateController::new(
             Arc::new(crate::gate::store::PendingGateStore::in_memory()),
@@ -838,7 +838,7 @@ mod tests {
         ));
         let thread_id = ThreadId::new();
         let user_id = "stop-during-wait-user".to_string();
-        let conversation_id = ironclaw_engine::ConversationId::new();
+        let conversation_id = t3claw_engine::ConversationId::new();
 
         // Bridge populates the per-execution context before invoking
         // the engine. Without it `pause()` cancels immediately
@@ -936,8 +936,8 @@ mod tests {
     /// happy path (no inline-await waiter) must not panic or block.
     #[tokio::test]
     async fn cancel_thread_with_no_active_pause_is_a_no_op() {
-        use ironclaw_engine::GateController;
-        use ironclaw_engine::ThreadId;
+        use t3claw_engine::GateController;
+        use t3claw_engine::ThreadId;
 
         let controller = BridgeGateController::new(
             Arc::new(crate::gate::store::PendingGateStore::in_memory()),

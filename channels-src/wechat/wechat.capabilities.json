@@ -8,7 +8,7 @@
     "required_secrets": [
       {
         "name": "wechat_bot_token",
-        "prompt": "Connect this channel from the WeChat setup flow. IronClaw stores the bot token after QR login succeeds.",
+        "prompt": "Connect this channel from the WeChat setup flow. T3Claw stores the bot token after QR login succeeds.",
         "optional": false
       }
     ],

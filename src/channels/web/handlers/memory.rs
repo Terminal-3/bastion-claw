@@ -245,7 +245,7 @@ mod tests {
     use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
     use crate::db::Database;
     use crate::workspace::Workspace;
-    use ironclaw_embeddings::EmbeddingCacheConfig;
+    use t3claw_embeddings::EmbeddingCacheConfig;
 
     use super::memory_read_handler;
 

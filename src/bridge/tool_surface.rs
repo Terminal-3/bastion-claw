@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
-use ironclaw_engine::CapabilityStatus;
+use t3claw_engine::CapabilityStatus;
 
 /// How the subject can be invoked from the model/runtime boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,7 +133,7 @@ mod tests {
     use super::{
         InvocationMode, SurfaceAssignment, SurfacePolicyInput, SurfaceSubjectKind, assign_surface,
     };
-    use ironclaw_engine::CapabilityStatus;
+    use t3claw_engine::CapabilityStatus;
 
     #[test]
     fn assigns_surface_matrix_rows() {

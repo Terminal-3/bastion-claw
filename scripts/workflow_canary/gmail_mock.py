@@ -3,9 +3,9 @@
 Mirrors `telegram_mock.py` / `sheets_mock.py` shape: single-port
 aiohttp, ``MOCK_GMAIL_PORT=<n>`` on stdout, test hooks under
 ``/__mock/``. Routes via
-``IRONCLAW_TEST_HTTP_REMAP=gmail.googleapis.com=<mock_url>``.
+``T3CLAW_TEST_HTTP_REMAP=gmail.googleapis.com=<mock_url>``.
 
-Surface (subset of Gmail v1 actually exercised by IronClaw's gmail
+Surface (subset of Gmail v1 actually exercised by T3Claw's gmail
 tool / mock LLM):
 
 - ``GET /gmail/v1/users/{userId}/messages`` — list messages, optional
@@ -168,7 +168,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock Gmail API v1 for IronClaw workflow-canary."
+        description="Mock Gmail API v1 for T3Claw workflow-canary."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

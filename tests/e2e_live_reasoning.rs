@@ -7,8 +7,8 @@
 //! # Running
 //!
 //! ```bash
-//! # Live — uses ~/.ironclaw/.env, real API call:
-//! IRONCLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_reasoning -- --ignored --nocapture
+//! # Live — uses ~/.t3claw/.env, real API call:
+//! T3CLAW_LIVE_TEST=1 cargo test --features libsql --test e2e_live_reasoning -- --ignored --nocapture
 //!
 //! # Replay — deterministic, no API keys (after a trace has been recorded):
 //! cargo test --features libsql --test e2e_live_reasoning -- --ignored
@@ -21,7 +21,7 @@ mod support;
 mod live_tests {
     use std::time::Duration;
 
-    use ironclaw::channels::StatusUpdate;
+    use t3claw::channels::StatusUpdate;
 
     use crate::support::live_harness::{LiveTestHarnessBuilder, TestMode};
 
@@ -41,7 +41,7 @@ mod live_tests {
         // so we can't assert on Thinking in replay mode.
         if harness.mode() != TestMode::Live {
             eprintln!(
-                "[ReasoningE2E] Live-only test — skipping outside IRONCLAW_LIVE_TEST=1. \
+                "[ReasoningE2E] Live-only test — skipping outside T3CLAW_LIVE_TEST=1. \
                  StatusUpdate::Thinking events are not recorded in trace fixtures."
             );
             return;
@@ -103,7 +103,7 @@ mod live_tests {
     /// (e.g. gpt-4o) via env. Skipped by default — run with:
     ///
     /// ```bash
-    /// IRONCLAW_LIVE_TEST=1 LLM_MODEL=gpt-4o \
+    /// T3CLAW_LIVE_TEST=1 LLM_MODEL=gpt-4o \
     ///   cargo test --features libsql --test e2e_live_reasoning \
     ///   -- non_reasoning_model_emits_no_thinking --ignored --nocapture
     /// ```

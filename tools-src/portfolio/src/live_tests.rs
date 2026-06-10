@@ -34,7 +34,7 @@ fn dune_api_key() -> String {
 fn http_get(url: &str) -> Result<String, String> {
     let response = ureq::get(url)
         .set("Accept", "application/json")
-        .set("User-Agent", "IronClaw-Portfolio-Tool-LiveTest/0.1")
+        .set("User-Agent", "T3Claw-Portfolio-Tool-LiveTest/0.1")
         .call()
         .map_err(|e| format!("HTTP error: {e}"))?;
 
@@ -47,7 +47,7 @@ fn dune_get(url: &str, api_key: &str) -> Result<String, String> {
     let response = ureq::get(url)
         .set("X-Sim-Api-Key", api_key)
         .set("Accept", "application/json")
-        .set("User-Agent", "IronClaw-Portfolio-Tool-LiveTest/0.1")
+        .set("User-Agent", "T3Claw-Portfolio-Tool-LiveTest/0.1")
         .call()
         .map_err(|e| format!("Dune HTTP error: {e}"))?;
 

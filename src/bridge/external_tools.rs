@@ -26,7 +26,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Duration, Utc};
-use ironclaw_engine::{ActionDef, ThreadId};
+use t3claw_engine::{ActionDef, ThreadId};
 use tokio::sync::RwLock;
 
 /// Callback-id prefix used for external-tool pause gates. The bridge
@@ -185,7 +185,7 @@ impl ExternalToolCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_engine::{EffectType, ModelToolSurface};
+    use t3claw_engine::{EffectType, ModelToolSurface};
 
     fn action(name: &str) -> ActionDef {
         ActionDef {

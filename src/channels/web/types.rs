@@ -146,7 +146,7 @@ pub struct PendingGateInfo {
     pub description: String,
     pub parameters: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub extension_name: Option<ironclaw_common::ExtensionName>,
+    pub extension_name: Option<t3claw_common::ExtensionName>,
     pub resume_kind: serde_json::Value,
 }
 
@@ -212,9 +212,9 @@ pub struct AuthCancelRequest {
     pub thread_id: Option<String>,
 }
 
-// --- App Event (re-exported from ironclaw_common) ---
+// --- App Event (re-exported from t3claw_common) ---
 
-pub use ironclaw_common::{AppEvent, OnboardingStateDto, ToolDecisionDto};
+pub use t3claw_common::{AppEvent, OnboardingStateDto, ToolDecisionDto};
 
 // --- Admin System Prompt ---
 
@@ -1527,7 +1527,7 @@ mod tests {
     #[test]
     fn test_app_event_onboarding_state_auth_required_serialize() {
         let event = AppEvent::OnboardingState {
-            extension_name: ironclaw_common::ExtensionName::new("notion").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("notion").unwrap(),
             state: OnboardingStateDto::AuthRequired,
             request_id: Some("req-123".to_string()),
             message: None,
@@ -1552,7 +1552,7 @@ mod tests {
     #[test]
     fn test_app_event_onboarding_state_ready_serialize() {
         let event = AppEvent::OnboardingState {
-            extension_name: ironclaw_common::ExtensionName::new("notion").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("notion").unwrap(),
             state: OnboardingStateDto::Ready,
             request_id: None,
             message: Some("notion authenticated (3 tools loaded)".to_string()),
@@ -1574,7 +1574,7 @@ mod tests {
     #[test]
     fn test_ws_server_from_app_event_onboarding_state_auth_required() {
         let event = AppEvent::OnboardingState {
-            extension_name: ironclaw_common::ExtensionName::new("openai").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("openai").unwrap(),
             state: OnboardingStateDto::AuthRequired,
             request_id: None,
             message: None,
@@ -1598,7 +1598,7 @@ mod tests {
     #[test]
     fn test_app_event_onboarding_state_pairing_required_serialize() {
         let event = AppEvent::OnboardingState {
-            extension_name: ironclaw_common::ExtensionName::new("telegram").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("telegram").unwrap(),
             state: OnboardingStateDto::PairingRequired,
             request_id: None,
             message: None,
@@ -1623,7 +1623,7 @@ mod tests {
     #[test]
     fn test_ws_server_from_app_event_onboarding_state_failed() {
         let event = AppEvent::OnboardingState {
-            extension_name: ironclaw_common::ExtensionName::new("slack").unwrap(),
+            extension_name: t3claw_common::ExtensionName::new("slack").unwrap(),
             state: OnboardingStateDto::Failed,
             request_id: None,
             message: Some("Invalid token".to_string()),

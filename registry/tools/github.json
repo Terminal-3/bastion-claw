@@ -21,7 +21,7 @@
   },
   "artifacts": {
     "wasm32-wasip2": {
-      "url": "https://github.com/nearai/ironclaw/releases/download/ironclaw-v0.27.0/tool-github-0.2.5-wasm32-wasip2.tar.gz",
+      "url": "https://github.com/Terminal-3/t3-claw/releases/download/t3claw-v0.27.0/tool-github-0.2.5-wasm32-wasip2.tar.gz",
       "sha256": "33e99a0b6456dce59400082a906df9181b5692f17d75c92ba25cbfedc1a04762"
     }
   },

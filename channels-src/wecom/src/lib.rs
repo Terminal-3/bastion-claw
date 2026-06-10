@@ -1,4 +1,4 @@
-//! WeCom channel for IronClaw.
+//! WeCom channel for T3Claw.
 //!
 //! Current shape:
 //! - bot websocket is the session path for inbound text/events and replies
@@ -1262,7 +1262,7 @@ fn websocket_media_batch_id(metadata: &WecomMessageMetadata) -> String {
         .as_deref()
         .or(metadata.ws_req_id.as_deref())
         .unwrap_or("response");
-    websocket_control_req_id("ironclaw_wecom_media_batch", seed)
+    websocket_control_req_id("t3claw_wecom_media_batch", seed)
 }
 
 fn websocket_media_send_id(batch_id: &str, index: usize, attachment: &Attachment) -> String {
@@ -1272,7 +1272,7 @@ fn websocket_media_send_id(batch_id: &str, index: usize, attachment: &Attachment
         attachment.mime_type,
         attachment.data.len()
     );
-    websocket_control_req_id("ironclaw_wecom_media", &seed)
+    websocket_control_req_id("t3claw_wecom_media", &seed)
 }
 
 fn websocket_media_chunk_blob_path(send_id: &str, chunk_index: usize) -> String {

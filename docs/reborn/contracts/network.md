@@ -1,15 +1,15 @@
-# IronClaw Reborn network service contract
+# T3Claw Reborn network service contract
 
 **Date:** 2026-04-26
 **Status:** V1 policy + HTTP egress slice
-**Crate:** `crates/ironclaw_network`
+**Crate:** `crates/t3claw_network`
 **Depends on:** `docs/reborn/contracts/host-api.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_network` is the scoped network policy and outbound HTTP egress service for Reborn.
+`t3claw_network` is the scoped network policy and outbound HTTP egress service for Reborn.
 
 It turns a host API `NetworkPolicy` plus a scoped target request into a metadata-only permit:
 
@@ -134,7 +134,7 @@ This slice does not implement:
 - per-tenant persisted policy stores
 - OAuth/token refresh flows
 
-Those should be added as separate service/composition slices without moving runtime execution or product workflow semantics into this crate. Runtime adapters that wrap external protocol clients must fail closed unless the host-selected client explicitly uses this host-mediated egress boundary rather than ambient direct HTTP. Reborn MCP HTTP/SSE uses `ironclaw_mcp::McpHostHttpClient` with `McpRuntimeHttpAdapter<RuntimeHttpEgress>` plus a host-owned egress planner; only that fully host-mediated client may report `uses_host_mediated_http_egress() == true`. Reborn script execution remains ambient-network-disabled by default; any future script HTTP surface must translate into `ScriptRuntimeHttpAdapter<RuntimeHttpEgress>` requests instead of adding direct HTTP/DNS/private-IP logic to `ironclaw_scripts`.
+Those should be added as separate service/composition slices without moving runtime execution or product workflow semantics into this crate. Runtime adapters that wrap external protocol clients must fail closed unless the host-selected client explicitly uses this host-mediated egress boundary rather than ambient direct HTTP. Reborn MCP HTTP/SSE uses `t3claw_mcp::McpHostHttpClient` with `McpRuntimeHttpAdapter<RuntimeHttpEgress>` plus a host-owned egress planner; only that fully host-mediated client may report `uses_host_mediated_http_egress() == true`. Reborn script execution remains ambient-network-disabled by default; any future script HTTP surface must translate into `ScriptRuntimeHttpAdapter<RuntimeHttpEgress>` requests instead of adding direct HTTP/DNS/private-IP logic to `t3claw_scripts`.
 
 ---
 

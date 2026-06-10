@@ -8,7 +8,7 @@ use std::sync::Arc;
 use clap::Subcommand;
 
 use crate::workspace::{SearchConfig, Workspace};
-use ironclaw_embeddings::{EmbeddingCacheConfig, EmbeddingProvider};
+use t3claw_embeddings::{EmbeddingCacheConfig, EmbeddingProvider};
 
 /// Run a memory command using the Database trait (works with any backend).
 pub async fn run_memory_command_with_db(

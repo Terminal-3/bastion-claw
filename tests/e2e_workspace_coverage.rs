@@ -13,7 +13,7 @@ mod tests {
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::LlmTrace;
-    use ironclaw::workspace::Workspace;
+    use t3claw::workspace::Workspace;
 
     const TEST_USER_ID: &str = "test-user";
 
@@ -308,7 +308,7 @@ mod tests {
         let first_request = &captured[0];
         let system_msg = first_request
             .iter()
-            .find(|msg| matches!(msg.role, ironclaw_llm::Role::System));
+            .find(|msg| matches!(msg.role, t3claw_llm::Role::System));
         assert!(
             system_msg.is_some(),
             "Expected a system message in the first request"

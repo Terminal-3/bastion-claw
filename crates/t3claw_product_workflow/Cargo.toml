@@ -1,0 +1,57 @@
+[package]
+name = "t3claw_product_workflow"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Product-facing workflow facade for T3Claw Reborn (#3280)"
+authors = ["NEAR AI <support@near.ai>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/Terminal-3/t3-claw"
+repository = "https://github.com/Terminal-3/t3-claw"
+publish = false
+
+[features]
+default = []
+# Compile in-memory fakes (FakeInboundTurnService, FakeConversationBindingService,
+# FakeIdempotencyLedger, etc.). Off by default so production binaries don't carry
+# the fake state machinery; downstream crates enable it from `[dev-dependencies]`.
+test-support = ["t3claw_product_adapters/test-support"]
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+futures = "0.3"
+t3claw_common = { path = "../t3claw_common", version = "0.4.1" }
+t3claw_approvals = { path = "../t3claw_approvals", version = "0.1.0" }
+t3claw_authorization = { path = "../t3claw_authorization", version = "0.1.0" }
+t3claw_auth = { path = "../t3claw_auth", version = "0.1.0" }
+t3claw_events = { path = "../t3claw_events", version = "0.1.0" }
+t3claw_host_api = { path = "../t3claw_host_api", version = "0.1.0" }
+t3claw_conversations = { path = "../t3claw_conversations", version = "0.1.0" }
+t3claw_outbound = { path = "../t3claw_outbound", version = "0.1.0" }
+t3claw_product_adapters = { path = "../t3claw_product_adapters", version = "0.1.0" }
+t3claw_run_state = { path = "../t3claw_run_state", version = "0.1.0" }
+t3claw_threads = { path = "../t3claw_threads", version = "0.1.0" }
+t3claw_turns = { path = "../t3claw_turns", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+secrecy = { version = "0.10", features = ["serde"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "time"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
+
+[dev-dependencies]
+t3claw_host_runtime = { path = "../t3claw_host_runtime" }
+t3claw_loop_support = { path = "../t3claw_loop_support" }
+t3claw_event_projections = { path = "../t3claw_event_projections" }
+t3claw_reborn_composition = { path = "../t3claw_reborn_composition" }
+t3claw_reborn = { path = "../t3claw_reborn" }
+t3claw_trust = { path = "../t3claw_trust" }
+t3claw_product_workflow = { path = ".", features = ["test-support"] }
+t3claw_product_adapters = { path = "../t3claw_product_adapters", features = ["test-support", "host-auth-mint"] }
+t3claw_telegram_v2_adapter = { path = "../t3claw_telegram_v2_adapter" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }

@@ -1,7 +1,7 @@
 """Mock Telegram Bot API for workflow-canary scenarios.
 
 Implements the subset of `https://api.telegram.org/bot<token>/<method>`
-endpoints that IronClaw's telegram channel + tool actually call:
+endpoints that T3Claw's telegram channel + tool actually call:
 
 - `getMe` (token validation)
 - `getUpdates` (long-poll for incoming messages)
@@ -15,7 +15,7 @@ Plus test-only hooks under `/__mock/...`:
   next `getUpdates` response so a scenario can simulate a Telegram
   user sending text to the bot
 - `GET /__mock/sent_messages` — drain the queue of every
-  `sendMessage`/etc. that IronClaw posted, for end-to-end assertions
+  `sendMessage`/etc. that T3Claw posted, for end-to-end assertions
 - `POST /__mock/reset` — clear all state between probes
 
 The server starts on `--port 0` (kernel-assigned) and prints the bound
@@ -23,8 +23,8 @@ port on stdout as `MOCK_TELEGRAM_PORT=<n>` so `wait_for_port_line` in
 `scripts/live_canary/common.py` can discover it the same way it does
 mock_llm.
 
-IronClaw's WASM telegram tool routes API calls through
-`IRONCLAW_TEST_HTTP_REMAP=api.telegram.org=<mock_url>`, so this server
+T3Claw's WASM telegram tool routes API calls through
+`T3CLAW_TEST_HTTP_REMAP=api.telegram.org=<mock_url>`, so this server
 just has to look like the Bot API on `/bot<TOKEN>/...` paths.
 """
 
@@ -43,8 +43,8 @@ from aiohttp import web
 # each other's queues — the canary runs single-process, single-port,
 # so this is fine.
 
-DEFAULT_BOT_USERNAME = "ironclaw_canary_bot"
-DEFAULT_BOT_FIRST_NAME = "IronClaw Canary"
+DEFAULT_BOT_USERNAME = "t3claw_canary_bot"
+DEFAULT_BOT_FIRST_NAME = "T3Claw Canary"
 DEFAULT_BOT_ID = 7700700700  # arbitrary int; Bot API IDs are positive
 DEFAULT_USER_ID = 8800800800  # the simulated Telegram user
 DEFAULT_USER_FIRST_NAME = "Canary Tester"
@@ -54,7 +54,7 @@ DEFAULT_CHAT_ID = DEFAULT_USER_ID  # private chat id == user id
 
 def _new_state() -> dict[str, Any]:
     return {
-        # Outbound messages IronClaw sent us. Each entry is a dict with
+        # Outbound messages T3Claw sent us. Each entry is a dict with
         # method, chat_id, text, payload (raw request JSON), ts.
         "sent": [],
         # Pending incoming messages to deliver on the next `getUpdates`
@@ -143,7 +143,7 @@ async def get_updates(request: web.Request) -> web.Response:
     """Long-poll endpoint. Returns immediately with whatever's queued.
 
     The real Telegram Bot API blocks for up to `timeout` seconds when
-    there's no data; we don't bother — IronClaw's polling loop iterates
+    there's no data; we don't bother — T3Claw's polling loop iterates
     fine with empty results, and zero-latency polling makes tests
     deterministic.
     """
@@ -152,7 +152,7 @@ async def get_updates(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         body = {}
-    # IronClaw sometimes passes via query string instead of body.
+    # T3Claw sometimes passes via query string instead of body.
     offset = int(body.get("offset", request.query.get("offset", "0")) or 0)
 
     if offset > 0:
@@ -314,7 +314,7 @@ def make_app() -> web.Application:
     app = web.Application(middlewares=[_request_logger])
     app["state"] = _new_state()
 
-    # Bot API methods (IronClaw uses both POST and GET for getUpdates)
+    # Bot API methods (T3Claw uses both POST and GET for getUpdates)
     for method in (
         "getMe",
         "getUpdates",
@@ -338,7 +338,7 @@ def make_app() -> web.Application:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mock Telegram Bot API for IronClaw workflow-canary tests."
+        description="Mock Telegram Bot API for T3Claw workflow-canary tests."
     )
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()

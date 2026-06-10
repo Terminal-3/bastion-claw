@@ -83,7 +83,7 @@ async def wait_for_extension_state(
             return extension
         await _sleep()
     # Surface what we actually observed so the failure is debuggable
-    # without IronClaw gateway logs (CI artifacts don't capture them).
+    # without T3Claw gateway logs (CI artifacts don't capture them).
     expected_parts = []
     if authenticated is not None:
         expected_parts.append(f"authenticated={authenticated}")

@@ -80,7 +80,7 @@ Later slices may add validation against transcript draft state, checkpoint fresh
 
 ## 6. Implemented slice
 
-`ironclaw_turns` currently provides contract types, a crate-private validator policy, and a trusted runner-side applicator:
+`t3claw_turns` currently provides contract types, a crate-private validator policy, and a trusted runner-side applicator:
 
 - `LoopExit`, `LoopCompleted`, `LoopBlocked`, `LoopCancelled`, `LoopFailed`;
 - bounded durable reference types for loop exit/message/result/usage/diagnostic refs;

@@ -2,7 +2,7 @@
 
 **Status:** Design draft for issue #3492
 **Date:** 2026-05-11
-**Target crates:** `ironclaw_trust`, `ironclaw_turns`, `ironclaw_memory`, `ironclaw_skills`, `ironclaw_host_runtime`, `ironclaw_architecture`, plus touched substrate crates
+**Target crates:** `t3claw_trust`, `t3claw_turns`, `t3claw_memory`, `t3claw_skills`, `t3claw_host_runtime`, `t3claw_architecture`, plus touched substrate crates
 **Depends on:** [`kernel-boundary.md`](kernel-boundary.md), [`host-api.md`](host-api.md), [`memory.md`](memory.md), [`host-runtime.md`](host-runtime.md), [`runtime-selection.md`](runtime-selection.md), [`loop-exit.md`](loop-exit.md)
 
 ---
@@ -74,8 +74,8 @@ Use one of these patterns:
 
 Existing examples to follow:
 
-- `crates/ironclaw_product_adapters/src/auth.rs`: `ProtocolAuthEvidence` can serialize verified evidence but only failed evidence can deserialize from wire; verified evidence is host-minted through a private seal.
-- `crates/ironclaw_trust`: privileged `EffectiveTrustClass` values are host-policy-only; manifest requests do not become grants.
+- `crates/t3claw_product_adapters/src/auth.rs`: `ProtocolAuthEvidence` can serialize verified evidence but only failed evidence can deserialize from wire; verified evidence is host-minted through a private seal.
+- `crates/t3claw_trust`: privileged `EffectiveTrustClass` values are host-policy-only; manifest requests do not become grants.
 
 ### 3.3 Loop-exit policy implication
 
@@ -343,7 +343,7 @@ Foundation PR verification should include:
 - `cargo fmt --all -- --check`;
 - targeted unit tests for new primitives;
 - targeted architecture/checklist test if a mechanical guard is added;
-- `cargo test -p ironclaw_architecture` if boundary rules or audit harness tests change;
+- `cargo test -p t3claw_architecture` if boundary rules or audit harness tests change;
 - targeted crate tests for any migrated trust-bearing type.
 
 Later migration PRs must add caller-level tests when the primitive gates side effects such as prompt assembly, dispatch, persistence, runtime execution, network egress, approvals, resources, or events.

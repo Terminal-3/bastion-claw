@@ -1,9 +1,9 @@
 # Telegram WASM v2 ProductAdapter
 
 **Status:** First-slice tracer-bullet for #3285 (default off).
-**Crate:** `ironclaw_telegram_v2_adapter`.
-**Host runtime:** `ironclaw_wasm_product_adapters`.
-**Contract:** `ironclaw_product_adapters` (see `product-adapters.md`).
+**Crate:** `t3claw_telegram_v2_adapter`.
+**Host runtime:** `t3claw_wasm_product_adapters`.
+**Contract:** `t3claw_product_adapters` (see `product-adapters.md`).
 
 ## Goals
 
@@ -24,7 +24,7 @@ slice is intentionally narrow:
 Telegram webhooks ship a shared secret in
 `X-Telegram-Bot-Api-Secret-Token`. The host verifies the header in
 constant time using
-`ironclaw_wasm_product_adapters::SharedSecretHeaderAuth` and only then
+`t3claw_wasm_product_adapters::SharedSecretHeaderAuth` and only then
 constructs a `ProtocolAuthEvidence::Verified` via
 `mark_shared_secret_header_verified`. Adapters refuse to parse a payload
 whose evidence is not `Verified`.
@@ -121,13 +121,13 @@ channel manager.
 
 `REBORN_TELEGRAM_V2_ENABLED=true` requires the legacy v1 Telegram channel
 to be inactive for the same installation. The host calls
-`ironclaw::config::validate_telegram_v1_v2_exclusivity` at startup and
+`t3claw::config::validate_telegram_v1_v2_exclusivity` at startup and
 fails closed when both are active.
 
 ## Test coverage (issue #3285 acceptance criteria)
 
 Coverage today lives in the crate's per-module `mod tests` blocks
-(`cargo test -p ironclaw_telegram_v2_adapter --lib`, 46 tests at the
+(`cargo test -p t3claw_telegram_v2_adapter --lib`, 46 tests at the
 time of writing). The tests are not yet named `ac<N>_*`; they are
 organised by the source surface they exercise:
 
@@ -154,7 +154,7 @@ organised by the source surface they exercise:
   used by `text_entity_windows`.
 
 **Deferred:** the integration contract suite at
-`crates/ironclaw_telegram_v2_adapter/tests/product_adapter_telegram_contract.rs`
+`crates/t3claw_telegram_v2_adapter/tests/product_adapter_telegram_contract.rs`
 (referenced in earlier revisions of this doc with `ac<N>_*`
 acceptance-bullet test names) was removed pending a case-by-case
 port to the post-#3352 product-adapter API
@@ -164,7 +164,7 @@ returning `ProductRenderOutcome`, `EgressRequest` builder API,
 paired `(host, credential)` egress policy, and
 `parse_inbound -> Result<ParsedProductInbound, _>`). The recorded
 Telegram payload fixtures under
-`crates/ironclaw_telegram_v2_adapter/tests/fixtures/*.json` are
+`crates/t3claw_telegram_v2_adapter/tests/fixtures/*.json` are
 retained for that followup. Once the port lands, each restored test
 should carry an `ac<N>_*` name referencing the exact AC bullet from
 issue #3285.

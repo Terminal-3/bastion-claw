@@ -15,39 +15,39 @@ set -euo pipefail
 : "${GH_RUNNER_URL:?GH_RUNNER_URL is required (e.g. https://github.com/ORG/REPO)}"
 : "${RUNNER_DATA:=/runner-data}"
 : "${RUNNER_NAME:=railway-private-oauth}"
-: "${RUNNER_LABELS:=self-hosted,ironclaw-live}"
+: "${RUNNER_LABELS:=self-hosted,t3claw-live}"
 
 RUNNER_DIR="${RUNNER_DATA}/runner"
 WORK_DIR="${RUNNER_DATA}/_work"
 
 mkdir -p "${RUNNER_DIR}" "${WORK_DIR}" "${HOME}" "${RUNNER_TOOL_CACHE}" "${RUNNER_TEMP}"
 
-# One-shot ironclaw DB bootstrap. The `private-oauth` canary lane expects
-# an existing libsql DB at `$HOME/.ironclaw/ironclaw.db` with pre-seeded
+# One-shot t3claw DB bootstrap. The `private-oauth` canary lane expects
+# an existing libsql DB at `$HOME/.t3claw/t3claw.db` with pre-seeded
 # Google OAuth secrets (`google_oauth_token`, `..._refresh_token`,
 # `..._scopes`). Minting those requires a human clicking "Allow" in a
 # browser; the pragmatic flow is to do the consent on a laptop and
 # transfer the resulting DB onto the runner volume.
 #
-# `IRONCLAW_DB_B64` is a base64-encoded copy of that DB. When set AND
+# `T3CLAW_DB_B64` is a base64-encoded copy of that DB. When set AND
 # the target file doesn't already exist, we decode once into place.
 # Running daily canary jobs rotate the refresh token on the runner's
 # DB; the `-f` guard ensures we never overwrite those rotations with
 # the stale laptop snapshot. To force a re-seed (e.g., after a volume
 # wipe), the file won't be there so the decode fires automatically.
 #
-# After a successful decode operators should remove `IRONCLAW_DB_B64`
+# After a successful decode operators should remove `T3CLAW_DB_B64`
 # from the Railway service env — the value is large (~1 MB base64'd
 # for a typical DB) and doesn't need to persist.
-DB_TARGET="${HOME}/.ironclaw/ironclaw.db"
-if [[ -n "${IRONCLAW_DB_B64:-}" && ! -f "${DB_TARGET}" ]]; then
-    echo "[entrypoint] Bootstrapping ${DB_TARGET} from IRONCLAW_DB_B64"
+DB_TARGET="${HOME}/.t3claw/t3claw.db"
+if [[ -n "${T3CLAW_DB_B64:-}" && ! -f "${DB_TARGET}" ]]; then
+    echo "[entrypoint] Bootstrapping ${DB_TARGET} from T3CLAW_DB_B64"
     mkdir -p "$(dirname "${DB_TARGET}")"
     # Strip any whitespace the Railway UI may have introduced on paste
     # (wrapped lines, trailing newlines) before decode.
-    if ! printf '%s' "${IRONCLAW_DB_B64}" | tr -d '[:space:]' \
+    if ! printf '%s' "${T3CLAW_DB_B64}" | tr -d '[:space:]' \
             | base64 -d > "${DB_TARGET}"; then
-        echo "[entrypoint] ERROR: base64 decode of IRONCLAW_DB_B64 failed" >&2
+        echo "[entrypoint] ERROR: base64 decode of T3CLAW_DB_B64 failed" >&2
         rm -f "${DB_TARGET}"
         exit 1
     fi
@@ -60,9 +60,9 @@ fi
 
 # Fallback bootstrap route for when the base64-in-env path blows past
 # the service plan's env-var size limit (Railway varies by plan, some
-# cap at 64 KB). Set IRONCLAW_DB_URL to a short-lived pre-signed URL
+# cap at 64 KB). Set T3CLAW_DB_URL to a short-lived pre-signed URL
 # the runner can GET once; the file is written to the same target as
-# IRONCLAW_DB_B64 and the same `-f` guard applies — once the DB exists
+# T3CLAW_DB_B64 and the same `-f` guard applies — once the DB exists
 # on the volume, subsequent boots skip the fetch so in-flight refresh
 # token rotations aren't clobbered.
 #
@@ -70,14 +70,14 @@ fi
 # you control (S3/R2 presigned URL, private gist asset, etc.). The
 # libsql file has encrypted secret values but plaintext schema — don't
 # park it on a public pastebin.
-if [[ -n "${IRONCLAW_DB_URL:-}" && ! -f "${DB_TARGET}" ]]; then
-    echo "[entrypoint] Bootstrapping ${DB_TARGET} from IRONCLAW_DB_URL"
+if [[ -n "${T3CLAW_DB_URL:-}" && ! -f "${DB_TARGET}" ]]; then
+    echo "[entrypoint] Bootstrapping ${DB_TARGET} from T3CLAW_DB_URL"
     mkdir -p "$(dirname "${DB_TARGET}")"
     if ! curl --fail --silent --show-error --location \
             --max-time 120 \
             --output "${DB_TARGET}" \
-            "${IRONCLAW_DB_URL}"; then
-        echo "[entrypoint] ERROR: fetch of IRONCLAW_DB_URL failed" >&2
+            "${T3CLAW_DB_URL}"; then
+        echo "[entrypoint] ERROR: fetch of T3CLAW_DB_URL failed" >&2
         rm -f "${DB_TARGET}"
         exit 1
     fi

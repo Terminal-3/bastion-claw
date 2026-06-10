@@ -12,9 +12,9 @@ Tests the MCP + OAuth integration path:
 Browser tests are skipped until the ``webui-v2-beta`` binary is available.
 
 Note: The Notion MCP OAuth path requires the Reborn composition's MCP adapter
-(``ironclaw_reborn_composition::nearai_mcp``) to be active. Tests that
+(``t3claw_reborn_composition::nearai_mcp``) to be active. Tests that
 exercise the HTTP API prove the route surface; the MCP OAuth trigger is
-exercised in ``crates/ironclaw_reborn_composition`` Rust integration tests.
+exercised in ``crates/t3claw_reborn_composition`` Rust integration tests.
 """
 
 import asyncio
@@ -89,11 +89,11 @@ def _reset_mocks(mock_notion, mock_notion_idp):
 
 
 @pytest.fixture(scope="module")
-async def v2_notion_server(ironclaw_binary, mock_llm_server, mock_notion, mock_notion_idp, tmp_path_factory):
-    """Start ironclaw for Notion MCP OAuth E2E tests."""
+async def v2_notion_server(t3claw_binary, mock_llm_server, mock_notion, mock_notion_idp, tmp_path_factory):
+    """Start t3claw for Notion MCP OAuth E2E tests."""
     home_dir = str(tmp_path_factory.mktemp("notion-home"))
     db_dir = str(tmp_path_factory.mktemp("notion-db"))
-    config_dir = os.path.join(home_dir, ".ironclaw")
+    config_dir = os.path.join(home_dir, ".t3claw")
     os.makedirs(config_dir, exist_ok=True)
 
     # Write a minimal config pointing at the mock Notion MCP server.
@@ -105,7 +105,7 @@ async def v2_notion_server(ironclaw_binary, mock_llm_server, mock_notion, mock_n
 
     port = _reserve_loopback_port()
     async with _start_engine_v2_server(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server=mock_llm_server,
         port=port,
         home_dir=home_dir,
@@ -113,7 +113,7 @@ async def v2_notion_server(ironclaw_binary, mock_llm_server, mock_notion, mock_n
         user_id="e2e-4112-notion",
         label="v2_notion_server",
         env_overrides={
-            "IRONCLAW_BASE_DIR": config_dir,
+            "T3CLAW_BASE_DIR": config_dir,
             "SKILLS_ENABLED": "false",
             "MCP_ENABLED": "true",
         },
@@ -398,7 +398,7 @@ class TestNotionMcpOAuthRoutes:
 
 @pytest.mark.skip(
     reason=(
-        "Playwright browser test requires ironclaw binary compiled with "
+        "Playwright browser test requires t3claw binary compiled with "
         "webui-v2-beta feature. Enable by building with: "
         "cargo build --features libsql,webui-v2-beta"
     )

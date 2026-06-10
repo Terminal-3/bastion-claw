@@ -16,8 +16,8 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
 
-    use ironclaw::context::JobContext;
-    use ironclaw::tools::{Tool, ToolError, ToolOutput};
+    use t3claw::context::JobContext;
+    use t3claw::tools::{Tool, ToolError, ToolOutput};
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::{
@@ -543,7 +543,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "list_issues",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "state": "open",
                                     "limit": "100"
                                 }),
@@ -619,7 +619,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "get_issue",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "issue_number": "42"
                                 }),
                             }],
@@ -693,7 +693,7 @@ mod tests {
                                 arguments: json!({
                                     "action": "create_pull_request",
                                     "owner": "nearai",
-                                    "repo": "ironclaw",
+                                    "repo": "t3claw",
                                     "title": "Fix coercion",
                                     "head": "fix/coercion",
                                     "base": "main",

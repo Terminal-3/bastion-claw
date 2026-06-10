@@ -69,21 +69,21 @@ Mechanics: which shared layer owns repeated DB/runtime plumbing?
 Domain crates own typed traits and semantics:
 
 ```text
-ironclaw_turns::TurnStateStore
-ironclaw_threads::SessionThreadService
-ironclaw_outbound::OutboundStateStore
-ironclaw_secrets::CredentialAccountStore / CredentialSessionStore / future SecretStore
+t3claw_turns::TurnStateStore
+t3claw_threads::SessionThreadService
+t3claw_outbound::OutboundStateStore
+t3claw_secrets::CredentialAccountStore / CredentialSessionStore / future SecretStore
 ```
 
 The shared storage substrate may provide reusable mechanics:
 
 ```text
-ironclaw_storage::StorageBackendKind
-ironclaw_storage::StorageError
-ironclaw_storage::StorageMigration
-ironclaw_storage::encode_json / decode_json
-ironclaw_storage::PageLimit
-ironclaw_storage::BlobStore / RecordStore primitives
+t3claw_storage::StorageBackendKind
+t3claw_storage::StorageError
+t3claw_storage::StorageMigration
+t3claw_storage::encode_json / decode_json
+t3claw_storage::PageLimit
+t3claw_storage::BlobStore / RecordStore primitives
 ```
 
 Primitive substrate families should stay small and mechanics-only:
@@ -128,7 +128,7 @@ not bypass domain invariants by mutating primitive storage rows directly.
 
 | Virtual area | Source of truth | Access surface | Indexed? | Notes |
 | --- | --- | --- | --- | --- |
-| `/memory` | `ironclaw_memory` DB repositories over `memory_documents`, `memory_chunks`, `memory_document_versions` | file-shaped memory docs + memory service APIs | backend-defined full-text/vector | Memory-specific path grammar lives in `ironclaw_memory`, not filesystem. |
+| `/memory` | `t3claw_memory` DB repositories over `memory_documents`, `memory_chunks`, `memory_document_versions` | file-shaped memory docs + memory service APIs | backend-defined full-text/vector | Memory-specific path grammar lives in `t3claw_memory`, not filesystem. |
 | `/users` | typed user/profile repositories + optional user config projection | user/profile APIs + optional file projection | no, unless projection says otherwise | User-owned durable profile and configuration areas. |
 | `/projects` | local/object/project file backend | filesystem | optional project indexer | Project source files and user-authored project artifacts. |
 | `/system/settings` | typed settings repository | typed API + optional file projection | no, unless projection says otherwise | Settings source of truth is not memory. |
@@ -139,17 +139,17 @@ not bypass domain invariants by mutating primitive storage rows directly.
 | `/tmp` | ephemeral runtime temp backend | scoped filesystem | no | Process/invocation-local temporary data. |
 | `/secrets` | typed encrypted secret repository | secret APIs only; optional redacted projection | no | No generic listing of secret material/source records. |
 | `/events` | durable event/audit append log + projections | event/projection APIs; optional export | no | Events are append/projection records, not mutable files. |
-| `/engine/openai_compat/refs` | `ironclaw_reborn_openai_compat_storage` implementing `OpenAiCompatRefStore` over `RootFilesystem` | OpenAI-compatible ref/idempotency API only | no | Source of truth for opaque `chatcmpl-*` / `resp_*` public refs, actor-scoped idempotency, and internal ProductWorkflow/projection refs. Initial adapter stores a CAS-protected state record at `/engine/openai_compat/refs/state.json`; PostgreSQL/libSQL parity comes from the selected `RootFilesystem` backend. |
-| `/processes` | typed process-lifecycle repository routed through `ironclaw_filesystem` (records, results, outputs) | process APIs | no | Consumer mount alias for `ironclaw_processes`; alias-relative under the per-invocation `MountView`. |
-| `/authorization` | typed capability-lease repository routed through `ironclaw_filesystem` | lease APIs | no | Consumer mount alias for `ironclaw_authorization`; alias-relative under the per-invocation `MountView`. |
-| `/outbound` | typed outbound-delivery repository routed through `ironclaw_filesystem` (policies, subscriptions, attempts) | outbound APIs | indexed scope projection | Consumer mount alias for `ironclaw_outbound`; alias-relative under the per-invocation `MountView`. |
-| `/run-state` | typed invocation-lifecycle repository routed through `ironclaw_filesystem` (run records) | run-state APIs | no | Consumer mount alias for `ironclaw_run_state`; alias-relative under the per-invocation `MountView`. |
-| `/approvals` | typed approval-request repository routed through `ironclaw_filesystem` (approval records) | run-state APIs | no | Sibling consumer mount alias for `ironclaw_run_state`; alias-relative under the per-invocation `MountView`. |
-| `/threads` | typed session-thread and transcript repository routed through `ironclaw_filesystem` (thread records, message records, summary artifacts, inbound idempotency) | thread/transcript APIs | no | Consumer mount alias for `ironclaw_threads`; alias-relative under the per-invocation `MountView`. |
-| `/conversations` | typed conversation binding / session-thread state routed through `ironclaw_filesystem` (singleton state record) | conversation services APIs | no | Consumer mount alias for `ironclaw_conversations`; alias-relative under the per-invocation `MountView`. |
-| `/turns` | typed turn-coordination persistence routed through `ironclaw_filesystem` (single snapshot blob of turns, runs, checkpoints, idempotency, events, reservations) | turn coordinator APIs | no | Consumer mount alias for `ironclaw_turns`; alias-relative under the per-invocation `MountView`. |
-| `/checkpoint-state` | host-owned loop checkpoint payload repository routed through `ironclaw_filesystem` (opaque resume payload records keyed by checkpoint state refs) | checkpoint state store APIs only | no | Consumer mount alias for `ironclaw_turns`; public turn/checkpoint/event records store only metadata and refs, never raw checkpoint payload bytes. |
-| `/resources` | typed resource-governor snapshot repository routed through `ironclaw_filesystem` (reservation/usage snapshots) | resource governor APIs | no | Consumer mount alias for `ironclaw_resources`; alias-relative under the per-invocation `MountView`. |
+| `/engine/openai_compat/refs` | `t3claw_reborn_openai_compat_storage` implementing `OpenAiCompatRefStore` over `RootFilesystem` | OpenAI-compatible ref/idempotency API only | no | Source of truth for opaque `chatcmpl-*` / `resp_*` public refs, actor-scoped idempotency, and internal ProductWorkflow/projection refs. Initial adapter stores a CAS-protected state record at `/engine/openai_compat/refs/state.json`; PostgreSQL/libSQL parity comes from the selected `RootFilesystem` backend. |
+| `/processes` | typed process-lifecycle repository routed through `t3claw_filesystem` (records, results, outputs) | process APIs | no | Consumer mount alias for `t3claw_processes`; alias-relative under the per-invocation `MountView`. |
+| `/authorization` | typed capability-lease repository routed through `t3claw_filesystem` | lease APIs | no | Consumer mount alias for `t3claw_authorization`; alias-relative under the per-invocation `MountView`. |
+| `/outbound` | typed outbound-delivery repository routed through `t3claw_filesystem` (policies, subscriptions, attempts) | outbound APIs | indexed scope projection | Consumer mount alias for `t3claw_outbound`; alias-relative under the per-invocation `MountView`. |
+| `/run-state` | typed invocation-lifecycle repository routed through `t3claw_filesystem` (run records) | run-state APIs | no | Consumer mount alias for `t3claw_run_state`; alias-relative under the per-invocation `MountView`. |
+| `/approvals` | typed approval-request repository routed through `t3claw_filesystem` (approval records) | run-state APIs | no | Sibling consumer mount alias for `t3claw_run_state`; alias-relative under the per-invocation `MountView`. |
+| `/threads` | typed session-thread and transcript repository routed through `t3claw_filesystem` (thread records, message records, summary artifacts, inbound idempotency) | thread/transcript APIs | no | Consumer mount alias for `t3claw_threads`; alias-relative under the per-invocation `MountView`. |
+| `/conversations` | typed conversation binding / session-thread state routed through `t3claw_filesystem` (singleton state record) | conversation services APIs | no | Consumer mount alias for `t3claw_conversations`; alias-relative under the per-invocation `MountView`. |
+| `/turns` | typed turn-coordination persistence routed through `t3claw_filesystem` (single snapshot blob of turns, runs, checkpoints, idempotency, events, reservations) | turn coordinator APIs | no | Consumer mount alias for `t3claw_turns`; alias-relative under the per-invocation `MountView`. |
+| `/checkpoint-state` | host-owned loop checkpoint payload repository routed through `t3claw_filesystem` (opaque resume payload records keyed by checkpoint state refs) | checkpoint state store APIs only | no | Consumer mount alias for `t3claw_turns`; public turn/checkpoint/event records store only metadata and refs, never raw checkpoint payload bytes. |
+| `/resources` | typed resource-governor snapshot repository routed through `t3claw_filesystem` (reservation/usage snapshots) | resource governor APIs | no | Consumer mount alias for `t3claw_resources`; alias-relative under the per-invocation `MountView`. |
 | `/tenant-shared` | per-tenant shared mount; resolves to `/tenants/<tenant_id>/shared/...` under the per-invocation `MountView` | scoped filesystem | no | Data shared between users/agents in the same tenant. |
 | `/tenants` | reserved root for tenant-scoped target subtrees written by the per-invocation `MountView` | scoped filesystem | no | Not a consumer-visible alias; only consumed at the mount-table layer by the rewritten `VirtualPath` targets (`/tenants/<tenant_id>/users/<user_id>/<alias>/...`). |
 
@@ -187,8 +187,8 @@ Rules:
 
 - source of truth is the memory repository, preserving existing production table family where viable;
 - memory docs are file-shaped, but memory search/chunks/versions are structured derived state;
-- memory path grammar, metadata inheritance, versioning, search, prompt context, and layer rules live in `ironclaw_memory`;
-- `ironclaw_filesystem` may route/mount memory backends but must not encode memory semantics.
+- memory path grammar, metadata inheritance, versioning, search, prompt context, and layer rules live in `t3claw_memory`;
+- `t3claw_filesystem` may route/mount memory backends but must not encode memory semantics.
 
 ### 5.3 Structured control-plane state
 
@@ -255,7 +255,7 @@ RawSecretRecordStore / EncryptedBlobStore / filesystem/object/SQL backend
   -> has no plaintext API and no secret-domain semantics
 ```
 
-`ironclaw_filesystem` may be one implementation of raw encrypted blob storage.
+`t3claw_filesystem` may be one implementation of raw encrypted blob storage.
 It must not expose secret material through generic file listing, file reads,
 errors, events, or projections. Secret APIs own listing semantics, redaction,
 key rotation, expiry, use-counts, and audit obligations.

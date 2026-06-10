@@ -58,7 +58,7 @@ assert_empty_scope() {
 
 assert_scope \
   "reborn binary crate" \
-  "crates/ironclaw_reborn_cli/src/main.rs" \
+  "crates/t3claw_reborn_cli/src/main.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false
@@ -66,7 +66,7 @@ has_reborn_tests=true"
 
 assert_scope \
   "reborn product storage crate" \
-  "crates/ironclaw_product_workflow_storage/src/lib.rs" \
+  "crates/t3claw_product_workflow_storage/src/lib.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false
@@ -74,7 +74,7 @@ has_reborn_tests=true"
 
 assert_scope \
   "reborn v2 adapter crate" \
-  "crates/ironclaw_telegram_v2_adapter/src/lib.rs" \
+  "crates/t3claw_telegram_v2_adapter/src/lib.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false
@@ -82,7 +82,7 @@ has_reborn_tests=true"
 
 assert_scope \
   "reborn support crate" \
-  "crates/ironclaw_outbound/src/lib.rs" \
+  "crates/t3claw_outbound/src/lib.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false
@@ -149,7 +149,7 @@ has_reborn_tests=true"
 
 assert_scope \
   "shared substrate crate" \
-  "crates/ironclaw_host_runtime/src/lib.rs" \
+  "crates/t3claw_host_runtime/src/lib.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=true
@@ -203,7 +203,7 @@ has_reborn_tests=false"
 
 assert_scope \
   "nested markdown is not docs only" \
-  "crates/ironclaw_reborn/CLAUDE.md" \
+  "crates/t3claw_reborn/CLAUDE.md" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false
@@ -220,7 +220,7 @@ has_reborn_tests=true"
 assert_scope \
   "mixed legacy and reborn" \
   "src/agent/session.rs
-crates/ironclaw_reborn_composition/src/lib.rs" \
+crates/t3claw_reborn_composition/src/lib.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=true
@@ -228,7 +228,7 @@ has_reborn_tests=true"
 
 assert_scope_no_trailing_newline \
   "final path without trailing newline" \
-  "crates/ironclaw_reborn_cli/src/main.rs" \
+  "crates/t3claw_reborn_cli/src/main.rs" \
   "docs_only=false
 has_core_code=true
 has_legacy_tests=false

@@ -1,12 +1,12 @@
 # How to port a v1 channel to Reborn
 
-This guide helps maintainers decide how an IronClaw v1 channel should move onto the Reborn product-surface path.
+This guide helps maintainers decide how an T3Claw v1 channel should move onto the Reborn product-surface path.
 
 The important distinction is that v1 used one `Channel` abstraction for several different things. Reborn should keep those categories separate.
 
 ## Quick decision tree
 
-Ask first: **is this channel an IronClaw-owned user surface, or an external protocol integration?**
+Ask first: **is this channel an T3Claw-owned user surface, or an external protocol integration?**
 
 | v1 source | Examples | Reborn target |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Ask first: **is this channel an IronClaw-owned user surface, or an external prot
 
 Rule of thumb:
 
-- If the surface is IronClaw's own UI/API, keep it native.
+- If the surface is T3Claw's own UI/API, keep it native.
 - If the surface speaks a third-party protocol or should be installable at runtime, make the production path a WASM ProductAdapter.
 - Native code is still useful for pure parse/render logic and tests, but not as the production boundary for installable external protocol adapters.
 
@@ -40,7 +40,7 @@ Native Reborn surface              WASM ProductAdapter component
 
 `ProductAdapter` is the external-protocol contract. It carries host-visible protocol auth, declared egress, external actor/conversation refs, and delivery-status semantics. That fits Telegram/Slack/etc.
 
-Host-owned surfaces already live inside the trusted IronClaw host. Web still needs auth, but it is **host auth** such as bearer tokens, sessions, OIDC, CSRF/origin checks, and tenancy. It should not be forced through fake protocol concepts like `ExternalActorRef`, protocol auth evidence, or delivery sinks unless it is actually crossing an external protocol boundary.
+Host-owned surfaces already live inside the trusted T3Claw host. Web still needs auth, but it is **host auth** such as bearer tokens, sessions, OIDC, CSRF/origin checks, and tenancy. It should not be forced through fake protocol concepts like `ExternalActorRef`, protocol auth evidence, or delivery sinks unless it is actually crossing an external protocol boundary.
 
 ## Path A: port a native host-owned surface
 
@@ -182,7 +182,7 @@ impl ProductAdapter for MyAdapter {
 }
 ```
 
-A ProductAdapter WIT contract already exists at `crates/ironclaw_wasm_product_adapters/wit/product_adapter.wit`. It currently uses JSON-shim fields for Rust DTOs while the DTOs evolve. Keep native core logic clean enough to wrap behind that component boundary without pulling host internals across it.
+A ProductAdapter WIT contract already exists at `crates/t3claw_wasm_product_adapters/wit/product_adapter.wit`. It currently uses JSON-shim fields for Rust DTOs while the DTOs evolve. Keep native core logic clean enough to wrap behind that component boundary without pulling host internals across it.
 
 ## Path C: port a legacy WASM channel
 
@@ -311,7 +311,7 @@ For native host surfaces:
 
 This guide can be used now for planning and native-core work, but the full production WASM ProductAdapter path still depends on follow-up work:
 
-- ProductAdapter WIT exists at `crates/ironclaw_wasm_product_adapters/wit/product_adapter.wit`, but wasmtime component bindings/loader are not wired yet.
+- ProductAdapter WIT exists at `crates/t3claw_wasm_product_adapters/wit/product_adapter.wit`, but wasmtime component bindings/loader are not wired yet.
 - Reborn WASM ProductAdapter host runtime that loads components and exposes egress/secrets/delivery/logging capabilities beyond the current native runner.
 - Component-level ProductAdapter contract test harness.
 - Production Reborn route/deployment documentation for selecting v1 or Reborn for a given external webhook.
@@ -320,12 +320,12 @@ This guide can be used now for planning and native-core work, but the full produ
 
 ## References
 
-- `crates/ironclaw_product_adapters/CLAUDE.md`
-- `crates/ironclaw_product_adapters/src/adapter.rs`
-- `crates/ironclaw_product_adapters/src/inbound.rs`
-- `crates/ironclaw_product_adapters/src/outbound.rs`
-- `crates/ironclaw_product_adapters/src/egress.rs`
-- `crates/ironclaw_wasm_product_adapters/wit/product_adapter.wit`
+- `crates/t3claw_product_adapters/CLAUDE.md`
+- `crates/t3claw_product_adapters/src/adapter.rs`
+- `crates/t3claw_product_adapters/src/inbound.rs`
+- `crates/t3claw_product_adapters/src/outbound.rs`
+- `crates/t3claw_product_adapters/src/egress.rs`
+- `crates/t3claw_wasm_product_adapters/wit/product_adapter.wit`
 - `docs/reborn/contracts/wasm.md`
 - `src/channels/mod.rs`
 - `channels-src/telegram/` as a v1 WASM reference only

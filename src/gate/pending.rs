@@ -1,9 +1,9 @@
 //! Pending gate state — unified type replacing `PendingApproval` and `PendingAuth`.
 
 use chrono::{DateTime, Utc};
-use ironclaw_common::ExternalThreadId;
-use ironclaw_engine::{CapabilityLease, ResumeKind, ThreadId};
 use serde::{Deserialize, Serialize};
+use t3claw_common::ExternalThreadId;
+use t3claw_engine::{CapabilityLease, ResumeKind, ThreadId};
 use uuid::Uuid;
 
 /// Composite key for the pending gate store.
@@ -39,11 +39,11 @@ pub struct PendingGate {
     ///
     /// This is the channel-supplied identifier (web UUID, Telegram chat id,
     /// Slack `thread_ts`) — not the internal engine [`ThreadId`]. See the
-    /// `ExternalThreadId` rationale in `crates/ironclaw_common/src/identity.rs`.
+    /// `ExternalThreadId` rationale in `crates/t3claw_common/src/identity.rs`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_thread_id: Option<ExternalThreadId>,
     /// Conversation the thread belongs to.
-    pub conversation_id: ironclaw_engine::ConversationId,
+    pub conversation_id: t3claw_engine::ConversationId,
     /// Channel that originated the request.
     /// Resolution MUST come from the same channel (or a trusted channel).
     pub source_channel: String,
@@ -149,7 +149,7 @@ mod tests {
             user_id: "user1".into(),
             thread_id: ThreadId::new(),
             scope_thread_id: None,
-            conversation_id: ironclaw_engine::ConversationId::new(),
+            conversation_id: t3claw_engine::ConversationId::new(),
             source_channel: "telegram".into(),
             action_name: "shell".into(),
             call_id: "call_1".into(),

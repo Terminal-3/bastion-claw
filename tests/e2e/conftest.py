@@ -1,6 +1,6 @@
 """pytest fixtures for E2E tests.
 
-Session-scoped: build binary, start mock LLM, start ironclaw, launch browser.
+Session-scoped: build binary, start mock LLM, start t3claw, launch browser.
 Function-scoped: fresh browser context and page per test.
 """
 
@@ -46,16 +46,16 @@ except Exception:
     pass
 
 # Temp directory for the libSQL database file (cleaned up automatically)
-_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-")
+_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-e2e-")
 
-# Temp HOME so pairing/allowFrom state never touches the developer's real ~/.ironclaw
-_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-home-")
+# Temp HOME so pairing/allowFrom state never touches the developer's real ~/.t3claw
+_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-e2e-home-")
 
 # Temp directories for WASM extensions. These start empty and are populated by
 # the install pipeline during tests; fixtures do not pre-populate dev build
 # artifacts into them.
-_WASM_TOOLS_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-wasm-tools-")
-_WASM_CHANNELS_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-wasm-channels-")
+_WASM_TOOLS_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-e2e-wasm-tools-")
+_WASM_CHANNELS_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-e2e-wasm-channels-")
 
 
 def _latest_mtime(path: Path) -> float:
@@ -202,16 +202,16 @@ def _build_gateway_env(
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=info",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
-        "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+        "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": OWNER_SCOPE_ID,
-        "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+        "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "HTTP_WEBHOOK_SECRET": HTTP_WEBHOOK_SECRET,
@@ -232,8 +232,8 @@ def _build_gateway_env(
         "WASM_CHANNELS_DIR": _WASM_CHANNELS_TMPDIR.name,
         "SKILLS_DIR": str(ROOT / "skills"),
         "ONBOARD_COMPLETED": "true",
-        "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-        "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+        "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+        "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
     }
     if extra_env:
         env.update(extra_env)
@@ -241,8 +241,8 @@ def _build_gateway_env(
     return env
 
 
-class ManagedIronclawServer:
-    """Restartable ironclaw process wrapper for E2E scenarios."""
+class ManagedT3ClawServer:
+    """Restartable t3claw process wrapper for E2E scenarios."""
 
     def __init__(
         self,
@@ -311,12 +311,12 @@ class ManagedIronclawServer:
 
 
 @pytest.fixture(scope="session")
-def ironclaw_binary():
-    """Ensure ironclaw binary is built. Returns the binary path."""
+def t3claw_binary():
+    """Ensure t3claw binary is built. Returns the binary path."""
     target_dir = _cargo_target_dir()
-    binary = target_dir / "debug" / "ironclaw"
+    binary = target_dir / "debug" / "t3claw"
     if _binary_needs_rebuild(binary):
-        print("Building ironclaw (this may take a while)...")
+        print("Building t3claw (this may take a while)...")
         subprocess.run(
             ["cargo", "build", "--no-default-features", "--features", "libsql"],
             cwd=ROOT,
@@ -331,22 +331,22 @@ def ironclaw_binary():
 
 
 @pytest.fixture(scope="session")
-def ironclaw_reborn_binary():
-    """Ensure the `ironclaw-reborn` binary is built with the WebChat v2 surface.
+def t3claw_reborn_binary():
+    """Ensure the `t3claw-reborn` binary is built with the WebChat v2 surface.
 
-    Distinct from `ironclaw_binary` (the legacy `ironclaw` web channel): the
+    Distinct from `t3claw_binary` (the legacy `t3claw` web channel): the
     Reborn WebUI v2 SPA and `serve` subcommand are gated behind the
     `webui-v2-beta` Cargo feature, which transitively enables `libsql`. Returns
     the binary path. Used by the Reborn WebUI v2 smoke scenario.
     """
     target_dir = _cargo_target_dir()
-    binary = target_dir / "debug" / "ironclaw-reborn"
+    binary = target_dir / "debug" / "t3claw-reborn"
     if _binary_needs_rebuild(binary):
-        print("Building ironclaw-reborn (webui-v2-beta; this may take a while)...")
+        print("Building t3claw-reborn (webui-v2-beta; this may take a while)...")
         subprocess.run(
             [
                 "cargo", "build",
-                "-p", "ironclaw_reborn_cli",
+                "-p", "t3claw_reborn_cli",
                 "--features", "webui-v2-beta",
             ],
             cwd=ROOT,
@@ -482,13 +482,13 @@ def _wasm_build_symlinks():
 
 
 @pytest.fixture(scope="session")
-async def ironclaw_server(
-    ironclaw_binary,
+async def t3claw_server(
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     server_ports,
 ):
-    """Start the ironclaw gateway. Yields the base URL."""
+    """Start the t3claw gateway. Yields the base URL."""
     home_dir = _HOME_TMPDIR.name
     gateway_port = server_ports["gateway"]
     http_port = server_ports["http"]
@@ -499,16 +499,16 @@ async def ironclaw_server(
         # Minimal env: PATH for process spawning, HOME for Rust/cargo defaults
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=info",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
-        "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+        "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": OWNER_SCOPE_ID,
-        "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+        "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "HTTP_WEBHOOK_SECRET": HTTP_WEBHOOK_SECRET,
@@ -532,15 +532,15 @@ async def ironclaw_server(
         "ONBOARD_COMPLETED": "true",
         # Force gateway OAuth callback mode (non-loopback URL) and point
         # token exchange at mock_llm.py so OAuth tests work without Google.
-        "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-        "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+        "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+        "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
     }
     _forward_coverage_env(env)
     env["SECRETS_MASTER_KEY"] = (
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     )
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -565,7 +565,7 @@ async def ironclaw_server(
                 pass
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
         pytest.fail(
-            f"ironclaw server failed to start on port {gateway_port} "
+            f"t3claw server failed to start on port {gateway_port} "
             f"(returncode={returncode}).\nstderr:\n{stderr_text}"
         )
     finally:
@@ -583,14 +583,14 @@ async def ironclaw_server(
 
 @pytest.fixture(scope="session")
 async def hosted_oauth_refresh_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
-    """Start a hosted-mode ironclaw instance for OAuth refresh regression tests."""
+    """Start a hosted-mode t3claw instance for OAuth refresh regression tests."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-hosted-oauth-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-hosted-oauth-home-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-hosted-oauth-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-hosted-oauth-home-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -604,10 +604,10 @@ async def hosted_oauth_refresh_server(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_dir,
-            "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-            "RUST_LOG": "ironclaw=info",
+            "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+            "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
-            "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+            "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
             "GATEWAY_ENABLED": "true",
             "GATEWAY_HOST": "127.0.0.1",
             "GATEWAY_PORT": str(gateway_port),
@@ -632,15 +632,15 @@ async def hosted_oauth_refresh_server(
             "WASM_TOOLS_DIR": wasm_tools_dir,
             "WASM_CHANNELS_DIR": _WASM_CHANNELS_TMPDIR.name,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-            "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
-            "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+            "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+            "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+            "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
             "GOOGLE_OAUTH_CLIENT_ID": "hosted-google-client-id",
         }
         _forward_coverage_env(env)
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -689,14 +689,14 @@ async def hosted_oauth_refresh_server(
 
 @pytest.fixture(scope="session")
 async def loop_limited_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
-    """Start an isolated ironclaw instance with a low tool-iteration limit."""
+    """Start an isolated t3claw instance with a low tool-iteration limit."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-loop-limit-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-loop-limit-home-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-loop-limit-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-loop-limit-home-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -708,10 +708,10 @@ async def loop_limited_server(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_tmpdir.name,
-            "IRONCLAW_BASE_DIR": os.path.join(home_tmpdir.name, ".ironclaw"),
-            "RUST_LOG": "ironclaw=info",
+            "T3CLAW_BASE_DIR": os.path.join(home_tmpdir.name, ".t3claw"),
+            "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
-            "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+            "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
             "GATEWAY_ENABLED": "true",
             "GATEWAY_HOST": "127.0.0.1",
             "GATEWAY_PORT": str(gateway_port),
@@ -735,14 +735,14 @@ async def loop_limited_server(
             "WASM_TOOLS_DIR": wasm_tools_dir,
             "WASM_CHANNELS_DIR": _WASM_CHANNELS_TMPDIR.name,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-            "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+            "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+            "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
             "AGENT_MAX_TOOL_ITERATIONS": "2",
         }
         _forward_coverage_env(env)
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -766,7 +766,7 @@ async def loop_limited_server(
                     pass
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
             pytest.fail(
-                f"loop-limited ironclaw server failed to start on port {gateway_port} "
+                f"loop-limited t3claw server failed to start on port {gateway_port} "
                 f"(returncode={returncode}).\nstderr:\n{stderr_text}"
             )
         finally:
@@ -787,14 +787,14 @@ async def loop_limited_server(
 
 @pytest.fixture(scope="session")
 async def length_preserving_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
-    """Start an isolated ironclaw instance using the NearAI provider path."""
+    """Start an isolated t3claw instance using the NearAI provider path."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-length-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-length-home-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-length-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-length-home-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -806,10 +806,10 @@ async def length_preserving_server(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_tmpdir.name,
-            "IRONCLAW_BASE_DIR": os.path.join(home_tmpdir.name, ".ironclaw"),
-            "RUST_LOG": "ironclaw=info",
+            "T3CLAW_BASE_DIR": os.path.join(home_tmpdir.name, ".t3claw"),
+            "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
-            "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+            "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
             "GATEWAY_ENABLED": "true",
             "GATEWAY_HOST": "127.0.0.1",
             "GATEWAY_PORT": str(gateway_port),
@@ -833,13 +833,13 @@ async def length_preserving_server(
             "WASM_TOOLS_DIR": wasm_tools_dir,
             "WASM_CHANNELS_DIR": _WASM_CHANNELS_TMPDIR.name,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-            "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+            "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+            "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
         }
         _forward_coverage_env(env)
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -863,7 +863,7 @@ async def length_preserving_server(
                     pass
             stderr_text = stderr_bytes.decode("utf-8", errors="replace")
             pytest.fail(
-                f"length-preserving ironclaw server failed to start on port {gateway_port} "
+                f"length-preserving t3claw server failed to start on port {gateway_port} "
                 f"(returncode={returncode}).\nstderr:\n{stderr_text}"
             )
         finally:
@@ -884,15 +884,15 @@ async def length_preserving_server(
 
 @pytest.fixture(scope="session")
 async def extension_cleanup_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
 ):
-    """Start an isolated ironclaw instance for uninstall secret cleanup E2E tests."""
+    """Start an isolated t3claw instance for uninstall secret cleanup E2E tests."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-cleanup-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-cleanup-home-")
-    tools_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-cleanup-tools-")
-    channels_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-cleanup-channels-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-cleanup-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-cleanup-home-")
+    tools_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-cleanup-tools-")
+    channels_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-cleanup-channels-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -906,10 +906,10 @@ async def extension_cleanup_server(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_dir,
-            "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-            "RUST_LOG": "ironclaw=info",
+            "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+            "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
-            "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+            "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
             "GATEWAY_ENABLED": "true",
             "GATEWAY_HOST": "127.0.0.1",
             "GATEWAY_PORT": str(gateway_port),
@@ -935,15 +935,15 @@ async def extension_cleanup_server(
             "WASM_TOOLS_DIR": tools_tmpdir.name,
             "WASM_CHANNELS_DIR": channels_tmpdir.name,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-            "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
-            "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+            "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+            "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+            "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
             "GOOGLE_OAUTH_CLIENT_ID": "hosted-google-client-id",
         }
         _forward_coverage_env(env)
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -995,14 +995,14 @@ async def extension_cleanup_server(
 
 @pytest.fixture
 async def managed_gateway_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
     """Start an isolated, restartable gateway instance for SSE/connectivity tests."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-managed-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-managed-home-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-managed-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-managed-home-")
     server = None
 
     try:
@@ -1020,8 +1020,8 @@ async def managed_gateway_server(
             http_port=http_port,
             db_path=os.path.join(db_tmpdir.name, "managed-gateway.db"),
         )
-        server = ManagedIronclawServer(
-            binary=ironclaw_binary,
+        server = ManagedT3ClawServer(
+            binary=t3claw_binary,
             env=env,
             gateway_port=gateway_port,
             label="managed gateway server",
@@ -1040,14 +1040,14 @@ async def managed_gateway_server(
 
 @pytest.fixture
 async def limited_gateway_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
     """Start an isolated gateway with a low SSE/WebSocket connection cap."""
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-limited-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-limited-home-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-limited-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-limited-home-")
     server = None
 
     try:
@@ -1066,8 +1066,8 @@ async def limited_gateway_server(
             db_path=os.path.join(db_tmpdir.name, "limited-gateway.db"),
             extra_env={"GATEWAY_MAX_CONNECTIONS": "2"},
         )
-        server = ManagedIronclawServer(
-            binary=ironclaw_binary,
+        server = ManagedT3ClawServer(
+            binary=t3claw_binary,
             env=env,
             gateway_port=gateway_port,
             label="limited gateway server",
@@ -1085,7 +1085,7 @@ async def limited_gateway_server(
 
 
 @pytest.fixture(scope="session")
-async def http_channel_server(ironclaw_server, server_ports):
+async def http_channel_server(t3claw_server, server_ports):
     """HTTP webhook channel base URL."""
     base_url = f"http://127.0.0.1:{server_ports['http']}"
     await wait_for_ready(f"{base_url}/health", timeout=30)
@@ -1094,14 +1094,14 @@ async def http_channel_server(ironclaw_server, server_ports):
 
 @pytest.fixture(scope="session")
 async def http_channel_server_without_secret(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
 ):
     """Start the HTTP webhook channel without a configured secret."""
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-webhook-no-secret-home-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-webhook-no-secret-home-")
     home_dir = home_tmpdir.name
-    base_dir = os.path.join(home_dir, ".ironclaw")
+    base_dir = os.path.join(home_dir, ".t3claw")
     os.makedirs(base_dir, exist_ok=True)
     gateway_port = _find_free_port()
     http_port = _find_free_port()
@@ -1109,15 +1109,15 @@ async def http_channel_server_without_secret(
         # Minimal env: PATH for process spawning, HOME for Rust/cargo defaults
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": base_dir,
-        "RUST_LOG": "ironclaw=info",
+        "T3CLAW_BASE_DIR": base_dir,
+        "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
         "GATEWAY_ENABLED": "true",
         "GATEWAY_HOST": "127.0.0.1",
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": OWNER_SCOPE_ID,
-        "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+        "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
@@ -1140,12 +1140,12 @@ async def http_channel_server_without_secret(
         "ONBOARD_COMPLETED": "true",
         # Force gateway OAuth callback mode (non-loopback URL) and point
         # token exchange at mock_llm.py so OAuth tests work without Google.
-        "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-        "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+        "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+        "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
     }
     _forward_coverage_env(env)
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -1172,7 +1172,7 @@ async def http_channel_server_without_secret(
                 pass
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
         pytest.fail(
-            f"ironclaw server without webhook secret failed to start on ports "
+            f"t3claw server without webhook secret failed to start on ports "
             f"gateway={gateway_port}, http={http_port} "
             f"(returncode={returncode}).\nstderr:\n{stderr_text}"
         )
@@ -1191,7 +1191,7 @@ async def http_channel_server_without_secret(
 
 
 @pytest.fixture(scope="session")
-async def browser(ironclaw_server):
+async def browser(t3claw_server):
     """Session-scoped Playwright browser instance.
 
     Reuses a single browser process across all tests. Individual tests
@@ -1207,11 +1207,11 @@ async def browser(ironclaw_server):
 
 
 @pytest.fixture
-async def page(ironclaw_server, browser):
+async def page(t3claw_server, browser):
     """Fresh Playwright browser context + page, navigated to the gateway with auth."""
     context = await browser.new_context(viewport={"width": 1280, "height": 720})
     pg = await context.new_page()
-    await _open_authed_gateway_page(pg, ironclaw_server, wait_for_sse=True)
+    await _open_authed_gateway_page(pg, t3claw_server, wait_for_sse=True)
     yield pg
     await context.close()
 
@@ -1286,18 +1286,18 @@ async def fake_slack_server():
 
 @pytest.fixture(scope="session")
 async def slack_e2e_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     fake_slack_server,
 ):
-    """IronClaw instance wired to the fake Slack API for E2E Slack tests."""
+    """T3Claw instance wired to the fake Slack API for E2E Slack tests."""
     reserved = _reserve_loopback_sockets(2)
     try:
-        db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-slack-db-")
-        home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-slack-home-")
+        db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-slack-db-")
+        home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-slack-home-")
         channels_tmpdir = tempfile.TemporaryDirectory(
-            prefix="ironclaw-e2e-slack-channels-"
+            prefix="t3claw-e2e-slack-channels-"
         )
         gateway_port = reserved[0].getsockname()[1]
         http_port = reserved[1].getsockname()[1]
@@ -1321,7 +1321,7 @@ async def slack_e2e_server(
                     "0123456789abcdef0123456789abcdef"
                 ),
                 "WASM_CHANNELS_DIR": channels_tmpdir.name,
-                "IRONCLAW_TEST_HTTP_REWRITE_MAP": json.dumps(
+                "T3CLAW_TEST_HTTP_REWRITE_MAP": json.dumps(
                     {
                         "slack.com": fake_slack_server,
                         "files.slack.com": fake_slack_server,
@@ -1331,7 +1331,7 @@ async def slack_e2e_server(
         )
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary,
+            t3claw_binary,
             "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
@@ -1411,14 +1411,14 @@ async def fake_telegram_server():
 
 
 async def _telegram_e2e_server_impl(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     fake_telegram_server,
     *,
     routines_enabled: bool,
 ):
-    """Start an isolated ironclaw instance wired to the fake Telegram API.
+    """Start an isolated t3claw instance wired to the fake Telegram API.
 
     Yields a dict with:
     - ``base_url``: gateway URL
@@ -1426,9 +1426,9 @@ async def _telegram_e2e_server_impl(
     - ``fake_tg_url``: fake Telegram API URL (for control endpoints)
     """
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-tg-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-tg-home-")
-    channels_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-tg-channels-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-tg-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-tg-home-")
+    channels_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-tg-channels-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -1441,10 +1441,10 @@ async def _telegram_e2e_server_impl(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_dir,
-            "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-            "RUST_LOG": "ironclaw=debug",
+            "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+            "RUST_LOG": "t3claw=debug",
             "RUST_BACKTRACE": "1",
-            "IRONCLAW_OWNER_ID": OWNER_SCOPE_ID,
+            "T3CLAW_OWNER_ID": OWNER_SCOPE_ID,
             "GATEWAY_ENABLED": "true",
             "GATEWAY_HOST": "127.0.0.1",
             "GATEWAY_PORT": str(gateway_port),
@@ -1472,17 +1472,17 @@ async def _telegram_e2e_server_impl(
             "WASM_TOOLS_DIR": wasm_tools_dir,
             "WASM_CHANNELS_DIR": channels_tmpdir.name,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": (
+            "T3CLAW_OAUTH_CALLBACK_URL": (
                 "https://oauth.test.example/oauth/callback"
             ),
-            "IRONCLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
+            "T3CLAW_OAUTH_EXCHANGE_URL": mock_llm_server,
             # Route Telegram API calls to the fake server
-            "IRONCLAW_TEST_TELEGRAM_API_BASE_URL": fake_telegram_server,
+            "T3CLAW_TEST_TELEGRAM_API_BASE_URL": fake_telegram_server,
         }
         _forward_coverage_env(env)
 
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -1536,13 +1536,13 @@ async def _telegram_e2e_server_impl(
 
 @pytest.fixture
 async def telegram_e2e_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     fake_telegram_server,
 ):
     async for server in _telegram_e2e_server_impl(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server,
         wasm_tools_dir,
         fake_telegram_server,
@@ -1553,13 +1553,13 @@ async def telegram_e2e_server(
 
 @pytest.fixture
 async def isolated_telegram_e2e_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     fake_telegram_server,
 ):
     async for server in _telegram_e2e_server_impl(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server,
         wasm_tools_dir,
         fake_telegram_server,
@@ -1570,13 +1570,13 @@ async def isolated_telegram_e2e_server(
 
 @pytest.fixture(scope="session")
 async def telegram_e2e_server_with_routines(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     fake_telegram_server,
 ):
     async for server in _telegram_e2e_server_impl(
-        ironclaw_binary,
+        t3claw_binary,
         mock_llm_server,
         wasm_tools_dir,
         fake_telegram_server,
@@ -1590,29 +1590,29 @@ async def telegram_e2e_server_with_routines(
 
 @pytest.fixture
 async def mission_gmail_live_server(
-    ironclaw_binary,
+    t3claw_binary,
     mock_llm_server,
     wasm_tools_dir,
     request,
 ):
-    """Isolated ironclaw instance for the mission auto-resume live test.
+    """Isolated t3claw instance for the mission auto-resume live test.
 
     Wires together three runtime pieces:
 
-    1. The `live_llm_proxy.py` record/replay proxy as ironclaw's
+    1. The `live_llm_proxy.py` record/replay proxy as t3claw's
        LLM backend. The proxy is launched with a per-test fixture
        file in `tests/e2e/fixtures/live/<test_name>.json`. In record
-       mode (`IRONCLAW_LIVE_TEST=1`) it forwards to the upstream
+       mode (`T3CLAW_LIVE_TEST=1`) it forwards to the upstream
        LLM and writes the trace; in replay mode it reads the
        committed trace.
     2. The existing mock_llm.py for the Gmail HTTP API mocks. The
-       `IRONCLAW_TEST_HTTP_REWRITE_MAP` env var routes
+       `T3CLAW_TEST_HTTP_REWRITE_MAP` env var routes
        `gmail.googleapis.com` at mock_llm.py so the gmail WASM
        tool's HTTP calls land on deterministic responses (the
        `/__mock/gmail/state` endpoint exposes counters for
        assertions). OAuth exchange (`/oauth/exchange`) also lives
        on mock_llm.py.
-    3. A function-scoped ironclaw process with engine v2 enabled
+    3. A function-scoped t3claw process with engine v2 enabled
        and admin tools auto-approved so the chat-driven
        `routine_create` + `mission_fire` flow runs without a
        human in the loop. The *authentication* gate raised by
@@ -1626,10 +1626,10 @@ async def mission_gmail_live_server(
     proxy = await proxy_iter.__anext__()
 
     reserved = _reserve_loopback_sockets(2)
-    db_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-mission-gmail-db-")
-    home_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-mission-gmail-home-")
-    channels_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-mission-gmail-channels-")
-    tools_tmpdir = tempfile.TemporaryDirectory(prefix="ironclaw-e2e-mission-gmail-tools-")
+    db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-mission-gmail-db-")
+    home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-mission-gmail-home-")
+    channels_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-mission-gmail-channels-")
+    tools_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-e2e-mission-gmail-tools-")
 
     try:
         gateway_port = reserved[0].getsockname()[1]
@@ -1658,10 +1658,10 @@ async def mission_gmail_live_server(
                 "LLM_BASE_URL": proxy["url"],
                 # Route gmail.googleapis.com at mock_llm so the
                 # gmail WASM tool's HTTP calls land deterministically.
-                "IRONCLAW_TEST_HTTP_REWRITE_MAP": json.dumps(
+                "T3CLAW_TEST_HTTP_REWRITE_MAP": json.dumps(
                     {"gmail.googleapis.com": mock_llm_server}
                 ),
-                "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+                "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
                 "GOOGLE_OAUTH_CLIENT_ID": "hosted-google-client-id",
                 # Auto-approve administrative tools so the chat-driven
                 # mission_create + fire sequence runs without a human
@@ -1673,15 +1673,15 @@ async def mission_gmail_live_server(
             },
         )
 
-        # Tee ironclaw stderr to a debug log so live-test failures are
+        # Tee t3claw stderr to a debug log so live-test failures are
         # diagnosable without re-running. Only used during /tests/e2e
         # live recordings — production paths don't see this.
-        stderr_log_path = os.environ.get("IRONCLAW_E2E_STDERR_LOG")
+        stderr_log_path = os.environ.get("T3CLAW_E2E_STDERR_LOG")
         stderr_dest: Any = asyncio.subprocess.PIPE
         if stderr_log_path:
             stderr_dest = open(stderr_log_path, "w")  # noqa: SIM115
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=stderr_dest,

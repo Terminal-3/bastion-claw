@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use tokio::sync::RwLock;
 
-use ironclaw_engine::types::capability::{EffectType, LeaseId, ModelToolSurface};
-use ironclaw_engine::{
+use t3claw_engine::types::capability::{EffectType, LeaseId, ModelToolSurface};
+use t3claw_engine::{
     ActionDef, ActionResult, Capability, CapabilityLease, CapabilityRegistry, DocId, DocType,
     EffectExecutor, EngineError, LeaseManager, LlmBackend, LlmCallConfig, LlmOutput, LlmResponse,
     MemoryDoc, Mission, MissionId, MissionStatus, PolicyEngine, Project, ProjectId, Step, Store,
@@ -23,8 +23,8 @@ use ironclaw_engine::{
     ThreadState, ThreadType, TokenUsage,
 };
 
-use ironclaw_skills::types::ActivationCriteria;
-use ironclaw_skills::v2::{CodeSnippet, SkillMetrics, V2SkillMetadata, V2SkillSource};
+use t3claw_skills::types::ActivationCriteria;
+use t3claw_skills::v2::{CodeSnippet, SkillMetrics, V2SkillMetadata, V2SkillSource};
 
 // ── Scripted LLM ─────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ struct PausingHttpMockEffects {
     canned_responses: HashMap<String, serde_json::Value>,
     calls: RwLock<Vec<(String, serde_json::Value)>>,
     approved: RwLock<bool>,
-    capabilities: Vec<ironclaw_engine::CapabilitySummary>,
+    capabilities: Vec<t3claw_engine::CapabilitySummary>,
 }
 
 impl PausingHttpMockEffects {
@@ -142,7 +142,7 @@ impl PausingHttpMockEffects {
 
     fn with_capabilities(
         canned: HashMap<String, serde_json::Value>,
-        capabilities: Vec<ironclaw_engine::CapabilitySummary>,
+        capabilities: Vec<t3claw_engine::CapabilitySummary>,
     ) -> Arc<Self> {
         Arc::new(Self {
             canned_responses: canned,
@@ -176,13 +176,13 @@ impl AutoApprovingHttpController {
 }
 
 #[async_trait::async_trait]
-impl ironclaw_engine::GateController for AutoApprovingHttpController {
+impl t3claw_engine::GateController for AutoApprovingHttpController {
     async fn pause(
         &self,
-        _request: ironclaw_engine::GatePauseRequest,
-    ) -> ironclaw_engine::GateResolution {
+        _request: t3claw_engine::GatePauseRequest,
+    ) -> t3claw_engine::GateResolution {
         self.effects.mark_approved().await;
-        ironclaw_engine::GateResolution::Approved { always: false }
+        t3claw_engine::GateResolution::Approved { always: false }
     }
 }
 
@@ -193,7 +193,7 @@ impl EffectExecutor for HttpMockEffects {
         action_name: &str,
         parameters: serde_json::Value,
         _lease: &CapabilityLease,
-        _context: &ironclaw_engine::ThreadExecutionContext,
+        _context: &t3claw_engine::ThreadExecutionContext,
     ) -> Result<ActionResult, EngineError> {
         self.calls
             .write()
@@ -227,7 +227,7 @@ impl EffectExecutor for HttpMockEffects {
     async fn available_actions(
         &self,
         _leases: &[CapabilityLease],
-        _context: &ironclaw_engine::ThreadExecutionContext,
+        _context: &t3claw_engine::ThreadExecutionContext,
     ) -> Result<Vec<ActionDef>, EngineError> {
         Ok(vec![ActionDef {
             name: "http".into(),
@@ -252,8 +252,8 @@ impl EffectExecutor for HttpMockEffects {
     async fn available_capabilities(
         &self,
         _leases: &[CapabilityLease],
-        _context: &ironclaw_engine::ThreadExecutionContext,
-    ) -> Result<Vec<ironclaw_engine::CapabilitySummary>, EngineError> {
+        _context: &t3claw_engine::ThreadExecutionContext,
+    ) -> Result<Vec<t3claw_engine::CapabilitySummary>, EngineError> {
         Ok(vec![])
     }
 }
@@ -265,7 +265,7 @@ impl EffectExecutor for PausingHttpMockEffects {
         action_name: &str,
         parameters: serde_json::Value,
         _lease: &CapabilityLease,
-        _context: &ironclaw_engine::ThreadExecutionContext,
+        _context: &t3claw_engine::ThreadExecutionContext,
     ) -> Result<ActionResult, EngineError> {
         if action_name == "http" && !*self.approved.read().await {
             return Err(EngineError::GatePaused {
@@ -273,7 +273,7 @@ impl EffectExecutor for PausingHttpMockEffects {
                 action_name: action_name.to_string(),
                 call_id: "call_http_gate_1".into(),
                 parameters: Box::new(parameters),
-                resume_kind: Box::new(ironclaw_engine::ResumeKind::Approval {
+                resume_kind: Box::new(t3claw_engine::ResumeKind::Approval {
                     allow_always: false,
                 }),
                 paused_lease: None,
@@ -311,7 +311,7 @@ impl EffectExecutor for PausingHttpMockEffects {
     async fn available_actions(
         &self,
         _leases: &[CapabilityLease],
-        _context: &ironclaw_engine::ThreadExecutionContext,
+        _context: &t3claw_engine::ThreadExecutionContext,
     ) -> Result<Vec<ActionDef>, EngineError> {
         Ok(vec![ActionDef {
             name: "http".into(),
@@ -336,8 +336,8 @@ impl EffectExecutor for PausingHttpMockEffects {
     async fn available_capabilities(
         &self,
         _leases: &[CapabilityLease],
-        _context: &ironclaw_engine::ThreadExecutionContext,
-    ) -> Result<Vec<ironclaw_engine::CapabilitySummary>, EngineError> {
+        _context: &t3claw_engine::ThreadExecutionContext,
+    ) -> Result<Vec<t3claw_engine::CapabilitySummary>, EngineError> {
         Ok(self.capabilities.clone())
     }
 }
@@ -540,7 +540,7 @@ fn make_github_skill_doc(project_id: ProjectId) -> MemoryDoc {
             ..Default::default()
         },
         source: V2SkillSource::Authored,
-        trust: ironclaw_skills::SkillTrust::Trusted,
+        trust: t3claw_skills::SkillTrust::Trusted,
         requires: Default::default(),
         code_snippets: vec![CodeSnippet {
             name: "list_github_issues".into(),
@@ -850,7 +850,7 @@ async fn skill_prompt_context_survives_pause_and_resume() {
     let llm = CapturingScriptedLlm::new(vec![
         LlmOutput {
             response: LlmResponse::ActionCalls {
-                calls: vec![ironclaw_engine::ActionCall {
+                calls: vec![t3claw_engine::ActionCall {
                     id: "call_http_gate_1".into(),
                     action_name: "http".into(),
                     parameters: serde_json::json!({
@@ -904,7 +904,7 @@ async fn skill_prompt_context_survives_pause_and_resume() {
         Arc::new(PolicyEngine::new()),
     ));
     let controller = AutoApprovingHttpController::new(effects.clone());
-    mgr.set_gate_controller(controller as Arc<dyn ironclaw_engine::GateController>)
+    mgr.set_gate_controller(controller as Arc<dyn t3claw_engine::GateController>)
         .await;
 
     let tid = mgr
@@ -956,7 +956,7 @@ async fn skill_prompt_context_survives_compaction_and_resume() {
         },
         LlmOutput {
             response: LlmResponse::ActionCalls {
-                calls: vec![ironclaw_engine::ActionCall {
+                calls: vec![t3claw_engine::ActionCall {
                     id: "call_http_gate_1".into(),
                     action_name: "http".into(),
                     parameters: serde_json::json!({
@@ -981,14 +981,14 @@ async fn skill_prompt_context_survives_compaction_and_resume() {
     );
     let effects = PausingHttpMockEffects::with_capabilities(
         canned,
-        vec![ironclaw_engine::CapabilitySummary {
+        vec![t3claw_engine::CapabilitySummary {
             name: "slack".into(),
             display_name: Some("Slack".into()),
-            kind: ironclaw_engine::CapabilitySummaryKind::Provider,
+            kind: t3claw_engine::CapabilitySummaryKind::Provider,
             // NeedsSetup keeps slack visible in the Activatable
             // Integrations prompt section. NeedsAuth is direct-callable
             // post-#3133 and lives in the regular action inventory.
-            status: ironclaw_engine::CapabilityStatus::NeedsSetup,
+            status: t3claw_engine::CapabilityStatus::NeedsSetup,
             description: Some("Slack workspace integration".into()),
             action_preview: vec!["slack_send".into()],
             routing_hint: None,
@@ -1024,7 +1024,7 @@ async fn skill_prompt_context_survives_compaction_and_resume() {
         Arc::new(PolicyEngine::new()),
     ));
     let controller = AutoApprovingHttpController::new(effects.clone());
-    mgr.set_gate_controller(controller as Arc<dyn ironclaw_engine::GateController>)
+    mgr.set_gate_controller(controller as Arc<dyn t3claw_engine::GateController>)
         .await;
 
     let tid = mgr

@@ -37,7 +37,7 @@ env:
   # Linux Secret Service). Guarded by src/secrets/keychain.rs::os_keychain_suppressed:
   # cfg!(test) covers unit tests; this covers integration/e2e that link the
   # non-cfg(test) library.
-  IRONCLAW_DISABLE_OS_KEYCHAIN: "1"
+  T3CLAW_DISABLE_OS_KEYCHAIN: "1"
 
 jobs:
   changes:
@@ -100,13 +100,13 @@ jobs:
                   [
                     .packages[]
                     | select(
-                        (.name | startswith("ironclaw_reborn"))
-                        or (.name | startswith("ironclaw_product"))
-                        or (.name == "ironclaw_architecture")
-                        or (.name == "ironclaw_slack_v2_adapter")
-                        or (.name == "ironclaw_telegram_v2_adapter")
-                        or (.name == "ironclaw_wasm_product_adapters")
-                        or (.name | startswith("ironclaw_webui_v2"))
+                        (.name | startswith("t3claw_reborn"))
+                        or (.name | startswith("t3claw_product"))
+                        or (.name == "t3claw_architecture")
+                        or (.name == "t3claw_slack_v2_adapter")
+                        or (.name == "t3claw_telegram_v2_adapter")
+                        or (.name == "t3claw_wasm_product_adapters")
+                        or (.name | startswith("t3claw_webui_v2"))
                       )
                     | .name
                   ]

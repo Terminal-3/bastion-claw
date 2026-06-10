@@ -98,7 +98,7 @@ mod cleanup_tests {
 
     #[test]
     fn cleanup_guard_removes_file() {
-        let path = "/tmp/ironclaw_cleanup_guard_test.txt";
+        let path = "/tmp/t3claw_cleanup_guard_test.txt";
         std::fs::write(path, "test").unwrap();
         {
             let _guard = CleanupGuard::new().file(path);
@@ -109,7 +109,7 @@ mod cleanup_tests {
 
     #[test]
     fn cleanup_guard_removes_dir() {
-        let dir = "/tmp/ironclaw_cleanup_guard_test_dir";
+        let dir = "/tmp/t3claw_cleanup_guard_test_dir";
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(format!("{dir}/file.txt"), "test").unwrap();
         {
@@ -121,7 +121,7 @@ mod cleanup_tests {
 
     #[test]
     fn cleanup_guard_file_does_not_remove_dir() {
-        let dir = "/tmp/ironclaw_cleanup_guard_file_not_dir";
+        let dir = "/tmp/t3claw_cleanup_guard_file_not_dir";
         std::fs::create_dir_all(dir).unwrap();
         {
             // Registering a directory path as .file() should not remove it
@@ -146,7 +146,7 @@ mod test_channel_tests {
     use std::time::Duration;
 
     use crate::support::test_channel::TestChannel;
-    use ironclaw::channels::{Channel, IncomingMessage, OutgoingResponse, StatusUpdate};
+    use t3claw::channels::{Channel, IncomingMessage, OutgoingResponse, StatusUpdate};
 
     #[tokio::test]
     async fn send_and_receive_message() {
@@ -362,41 +362,41 @@ mod reborn_support_tests {
     };
 
     use async_trait::async_trait;
-    use ironclaw_filesystem::ScopedFilesystem;
-    use ironclaw_host_api::{
+    use t3claw_filesystem::ScopedFilesystem;
+    use t3claw_host_api::{
         AgentId, CapabilityId, InvocationId, MountAlias, MountGrant, MountPermissions, MountView,
         NetworkMethod, NetworkPolicy, NetworkTargetPattern, ProjectId, ResourceScope, TenantId,
         ThreadId, UserId, VirtualPath,
     };
-    use ironclaw_loop_support::{
+    use t3claw_loop_support::{
         HostManagedModelErrorKind, HostManagedModelGateway, HostManagedModelMessage,
         HostManagedModelMessageRole, HostManagedModelRequest, HostManagedModelResponse,
         HostManagedToolResultContent,
     };
-    use ironclaw_network::{
+    use t3claw_network::{
         NetworkHttpEgress, NetworkHttpError, NetworkHttpRequest, NetworkHttpResponse,
         NetworkHttpTransport, NetworkResolver, NetworkTransportRequest, NetworkUsage,
         PolicyNetworkHttpEgress,
     };
-    use ironclaw_product_adapters::{
+    use t3claw_product_adapters::{
         AuthRequirement, DeliveryStatus, ExternalConversationRef, FakeProjectionStream,
         FakeProtocolHttpEgress, FinalReplyView, OutboundDeliverySink, ProductAdapter,
         ProductAdapterError, ProductInboundAck, ProductOutboundEnvelope, ProductOutboundPayload,
         ProductOutboundTarget, ProductProjectionItem, ProductProjectionState, ProductRenderOutcome,
         ProductWorkflow, ProjectionCursor, ProjectionStream, ProtocolAuthEvidence,
     };
-    use ironclaw_product_workflow::{
+    use t3claw_product_workflow::{
         ActionDispatchKind, ActionFingerprintKey, ConversationBindingService,
         DefaultInboundTurnService, DefaultProductWorkflow, IdempotencyDecision, IdempotencyLedger,
         InboundTurnService, ProductActionId, ProductConversationRouteKind, ProductWorkflowError,
         ResolveBindingRequest, SourceBindingKey,
     };
-    use ironclaw_threads::{
+    use t3claw_threads::{
         AcceptInboundMessageRequest, AppendAssistantDraftRequest, EnsureThreadRequest,
         MessageContent, ProviderToolCallReferenceEnvelope, SessionThreadService, ThreadScope,
         ToolResultSafeSummary,
     };
-    use ironclaw_turns::{
+    use t3claw_turns::{
         CancelRunRequest, CancelRunResponse, GetRunStateRequest, LoopMessageRef,
         ReplyTargetBindingRef, ResumeTurnRequest, ResumeTurnResponse, RunProfileId,
         RunProfileVersion, SubmitTurnRequest, SubmitTurnResponse, ThreadBusy, TurnCoordinator,
@@ -1383,7 +1383,7 @@ mod reborn_support_tests {
         let ledger = harness.idempotency_ledger();
         let received_at = chrono::Utc::now();
 
-        let missing = ironclaw_product_workflow::ProductInboundAction::begin(
+        let missing = t3claw_product_workflow::ProductInboundAction::begin(
             fingerprint_for("event-missing", "alice", "room-1"),
             received_at,
         );
@@ -1750,7 +1750,7 @@ mod reborn_support_tests {
         assert_eq!(parsed.external_event_id.as_str(), "event-1");
 
         let failed =
-            ProtocolAuthEvidence::failed(ironclaw_product_adapters::ProtocolAuthFailure::Missing);
+            ProtocolAuthEvidence::failed(t3claw_product_adapters::ProtocolAuthFailure::Missing);
         assert!(adapter.parse_inbound(&raw, &failed).is_err());
     }
 
@@ -2339,7 +2339,7 @@ mod reborn_support_tests {
         user_id: &str,
         thread_id: &str,
         text: &str,
-    ) -> ironclaw_product_adapters::ProductInboundEnvelope {
+    ) -> t3claw_product_adapters::ProductInboundEnvelope {
         let adapter = RebornTestProductAdapter::new("reborn-test", "install-1").expect("adapter");
         RebornTestIngress::new(adapter)
             .verified_text_envelope(event_id, user_id, thread_id, text)
@@ -2488,7 +2488,7 @@ mod reborn_support_tests {
 
 mod trace_llm_tests {
     use crate::support::trace_llm::*;
-    use ironclaw_llm::{
+    use t3claw_llm::{
         ChatMessage, CompletionRequest, FinishReason, LlmProvider, ToolCompletionRequest,
     };
 

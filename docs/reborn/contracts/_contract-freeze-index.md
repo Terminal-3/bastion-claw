@@ -40,7 +40,7 @@ If a task needs to change one of those answers, it is not implementation work; i
 | Memory layers | Include in V1, but layer scopes must be namespaced and non-colliding with raw user IDs. |
 | Prompt context | Prompt-injection write safety is kernel-mediated policy; prompt assembly is loop/userland strategy over authorized memory reads. |
 | Secrets | Typed encrypted secret repository is production source of truth; file views are redacted projections/reference only. |
-| Network | All host/provider HTTP goes through `ironclaw_network`. |
+| Network | All host/provider HTTP goes through `t3claw_network`. |
 | Events/projections | Durable append log plus scoped replay cursors are substrate dependencies; projections and SSE/WebSocket transports build on that substrate. |
 | Resources | V1 reserves/enforces runtime/process, network, embeddings/providers, and artifacts/storage quotas. |
 | Settings/extensions/skills | Typed repositories are source of truth with optional `/system/...` file projections. |
@@ -125,7 +125,7 @@ Current implemented/partial substrate called out there includes:
 
 - host API vocabulary and neutral dispatch contracts;
 - root/scoped/composite filesystem surfaces and DB-backed root filesystem backends;
-- `ironclaw_memory` backend/filesystem adapter, DB repositories, metadata/search, embeddings, and plugin seam;
+- `t3claw_memory` backend/filesystem adapter, DB repositories, metadata/search, embeddings, and plugin seam;
 - extension discovery/registry contracts;
 - resource governor primitives;
 - secret metadata/encryption/leases plus filesystem-backed repository reference;
@@ -181,7 +181,7 @@ Goal: make docs explicit enough that implementation tasks do not need architectu
 Tasks:
 
 1. Ratify the kernel/userland boundary and trust-class policy from [`kernel-boundary.md`](kernel-boundary.md).
-2. Add `AgentId` to `ironclaw_host_api` scope/resource/event shapes.
+2. Add `AgentId` to `t3claw_host_api` scope/resource/event shapes.
 3. Finalize `RootFilesystem::append_file`, `RootFilesystem::delete`, and `RootFilesystem::create_dir_all` semantics.
 4. Ratify memory service trait shapes from [`memory.md`](memory.md), including the split between prompt safety policy and prompt assembly strategy.
 5. Ratify durable event cursor envelope from [`events-projections.md`](events-projections.md).
@@ -193,13 +193,13 @@ Can run in parallel after their direct Level 0 contract dependencies are accepte
 
 | Task | Main contract | Primary crate(s) | Direct blockers |
 | --- | --- | --- | --- |
-| Filesystem V1 ops | `filesystem.md` | `ironclaw_filesystem` | filesystem ops semantics |
-| AgentId propagation | `host-api.md`, `storage-placement.md` | `ironclaw_host_api`, all scope stores | global scope model |
-| Typed secret repository | `secrets.md` | `ironclaw_secrets` | storage/source-of-truth rules |
-| Network provider client boundary | `network.md` | `ironclaw_network`, provider crates | network boundary contract |
-| Durable event log/cursors | `events-projections.md` | `ironclaw_events`, web gateway later | cursor envelope and redaction rules |
-| Resource reservation expansion | `resources.md` | `ironclaw_resources`, capabilities/processes/network | resource scope and lifecycle ownership |
-| Extension lifecycle state machine | `extensions.md` | `ironclaw_extensions` | lifecycle states/transitions |
+| Filesystem V1 ops | `filesystem.md` | `t3claw_filesystem` | filesystem ops semantics |
+| AgentId propagation | `host-api.md`, `storage-placement.md` | `t3claw_host_api`, all scope stores | global scope model |
+| Typed secret repository | `secrets.md` | `t3claw_secrets` | storage/source-of-truth rules |
+| Network provider client boundary | `network.md` | `t3claw_network`, provider crates | network boundary contract |
+| Durable event log/cursors | `events-projections.md` | `t3claw_events`, web gateway later | cursor envelope and redaction rules |
+| Resource reservation expansion | `resources.md` | `t3claw_resources`, capabilities/processes/network | resource scope and lifecycle ownership |
+| Extension lifecycle state machine | `extensions.md` | `t3claw_extensions` | lifecycle states/transitions |
 | Trust-class policy engine | `kernel-boundary.md`, `host-api.md`, `extensions.md` | host policy/composition + extension registry | trust assignment, upgrade, revocation, grant ceilings |
 
 `Durable event log/cursors` is a substrate dependency, not merely a web feature. It gives parallel implementation agents a typed, replayable surface for caller-level tests and cross-component debugging. SSE/WebSocket transport can remain downstream product integration over this substrate.
@@ -248,10 +248,10 @@ Legacy `src/` feature additions are a drift risk while Reborn is being built. Th
 - Raw secrets, host paths, unapproved input/output, approval reasons, lease contents, and backend error details must not appear in user-facing errors/events/audit.
 - Tenant/user/project/agent scope must flow through persistence, resources, events, approvals, leases, processes, results, outputs, secrets, network, runtime boundaries, and memory routing.
 - PostgreSQL/libSQL parity is required for production persistence behavior unless a contract explicitly says a backend is unsupported.
-- `ironclaw_filesystem` remains generic and must not learn memory-domain path grammar.
+- `t3claw_filesystem` remains generic and must not learn memory-domain path grammar.
 - Prompt-injection write safety is kernel-mediated policy; prompt assembly strategy belongs to the active loop over authorized memory reads.
-- `ironclaw_memory` owns memory path grammar, memory backend plugin contracts, metadata/search/indexing, and prompt-context policy hooks.
-- Provider HTTP and embedding/memory adapter network calls must go through `ironclaw_network`.
+- `t3claw_memory` owns memory path grammar, memory backend plugin contracts, metadata/search/indexing, and prompt-context policy hooks.
+- Provider HTTP and embedding/memory adapter network calls must go through `t3claw_network`.
 - Trust class is an authority ceiling and assignment policy input, not a permission grant or kernel bypass.
 - Shipped and user-installed loops both run on the kernel surface and must use mediated grants, mounts, leases, resources, and obligations.
 

@@ -24,9 +24,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use ironclaw::context::{ActionRecord, JobContext};
-use ironclaw::db::Database;
-use ironclaw::tools::{ToolError, ToolOutput, ToolRegistry};
+use t3claw::context::{ActionRecord, JobContext};
+use t3claw::db::Database;
+use t3claw::tools::{ToolError, ToolOutput, ToolRegistry};
 
 /// An ordered sequence of tool invocations with expected outcomes.
 ///

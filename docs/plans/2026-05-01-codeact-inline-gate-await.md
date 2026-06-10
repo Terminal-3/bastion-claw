@@ -16,7 +16,7 @@ Error: RuntimeError: execution paused by gate 'approval'
 instead of an approval prompt. The script aborts, the gate is never
 surfaced to the user.
 
-Concretely: in `crates/ironclaw_engine/src/executor/scripting.rs`, the
+Concretely: in `crates/t3claw_engine/src/executor/scripting.rs`, the
 async tool-resolve path (`resolve_tool_future`, line 1740-1766) catches
 `Err(EngineError::GatePaused { .. })` from `EffectExecutor::execute_action`,
 emits an `ApprovalRequested` event, and converts the gate to a
@@ -44,7 +44,7 @@ the gated one** in the same script.
 ## Non-goals
 
 - Monty VM serialization across process restarts. Out of scope.
-- Surviving an IronClaw process restart while a CodeAct gate is
+- Surviving an T3Claw process restart while a CodeAct gate is
   pending. Accepted loss: stranded gates expire after 30 min and the
   user retries.
 - Combining multiple parallel gate prompts into one approval card.
@@ -61,7 +61,7 @@ exact suspension point. No replay, no restart, no double execution.
 ### Core mechanism: a `GateController` callback on `ThreadExecutionContext`
 
 ```rust
-// crates/ironclaw_engine/src/gate/mod.rs
+// crates/t3claw_engine/src/gate/mod.rs
 
 #[derive(Debug, Clone)]
 pub struct GatePauseRequest {
@@ -293,7 +293,7 @@ scope for this PR.
 
 ### Restart behavior
 
-If IronClaw restarts while a CodeAct gate is pending:
+If T3Claw restarts while a CodeAct gate is pending:
 
 - The DB-stored `PendingGate` still exists.
 - The in-memory `oneshot::Sender` is gone.
@@ -382,7 +382,7 @@ need to deliver it back to the suspended call).
 
 ## Restart semantics
 
-If IronClaw restarts while an `Approval` gate is pending:
+If T3Claw restarts while an `Approval` gate is pending:
 
 - DB-stored `PendingGate` row still exists.
 - In-memory `oneshot::Sender` is gone.
@@ -466,7 +466,7 @@ recording so a future reader doesn't get confused:
 ## Build order
 
 1. `GatePauseRequest` / `GateController` / `CancellingGateController`
-   in `crates/ironclaw_engine/src/gate/mod.rs`. Required field
+   in `crates/t3claw_engine/src/gate/mod.rs`. Required field
    (`Arc<dyn GateController>`, not `Option`) on
    `traits/effect.rs::ThreadExecutionContext`. Restricted to
    `Approval` resume-kind for this PR.

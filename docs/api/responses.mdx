@@ -1,10 +1,10 @@
 ---
 title: "Responses API"
-description: "OpenAI-compatible Responses endpoint backed by the full IronClaw agent loop"
+description: "OpenAI-compatible Responses endpoint backed by the full T3Claw agent loop"
 icon: "code"
 ---
 
-IronClaw exposes an OpenAI-compatible Responses API. Unlike a raw LLM passthrough, requests route through the full agent loop, so callers get tools, memory, safety, and server-side conversation state via a standard wire format.
+T3Claw exposes an OpenAI-compatible Responses API. Unlike a raw LLM passthrough, requests route through the full agent loop, so callers get tools, memory, safety, and server-side conversation state via a standard wire format.
 
 ```
 POST /api/v1/responses
@@ -17,10 +17,10 @@ The legacy `/v1/responses` path is still accepted as an alias for clients pinned
 
 | Endpoint | Behavior |
 |----------|----------|
-| `/api/v1/responses` | Routes through the agent. The model can call IronClaw tools (file, web, memory, MCP, extensions), retain conversation state via `previous_response_id`, and pause for caller-supplied tools. |
+| `/api/v1/responses` | Routes through the agent. The model can call T3Claw tools (file, web, memory, MCP, extensions), retain conversation state via `previous_response_id`, and pause for caller-supplied tools. |
 | `/v1/chat/completions` | Raw LLM proxy. No tools, no memory, no agent loop. Use it when you only need a model call. |
 
-If you want IronClaw's capabilities behind an OpenAI-shaped wire contract, this is the endpoint.
+If you want T3Claw's capabilities behind an OpenAI-shaped wire contract, this is the endpoint.
 
 ---
 
@@ -38,7 +38,7 @@ You have two options:
   <Tab title="Gateway token (single-user)">
     For single-user deployments, set `GATEWAY_AUTH_TOKEN` in the environment. The same token authenticates the web UI, the Telegram bridge, and the Responses API.
 
-    If `GATEWAY_AUTH_TOKEN` is not set, IronClaw generates 32 random bytes and prints the hex-encoded value (64 characters) to the console on boot.
+    If `GATEWAY_AUTH_TOKEN` is not set, T3Claw generates 32 random bytes and prints the hex-encoded value (64 characters) to the console on boot.
 
     ```bash
     export GATEWAY_AUTH_TOKEN="your-secure-token"
@@ -139,11 +139,11 @@ print(resp.output_text)
 |-------|----------|-------------|
 | `input` | yes | A string, or an array of `message` / `function_call_output` items. See [External tools](#external-tools) for the array form. |
 | `model` | no | Must be `"default"`. Per-request model override is not yet supported; configure providers via settings. |
-| `instructions` | no | System/developer instructions. Injected ahead of `input` as an `<instructions>` block and stored as part of the persisted user message. See [Per-request instructions](#per-request-instructions) for the IronClaw-specific replay caveat. |
+| `instructions` | no | System/developer instructions. Injected ahead of `input` as an `<instructions>` block and stored as part of the persisted user message. See [Per-request instructions](#per-request-instructions) for the T3Claw-specific replay caveat. |
 | `previous_response_id` | no | The `id` from a prior response. Resumes the same thread; see [Session continuity](#session-continuity). |
 | `stream` | no | `true` for SSE; `false` (default) for a single JSON response. |
 | `tools` | no | Caller-supplied function tools. See [External tools](#external-tools). |
-| `x_context` | no | IronClaw extension. Structured JSON context (≤ 10 KB) prepended as `<user-context>`. The alias `context` is also accepted but may collide with future OpenAI fields. Prefer `x_context`. |
+| `x_context` | no | T3Claw extension. Structured JSON context (≤ 10 KB) prepended as `<user-context>`. The alias `context` is also accepted but may collide with future OpenAI fields. Prefer `x_context`. |
 
 These fields are rejected with `400` so callers know they were ignored rather than silently dropped:
 
@@ -165,7 +165,7 @@ Each response embeds its thread UUID in the `id`. Pass the previous `id` back as
 }
 ```
 
-IronClaw replays the thread's history from the conversation store and runs the new turn against it. There is no client-side state to manage. Threads are user-scoped, so a token belonging to a different user cannot resume someone else's thread (the lookup returns `404`).
+T3Claw replays the thread's history from the conversation store and runs the new turn against it. There is no client-side state to manage. Threads are user-scoped, so a token belonging to a different user cannot resume someone else's thread (the lookup returns `404`).
 
 Each POST mints a fresh `response_uuid`, so two turns on the same thread produce different `id`s.
 
@@ -242,9 +242,9 @@ External tools require **engine v2** to be enabled on the server (`ENGINE_V2=tru
 
 Constraints (validated up-front, `400` on violation):
 
-- Only `type: "function"` is accepted. `web_search`, `file_search`, `code_interpreter`, etc. are rejected. IronClaw routes those through its own registry, not caller-provided definitions.
+- Only `type: "function"` is accepted. `web_search`, `file_search`, `code_interpreter`, etc. are rejected. T3Claw routes those through its own registry, not caller-provided definitions.
 - Names: `^[A-Za-z0-9_-]{1,64}$`, unique within the request.
-- Names must not shadow a registered IronClaw action (built-in tool, extension tool, or engine v2 capability like `mission_*`, `skill_*`, `memory_*`). Shadowing is rejected to prevent confused-deputy behavior.
+- Names must not shadow a registered T3Claw action (built-in tool, extension tool, or engine v2 capability like `mission_*`, `skill_*`, `memory_*`). Shadowing is rejected to prevent confused-deputy behavior.
 - The entire `tools[]` payload caps at 16 KiB of canonical JSON.
 
 ### The round trip
@@ -342,7 +342,7 @@ For integrations that need to pass structured state alongside the user message (
 
 The handler renders it as a `<user-context>` block ahead of the user message. Total serialized size caps at 10 KB. Pass a flat `{key: {object}}` structure; deeper nesting is serialized as raw JSON.
 
-`x_context` is an IronClaw extension and is not part of the OpenAI Responses API spec.
+`x_context` is an T3Claw extension and is not part of the OpenAI Responses API spec.
 
 ---
 
@@ -357,7 +357,7 @@ Use `instructions` to inject a one-turn system/developer message:
 }
 ```
 
-**IronClaw caveat — diverges from the OpenAI spec.** The OpenAI Responses API contract is that `instructions` apply only to the current turn and are not carried by `previous_response_id`. IronClaw currently prepends the `<instructions>` block into the user message and persists it as part of the conversation, so it *is* visible on later turns when history is replayed. Until the handler stores instructions out-of-band, treat them as sticky for the thread and re-send (or override) them explicitly on each turn that needs different behaviour.
+**T3Claw caveat — diverges from the OpenAI spec.** The OpenAI Responses API contract is that `instructions` apply only to the current turn and are not carried by `previous_response_id`. T3Claw currently prepends the `<instructions>` block into the user message and persists it as part of the conversation, so it *is* visible on later turns when history is replayed. Until the handler stores instructions out-of-band, treat them as sticky for the thread and re-send (or override) them explicitly on each turn that needs different behaviour.
 
 The agent's persistent identity files (`AGENTS.md`, `SOUL.md`, `USER.md`, `IDENTITY.md`) come from workspace memory and are not affected by this field.
 
@@ -398,7 +398,7 @@ The Responses API does **not** support interactive approvals or authentication g
 
 ## SDK usage
 
-The OpenAI SDKs are the easiest way to use this endpoint. Point them at IronClaw and they "just work":
+The OpenAI SDKs are the easiest way to use this endpoint. Point them at T3Claw and they "just work":
 
 <CodeGroup>
 
@@ -462,7 +462,7 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   baseURL: "https://your-host/api/v1",
-  apiKey: process.env.IRONCLAW_TOKEN,
+  apiKey: process.env.T3CLAW_TOKEN,
 });
 
 const resp = await client.responses.create({
@@ -520,5 +520,5 @@ if (call) {
 
 - [Inference Providers](/capabilities/llm-providers) — configure the model that backs `"default"`.
 - [Configuration](/capabilities/configuration) — `GATEWAY_AUTH_TOKEN`, engine v2, body and rate limits.
-- [Sandboxed Tools](/capabilities/sandboxed-tools) — how IronClaw's built-in tools execute when the agent calls them.
+- [Sandboxed Tools](/capabilities/sandboxed-tools) — how T3Claw's built-in tools execute when the agent calls them.
 - [MCP](/capabilities/mcp) — connect Model Context Protocol servers to extend the agent's tool surface server-side instead of supplying caller tools per-request.

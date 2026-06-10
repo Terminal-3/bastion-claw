@@ -6,7 +6,7 @@
 //! filesystem/shell calls into JSON-RPC requests for the daemon running
 //! inside the project's container.
 //!
-//! Path semantics are identical to [`ironclaw_engine::workspace::FilesystemBackend`]:
+//! Path semantics are identical to [`t3claw_engine::workspace::FilesystemBackend`]:
 //! the backend receives **relative** paths (the bridge interceptor strips
 //! the `/project/` prefix before calling). The daemon's tools are configured
 //! with `base_dir = /project/`, so the relative path is re-anchored at
@@ -17,9 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ironclaw_engine::workspace::{DirEntry, EntryKind, ShellOutput};
-use ironclaw_engine::{MountBackend, MountError};
 use serde_json::Value;
+use t3claw_engine::workspace::{DirEntry, EntryKind, ShellOutput};
+use t3claw_engine::{MountBackend, MountError};
 use uuid::Uuid;
 
 use super::protocol::{Request, Response, RpcError};
@@ -96,7 +96,7 @@ fn unwrap_tool_response(tool: &str, response: Response) -> Result<Value, MountEr
 }
 
 /// Map daemon RPC errors to [`MountError`] so the bridge surfaces them
-/// consistently with the [`ironclaw_engine::workspace::FilesystemBackend`] equivalents.
+/// consistently with the [`t3claw_engine::workspace::FilesystemBackend`] equivalents.
 fn map_rpc_error(tool: &str, err: RpcError) -> MountError {
     match err.code.as_str() {
         "tool_error" if err.message.contains("not found") || err.message.contains("No such") => {

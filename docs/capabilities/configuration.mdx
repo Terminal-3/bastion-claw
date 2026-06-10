@@ -1,10 +1,10 @@
 ---
 title: Configuration
 sidebarTitle: Configuration
-description: Common operator configuration reference for IronClaw
+description: Common operator configuration reference for T3Claw
 ---
 
-IronClaw is configured through bootstrap environment variables, database-backed settings, and a small set of advanced or provider-specific environment variables. This page documents the primary options used during setup and normal operation.
+T3Claw is configured through bootstrap environment variables, database-backed settings, and a small set of advanced or provider-specific environment variables. This page documents the primary options used during setup and normal operation.
 
 <Info>
 This operator-focused reference is checked against the current `src/config/` modules and `providers.json`. Test-only variables, one-off debugging hooks, and lower-level runtime internals may still exist outside this page; when changing configuration behavior, treat `src/config/`, `providers.json`, and `src/setup/README.md` as the source of truth.
@@ -12,10 +12,10 @@ This operator-focused reference is checked against the current `src/config/` mod
 
 ## Two-Layer Configuration
 
-IronClaw uses a two-layer configuration system:
+T3Claw uses a two-layer configuration system:
 
 <AccordionGroup>
-  <Accordion title="Layer 1: ~/.ironclaw/.env (Bootstrap)" icon="file">
+  <Accordion title="Layer 1: ~/.t3claw/.env (Bootstrap)" icon="file">
     Contains settings needed **before** database connection:
 
     - `DATABASE_BACKEND` — Which database to use
@@ -36,7 +36,7 @@ IronClaw uses a two-layer configuration system:
     - Skills configuration
     - Heartbeat settings
 
-    Some security-sensitive and advanced options remain environment-only. Manage database-backed values through the wizard or `ironclaw config` command.
+    Some security-sensitive and advanced options remain environment-only. Manage database-backed values through the wizard or `t3claw config` command.
   </Accordion>
 </AccordionGroup>
 
@@ -72,7 +72,7 @@ IronClaw uses a two-layer configuration system:
   </Card>
 
   <Card title="Security" icon="shield" href="#security">
-    SECRETS_MASTER_KEY, IRONCLAW_BASE_DIR
+    SECRETS_MASTER_KEY, T3CLAW_BASE_DIR
   </Card>
 </CardGroup>
 
@@ -80,7 +80,7 @@ IronClaw uses a two-layer configuration system:
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AGENT_NAME` | string | `ironclaw` | Agent name displayed in responses |
+| `AGENT_NAME` | string | `t3claw` | Agent name displayed in responses |
 | `AGENT_MAX_PARALLEL_JOBS` | int | `5` | Maximum concurrent jobs |
 | `AGENT_JOB_TIMEOUT_SECS` | int | `3600` | Job timeout in seconds (1 hour) |
 | `AGENT_STUCK_THRESHOLD_SECS` | int | `300` | Time before job considered stuck (5 min) |
@@ -102,7 +102,7 @@ IronClaw uses a two-layer configuration system:
 | `DATABASE_URL` | string | — | PostgreSQL connection URL |
 | `DATABASE_POOL_SIZE` | int | `30` | Connection pool size |
 | `DATABASE_SSLMODE` | enum | `prefer` | TLS mode: `disable`, `prefer`, `require` |
-| `LIBSQL_PATH` | path | `~/.ironclaw/ironclaw.db` | libSQL database file |
+| `LIBSQL_PATH` | path | `~/.t3claw/t3claw.db` | libSQL database file |
 | `LIBSQL_URL` | URL | — | Turso cloud sync URL |
 | `LIBSQL_AUTH_TOKEN` | string | — | Turso auth token |
 
@@ -110,7 +110,7 @@ IronClaw uses a two-layer configuration system:
 
 ```bash
 export DATABASE_BACKEND=postgres
-export DATABASE_URL="postgres://user:pass@localhost/ironclaw"
+export DATABASE_URL="postgres://user:pass@localhost/t3claw"
 export DATABASE_SSLMODE=require
 ```
 
@@ -118,14 +118,14 @@ export DATABASE_SSLMODE=require
 
 ```bash
 export DATABASE_BACKEND=libsql
-export LIBSQL_PATH="/home/user/.ironclaw/ironclaw.db"
+export LIBSQL_PATH="/home/user/.t3claw/t3claw.db"
 ```
 
 ### Turso Example
 
 ```bash
 export DATABASE_BACKEND=libsql
-export LIBSQL_PATH="/home/user/.ironclaw/ironclaw.db"
+export LIBSQL_PATH="/home/user/.t3claw/t3claw.db"
 export LIBSQL_URL="libsql://your-db.turso.io"
 export LIBSQL_AUTH_TOKEN="your-auth-token"
 ```
@@ -213,7 +213,7 @@ The HTTP webhook binds to `127.0.0.1:8080` by default. To receive webhooks from 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `WASM_CHANNELS_ENABLED` | bool | `true` | Enable WASM channels |
-| `WASM_CHANNELS_DIR` | path | `~/.ironclaw/channels` | Channel modules directory |
+| `WASM_CHANNELS_DIR` | path | `~/.t3claw/channels` | Channel modules directory |
 | `TELEGRAM_OWNER_ID` | int | — | Telegram owner user ID (legacy) |
 
 ### Signal
@@ -247,7 +247,7 @@ The HTTP webhook binds to `127.0.0.1:8080` by default. To receive webhooks from 
 | `SANDBOX_TIMEOUT_SECS` | int | `120` | Command timeout |
 | `SANDBOX_MEMORY_LIMIT_MB` | int | `2048` | Memory limit per container |
 | `SANDBOX_CPU_SHARES` | int | `1024` | CPU shares (relative weight) |
-| `SANDBOX_IMAGE` | string | `ironclaw-worker:latest` | Docker image |
+| `SANDBOX_IMAGE` | string | `t3claw-worker:latest` | Docker image |
 | `SANDBOX_AUTO_PULL` | bool | `true` | Auto-pull missing images |
 | `SANDBOX_EXTRA_DOMAINS` | list | — | Additional allowed domains |
 
@@ -290,8 +290,8 @@ The HTTP webhook binds to `127.0.0.1:8080` by default. To receive webhooks from 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SECRETS_MASTER_KEY` | string | — | Master key for encryption (env var mode) |
-| `IRONCLAW_BASE_DIR` | path | `~/.ironclaw` | Data directory |
-| `IRONCLAW_OAUTH_CALLBACK_URL` | URL | `http://127.0.0.1:9876` | OAuth callback URL |
+| `T3CLAW_BASE_DIR` | path | `~/.t3claw` | Data directory |
+| `T3CLAW_OAUTH_CALLBACK_URL` | URL | `http://127.0.0.1:9876` | OAuth callback URL |
 
 ## Provider Registry Variables
 
@@ -492,7 +492,7 @@ These variables are resolved by the current `src/config/` modules but are less c
 | `TUNNEL_CUSTOM_HEALTH_URL` | Custom tunnel health URL. |
 | `CHANNEL_RELAY_URL` | External channel relay URL. |
 | `CHANNEL_RELAY_API_KEY` | External channel relay API key. |
-| `IRONCLAW_INSTANCE_ID` | Relay instance ID. |
+| `T3CLAW_INSTANCE_ID` | Relay instance ID. |
 | `RELAY_WEBHOOK_PATH` | Relay webhook path. |
 | `RELAY_REQUEST_TIMEOUT_SECS` | Relay request timeout. |
 | `TRANSCRIPTION_ENABLED` | Enables transcription. |
@@ -511,24 +511,24 @@ These variables are resolved by the current `src/config/` modules but are less c
 
 | Variable | Description |
 |----------|-------------|
-| `IRONCLAW_BASE_DIR` | Overrides the IronClaw data directory. |
-| `IRONCLAW_OWNER_ID` | Stable owner scope for the instance. |
-| `IRONCLAW_PROFILE` | Built-in profile selected during onboarding. |
-| `IRONCLAW_OAUTH_CALLBACK_URL` | OAuth callback URL used by auth flows. |
+| `T3CLAW_BASE_DIR` | Overrides the T3Claw data directory. |
+| `T3CLAW_OWNER_ID` | Stable owner scope for the instance. |
+| `T3CLAW_PROFILE` | Built-in profile selected during onboarding. |
+| `T3CLAW_OAUTH_CALLBACK_URL` | OAuth callback URL used by auth flows. |
 | `NEARAI_SESSION_TOKEN` | NEAR AI session token; takes precedence over session file. |
-| `IRONCLAW_PID_LOCK_PATH` | Process PID lock path override. |
-| `IRONCLAW_PID_LOCK_HOLD_MS` | PID lock hold duration. |
-| `IRONCLAW_PID_LOCK_CHILD` | Internal child-process PID lock marker. |
+| `T3CLAW_PID_LOCK_PATH` | Process PID lock path override. |
+| `T3CLAW_PID_LOCK_HOLD_MS` | PID lock hold duration. |
+| `T3CLAW_PID_LOCK_CHILD` | Internal child-process PID lock marker. |
 
 
 ## Environment File Example
 
-Create `~/.ironclaw/.env`:
+Create `~/.t3claw/.env`:
 
 ```bash
 # Database
 DATABASE_BACKEND=libsql
-LIBSQL_PATH=/home/user/.ironclaw/ironclaw.db
+LIBSQL_PATH=/home/user/.t3claw/t3claw.db
 
 # LLM (NEAR AI)
 LLM_BACKEND=nearai
@@ -554,16 +554,16 @@ HEARTBEAT_INTERVAL_SECS=1800
 
 ```bash
 # View current config
-ironclaw config list
+t3claw config list
 
 # Get specific value
-ironclaw config get llm.backend
+t3claw config get llm.backend
 
 # Set value
-ironclaw config set llm.backend nearai
+t3claw config set llm.backend nearai
 
 # Delete value (reset to default)
-ironclaw config delete llm.backend
+t3claw config delete llm.backend
 ```
 
 ## Next Steps

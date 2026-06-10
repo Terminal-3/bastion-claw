@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use ironclaw_engine::{
+use t3claw_engine::{
     ActionDef, ActionDiscoveryMetadata, ActionDiscoverySummary, ActionInventory, CapabilityLease,
     CapabilityRegistry, CapabilityStatus, EngineError, ModelToolSurface, ThreadExecutionContext,
 };
@@ -340,7 +340,7 @@ mod tests {
     use std::collections::HashMap;
 
     use async_trait::async_trait;
-    use ironclaw_engine::{ActionInventory, ModelToolSurface, ThreadExecutionContext};
+    use t3claw_engine::{ActionInventory, ModelToolSurface, ThreadExecutionContext};
 
     use super::{
         ActionProjector, default_model_tool_surface, project_tool_action, provider_extension_status,
@@ -560,7 +560,7 @@ mod tests {
         permission: crate::tools::permissions::PermissionState,
     ) -> ActionInventory {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-action-projector-permissions-{}.db",
+            "t3claw-action-projector-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -595,7 +595,7 @@ mod tests {
         permission: crate::tools::permissions::PermissionState,
     ) -> ActionInventory {
         let db_path = std::env::temp_dir().join(format!(
-            "ironclaw-action-projector-provider-permissions-{}.db",
+            "t3claw-action-projector-provider-permissions-{}.db",
             uuid::Uuid::new_v4()
         ));
         let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
@@ -637,11 +637,11 @@ mod tests {
 
     fn test_context() -> ThreadExecutionContext {
         ThreadExecutionContext {
-            thread_id: ironclaw_engine::ThreadId::new(),
-            thread_type: ironclaw_engine::types::thread::ThreadType::Foreground,
-            project_id: ironclaw_engine::ProjectId::new(),
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
             user_id: "test_user".to_string(),
-            step_id: ironclaw_engine::StepId::new(),
+            step_id: t3claw_engine::StepId::new(),
             current_call_id: None,
             source_channel: None,
             user_timezone: None,
@@ -649,7 +649,7 @@ mod tests {
             available_actions_snapshot: None,
             available_action_inventory_snapshot: None,
             conversation_scope: None,
-            gate_controller: ironclaw_engine::CancellingGateController::arc(),
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
             call_approval_granted: false,
             conversation_id: None,
         }

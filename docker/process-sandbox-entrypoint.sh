@@ -2,20 +2,20 @@
 set -eu
 
 if [ -n "${SSL_CERT_FILE:-}" ] && [ -f "${SSL_CERT_FILE}" ]; then
-  cp "${SSL_CERT_FILE}" /usr/local/share/ca-certificates/ironclaw-broker.crt
+  cp "${SSL_CERT_FILE}" /usr/local/share/ca-certificates/t3claw-broker.crt
   update-ca-certificates >/dev/null
 fi
 
-if [ "${IRONCLAW_EGRESS_LOCKDOWN:-}" = "broker-only" ]; then
-  if [ -z "${IRONCLAW_BROKER_PROXY:-}" ]; then
-    echo "IRONCLAW_BROKER_PROXY is required for broker-only lockdown" >&2
+if [ "${T3CLAW_EGRESS_LOCKDOWN:-}" = "broker-only" ]; then
+  if [ -z "${T3CLAW_BROKER_PROXY:-}" ]; then
+    echo "T3CLAW_BROKER_PROXY is required for broker-only lockdown" >&2
     exit 65
   fi
 
-  broker_scheme="$(printf '%s' "${IRONCLAW_BROKER_PROXY}" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*).*$#\1#')"
-  broker_host="$(printf '%s' "${IRONCLAW_BROKER_PROXY}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:]+).*$#\1#')"
-  broker_port="$(printf '%s' "${IRONCLAW_BROKER_PROXY}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/:]+:([0-9]+).*$#\1#')"
-  if [ "${broker_port}" = "${IRONCLAW_BROKER_PROXY}" ]; then
+  broker_scheme="$(printf '%s' "${T3CLAW_BROKER_PROXY}" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*).*$#\1#')"
+  broker_host="$(printf '%s' "${T3CLAW_BROKER_PROXY}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:]+).*$#\1#')"
+  broker_port="$(printf '%s' "${T3CLAW_BROKER_PROXY}" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://[^/:]+:([0-9]+).*$#\1#')"
+  if [ "${broker_port}" = "${T3CLAW_BROKER_PROXY}" ]; then
     if [ "${broker_scheme}" = "https" ]; then
       broker_port=443
     else

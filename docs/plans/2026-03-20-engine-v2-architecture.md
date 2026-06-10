@@ -1,15 +1,15 @@
-# IronClaw Engine v2: Unified Thread-Capability-CodeAct Architecture
+# T3Claw Engine v2: Unified Thread-Capability-CodeAct Architecture
 
 **Date:** 2026-03-20
 **Updated:** 2026-04-21
 **Status:** Phases 1–6 complete, Phase 7 engine-side complete, Phase 8 infrastructure integration in progress. Engine v2 runs end-to-end under `ENGINE_V2=true`. Default-flip work tracked in issue #2800.
-**Goal:** Replace IronClaw's ~10 fragmented abstractions with a unified execution model built on 5 primitives: Thread, Step, Capability, MemoryDoc, Project. Developed as a standalone crate (`ironclaw_engine`) that can be swapped in when it passes all acceptance tests.
+**Goal:** Replace T3Claw's ~10 fragmented abstractions with a unified execution model built on 5 primitives: Thread, Step, Capability, MemoryDoc, Project. Developed as a standalone crate (`t3claw_engine`) that can be swapped in when it passes all acceptance tests.
 
 ---
 
 ## Motivation
 
-IronClaw currently has Session, Job, Routine, Channel, Tool, Skill, Hook, Observer, Extension, and LoopDelegate as separate abstractions. All share common patterns (lifecycle, messaging, state, capabilities) but are implemented independently. This causes:
+T3Claw currently has Session, Job, Routine, Channel, Tool, Skill, Hook, Observer, Extension, and LoopDelegate as separate abstractions. All share common patterns (lifecycle, messaging, state, capabilities) but are implemented independently. This causes:
 
 - Duplicated logic across ChatDelegate, JobDelegate, ContainerDelegate
 - Inconsistent state machines (SessionState vs JobState vs RoutineState)
@@ -51,10 +51,10 @@ IronClaw currently has Session, Job, Routine, Channel, Tool, Skill, Hook, Observ
 
 ## Crate Structure
 
-Single crate: `crates/ironclaw_engine/`
+Single crate: `crates/t3claw_engine/`
 
 ```
-crates/ironclaw_engine/
+crates/t3claw_engine/
   Cargo.toml
   CLAUDE.md
   src/
@@ -220,7 +220,7 @@ Learning is driven by trace analysis plus learning missions (`self-improvement`,
 
 ### 4.3 Compaction (from RLM) — IMPLEMENTED
 
-Compaction is orchestrator-owned, in Python. See `crates/ironclaw_engine/orchestrator/default.py:240-310`:
+Compaction is orchestrator-owned, in Python. See `crates/t3claw_engine/orchestrator/default.py:240-310`:
 
 - Triggers when token count exceeds the configured `compaction_threshold` of the model limit (defaults to 85%)
 - Calls `__llm_complete__()` to produce a summary
@@ -274,7 +274,7 @@ pub struct Mission {
 
 ### 4.9 Tool reliability learning
 
-`ReliabilityTracker` (`crates/ironclaw_engine/src/reliability.rs`) records EMA-smoothed success rate and latency per action. Proposed follow-up work tracked in issue #2800 (PR-B): wire `EffectBridgeAdapter` to record outcomes after dispatch, have `build_step_context` optionally surface a "recently unreliable actions" prompt section, and finalize any thresholds, entry caps, and feature-flag/kill-switch behavior (including a possible `ENGINE_V2_RELIABILITY_HINTS` control) once implemented.
+`ReliabilityTracker` (`crates/t3claw_engine/src/reliability.rs`) records EMA-smoothed success rate and latency per action. Proposed follow-up work tracked in issue #2800 (PR-B): wire `EffectBridgeAdapter` to record outcomes after dispatch, have `build_step_context` optionally surface a "recently unreliable actions" prompt section, and finalize any thresholds, entry caps, and feature-flag/kill-switch behavior (including a possible `ENGINE_V2_RELIABILITY_HINTS` control) once implemented.
 
 ### 4.10 Tests
 - Learning missions produce the correct knowledge artifacts from completed threads
@@ -333,7 +333,7 @@ The existing `Channel` trait stays. A bridge adapter translates:
 
 ## Phase 6: Main Crate Integration — DONE (partial)
 
-**Goal:** Bridge adapters connect the engine to existing IronClaw infrastructure. Strategy C: parallel deployment via `ENGINE_V2=true` env var.
+**Goal:** Bridge adapters connect the engine to existing T3Claw infrastructure. Strategy C: parallel deployment via `ENGINE_V2=true` env var.
 
 ### 6.1 Bridge adapters — DONE (`src/bridge/`)
 - `LlmBridgeAdapter` — wraps `Arc<dyn LlmProvider>`, converts `ThreadMessage` ↔ `ChatMessage`, `ActionDef` ↔ `ToolDefinition`. Depth-based routing (depth=0 → primary, depth>0 → `cheap_llm`). Code block detection for CodeAct (`extract_code_block` handles ```repl, ```python, ```py, bare ```). Defaults: max_tokens=4096, temperature=0.7, tool_choice="auto". No-tools path uses plain `complete()`.
@@ -351,7 +351,7 @@ Engine broadcasts `ThreadEvent`s via `tokio::broadcast`. Router subscribes and f
 `EngineState` persists across messages (OnceLock singleton). ConversationManager builds the visible conversation transcript for continuity. The orchestrator persists its mutable working transcript and intermediate execution state in `persisted_state` / internal thread transcript rather than mixing tool traces into the user-visible transcript.
 
 ### 6.5 Trace recording + retrospective — DONE
-Live trace recording is handled by the host crate's `RecordingLlm` (`IRONCLAW_RECORD_TRACE=1`) — engine v2 piggybacks on it via the shared LLM provider chain, so there is no separate engine trace file. Inside ThreadManager, retrospective trace analysis runs unconditionally after each thread completes: the analyzer detects 8 issue categories and the reflection pipeline produces Summary/Lesson/Issue/Spec/Playbook docs.
+Live trace recording is handled by the host crate's `RecordingLlm` (`T3CLAW_RECORD_TRACE=1`) — engine v2 piggybacks on it via the shared LLM provider chain, so there is no separate engine trace file. Inside ThreadManager, retrospective trace analysis runs unconditionally after each thread completes: the analyzer detects 8 issue categories and the reflection pipeline produces Summary/Lesson/Issue/Spec/Playbook docs.
 
 ### 6.6 Bugs found and fixed via traces
 - Tool name hyphens vs underscores (web-search vs web_search)
@@ -390,7 +390,7 @@ Approval, authentication, and post-action auth chaining all use the same pause/r
 #### Web gateway integration — DONE
 - SSE streaming via AppEvent: `ThreadEvent` → `AppEvent` conversion + `SseManager.broadcast()`
 - V1 conversation DB persistence: user messages + agent responses written via `add_conversation_message()`
-- Depends on `ironclaw_common` crate with `AppEvent` type (PR #1615, merged into branch)
+- Depends on `t3claw_common` crate with `AppEvent` type (PR #1615, merged into branch)
 
 #### Routines / Jobs — PARTIAL
 - `routine_create` / `routine_update` / `routine_list` / etc. are translated to mission_* dispatches via `routine_to_mission_alias()` in `src/bridge/effect_adapter.rs` before the v1-denylist check fires. The LLM-facing routine tools go through the mission manager in v2, not the v1 routine engine.
@@ -422,8 +422,8 @@ Approval, authentication, and post-action auth chaining all use the same pause/r
 
 For `WriteExternal` + `Financial` effects, the unified gate mechanism satisfies the approval invariant:
 
-- `PolicyEngine::evaluate_with_provenance` injects `RequireApproval` for `Financial` effects (via `LlmGenerated` or `ToolOutput` provenance) and `WriteExternal` effects (via `LlmGenerated` provenance) (`crates/ironclaw_engine/src/capability/policy.rs:126-169`).
-- The Tier 0 executor halts the batch on `RequireApproval` and emits `ThreadOutcome::GatePaused` (`crates/ironclaw_engine/src/executor/structured.rs:139-171`).
+- `PolicyEngine::evaluate_with_provenance` injects `RequireApproval` for `Financial` effects (via `LlmGenerated` or `ToolOutput` provenance) and `WriteExternal` effects (via `LlmGenerated` provenance) (`crates/t3claw_engine/src/capability/policy.rs:126-169`).
+- The Tier 0 executor halts the batch on `RequireApproval` and emits `ThreadOutcome::GatePaused` (`crates/t3claw_engine/src/executor/structured.rs:139-171`).
 - Resume flows through `POST /api/chat/gate/resolve` — same path as auth gates.
 
 A separate "simulate → preview → approve → execute" flow is intentionally not implemented: the gate mechanism already bounds blast radius, and a preview step would need to round-trip the effect payload through another LLM turn. If a future surface (e.g. DeFi portfolio) requires preview, it should be added at the `EffectBridgeAdapter` boundary for that specific effect, not as a policy-layer primitive.
@@ -434,7 +434,7 @@ A separate "simulate → preview → approve → execute" flow is intentionally 
 
 ### 7a. Engine-side cleanup — DONE
 
-The `ironclaw_engine` crate has no runtime dependency on `JobState`, `Session`, `Routine`, or v1 delegate types; any remaining mentions are limited to documentation/comments. The engine was built clean from day one on the five primitives (Thread, Step, Capability, MemoryDoc, Project). No migration work is needed inside the crate.
+The `t3claw_engine` crate has no runtime dependency on `JobState`, `Session`, `Routine`, or v1 delegate types; any remaining mentions are limited to documentation/comments. The engine was built clean from day one on the five primitives (Thread, Step, Capability, MemoryDoc, Project). No migration work is needed inside the crate.
 
 ### 7b. Host-side cleanup — BLOCKED ON DEFAULT FLIP
 
@@ -451,14 +451,14 @@ This is NOT a prerequisite for the default flip — all three paths co-exist tod
 
 ### 7c. Sub-crate extraction
 Once boundaries stabilize, split if beneficial:
-- `ironclaw_types` — shared types for WASM extensions
-- `ironclaw_capability` — if used by tooling/CLI independently
+- `t3claw_types` — shared types for WASM extensions
+- `t3claw_capability` — if used by tooling/CLI independently
 
 ---
 
 ## Phase 8: Sandboxed Execution + Infrastructure Integration
 
-**Goal:** Leverage existing IronClaw infrastructure for sandboxed execution. This is NOT about running CodeAct/RLM in different runtimes — Monty is the sole Python executor. This is about isolating threads and running third-party tools safely.
+**Goal:** Leverage existing T3Claw infrastructure for sandboxed execution. This is NOT about running CodeAct/RLM in different runtimes — Monty is the sole Python executor. This is about isolating threads and running third-party tools safely.
 
 ### 8.1 WASM tool sandbox (existing infrastructure)
 - Third-party tools from `tools-src/` and the registry run in WASM via existing `src/tools/wasm/`
@@ -545,9 +545,9 @@ Once boundaries stabilize, split if beneficial:
 
 ```bash
 # Engine crate only:
-cargo check -p ironclaw_engine
-cargo clippy -p ironclaw_engine --all-targets -- -D warnings
-cargo test -p ironclaw_engine
+cargo check -p t3claw_engine
+cargo clippy -p t3claw_engine --all-targets -- -D warnings
+cargo test -p t3claw_engine
 
 # Full workspace (no regressions):
 cargo check

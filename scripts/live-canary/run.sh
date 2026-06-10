@@ -94,7 +94,7 @@ write_env_summary() {
     echo "branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
     echo "rustc=$(rustc --version 2>/dev/null || true)"
     echo "cargo=$(cargo --version 2>/dev/null || true)"
-    echo "IRONCLAW_LIVE_TEST=${IRONCLAW_LIVE_TEST:-<unset>}"
+    echo "T3CLAW_LIVE_TEST=${T3CLAW_LIVE_TEST:-<unset>}"
     echo "LLM_BACKEND=${LLM_BACKEND:-<unset>}"
     echo "LLM_MODEL=${LLM_MODEL:-<unset>}"
     echo "ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-<unset>}"
@@ -228,21 +228,21 @@ main() {
 
   case "${LANE}" in
     deterministic-replay)
-      IRONCLAW_LIVE_TEST=0 run_cargo_test e2e_live "${SCENARIO}"
+      T3CLAW_LIVE_TEST=0 run_cargo_test e2e_live "${SCENARIO}"
       ;;
     public-smoke)
-      export IRONCLAW_LIVE_TEST=1
+      export T3CLAW_LIVE_TEST=1
       run_cargo_test e2e_live "${SCENARIO:-zizmor_scan}"
       run_cargo_test e2e_live_mission "mission_daily_news_digest_with_followup"
       ;;
     persona-rotating)
-      export IRONCLAW_LIVE_TEST=1
+      export T3CLAW_LIVE_TEST=1
       selected="$(select_rotating_persona)"
       SCENARIO="${selected}"
       run_cargo_test e2e_live_personas "${selected}"
       ;;
     private-oauth)
-      export IRONCLAW_LIVE_TEST=1
+      export T3CLAW_LIVE_TEST=1
       # drive_auth_gate_roundtrip is currently skipped pending the
       # non-HTTP pre-flight auth gate (stub fallthrough in
       # `src/auth/extension.rs::check_action_auth`). Until that lands
@@ -255,11 +255,11 @@ main() {
       run_cargo_test e2e_live "drive_transparent_oauth_refresh"
       ;;
     provider-matrix)
-      export IRONCLAW_LIVE_TEST=1
+      export T3CLAW_LIVE_TEST=1
       run_cargo_test "${PROVIDER_TEST_TARGET:-e2e_live}" "${SCENARIO:-zizmor_scan}"
       ;;
     release-public-full)
-      export IRONCLAW_LIVE_TEST=1
+      export T3CLAW_LIVE_TEST=1
       run_cargo_test e2e_live "zizmor_scan"
       run_cargo_test e2e_live "zizmor_scan_v2"
       run_cargo_test e2e_live_mission ""

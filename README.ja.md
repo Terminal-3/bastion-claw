@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="ironclaw.png?v=2" alt="IronClaw" width="200"/>
+  <img src="ironclaw.png?v=2" alt="T3Claw" width="200"/>
 </p>
 
-<h1 align="center">IronClaw</h1>
+<h1 align="center">T3Claw</h1>
 
 <p align="center">
   <strong>あなたの味方になる、安全なパーソナルAIアシスタント</strong>
@@ -35,16 +35,16 @@
 
 ## フィロソフィー
 
-IronClawはシンプルな原則に基づいて構築されています：**あなたのAIアシスタントは、あなたのために働くべきであり、あなたに不利益をもたらすべきではありません。**
+T3Clawはシンプルな原則に基づいて構築されています：**あなたのAIアシスタントは、あなたのために働くべきであり、あなたに不利益をもたらすべきではありません。**
 
-AIシステムがデータの取り扱いについて不透明になり、企業の利益に沿って調整されることが増えている世界で、IronClawは異なるアプローチを取ります：
+AIシステムがデータの取り扱いについて不透明になり、企業の利益に沿って調整されることが増えている世界で、T3Clawは異なるアプローチを取ります：
 
 - **あなたのデータはあなたのもの** - すべての情報はローカルに保存・暗号化され、あなたの管理下から離れることはありません
 - **設計段階からの透明性** - オープンソース、監査可能、隠れたテレメトリやデータ収集なし
 - **自己拡張する能力** - ベンダーのアップデートを待たずに、新しいツールをその場で構築
 - **多層防御** - 複数のセキュリティレイヤーがプロンプトインジェクションやデータ流出から保護
 
-IronClawは、個人生活にも仕事にも本当に信頼できるAIアシスタントです。
+T3Clawは、個人生活にも仕事にも本当に信頼できるAIアシスタントです。
 
 ## 機能
 
@@ -67,7 +67,7 @@ IronClawは、個人生活にも仕事にも本当に信頼できるAIアシス�
 
 ### 自己拡張
 
-- **動的ツール構築** - 必要なものを説明すると、IronClawがWASMツールとして構築
+- **動的ツール構築** - 必要なものを説明すると、T3ClawがWASMツールとして構築
 - **MCPプロトコル** - Model Context Protocolサーバーに接続して追加機能を利用
 - **プラグインアーキテクチャ** - 再起動なしで新しいWASMツールやチャネルを追加
 
@@ -87,12 +87,12 @@ IronClawは、個人生活にも仕事にも本当に信頼できるAIアシス�
 
 ## ダウンロードまたはビルド
 
-最新のアップデートは[リリースページ](https://github.com/nearai/ironclaw/releases/)をご覧ください。
+最新のアップデートは[リリースページ](https://github.com/Terminal-3/t3-claw/releases/)をご覧ください。
 
 <details>
   <summary>Windowsインストーラーでインストール（Windows）</summary>
 
-[Windowsインストーラー](https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-x86_64-pc-windows-msvc.msi)をダウンロードして実行してください。
+[Windowsインストーラー](https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-x86_64-pc-windows-msvc.msi)をダウンロードして実行してください。
 
 </details>
 
@@ -100,7 +100,7 @@ IronClawは、個人生活にも仕事にも本当に信頼できるAIアシス�
   <summary>PowerShellスクリプトでインストール（Windows）</summary>
 
 ```sh
-irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.ps1 | iex
+irm https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-installer.ps1 | iex
 ```
 
 </details>
@@ -109,7 +109,7 @@ irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-install
   <summary>シェルスクリプトでインストール（macOS、Linux、Windows/WSL）</summary>
 
 ```sh
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/Terminal-3/t3-claw/releases/latest/download/t3claw-installer.sh | sh
 ```
 </details>
 
@@ -117,7 +117,7 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/release
   <summary>Homebrewでインストール（macOS/Linux）</summary>
 
 ```sh
-brew install ironclaw
+brew install t3claw
 ```
 
 </details>
@@ -129,8 +129,8 @@ brew install ironclaw
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/nearai/ironclaw.git
-cd ironclaw
+git clone https://github.com/Terminal-3/t3-claw.git
+cd t3claw
 
 # ビルド
 cargo build --release
@@ -147,25 +147,25 @@ cargo test
 
 ```bash
 # データベースを作成
-createdb ironclaw
+createdb t3claw
 
 # pgvectorを有効化
-psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+psql t3claw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
 ## 設定
 
-セットアップウィザードを実行してIronClawを設定します：
+セットアップウィザードを実行してT3Clawを設定します：
 
 ```bash
-ironclaw onboard
+t3claw onboard
 ```
 
-ウィザードは、データベース接続、NEAR AI認証（ブラウザOAuth経由）、シークレットの暗号化（システムキーチェーンを使用）を処理します。設定は接続されたデータベースに永続化されます。ブートストラップ変数（例：`DATABASE_URL`、`LLM_BACKEND`）は、データベース接続前に利用できるよう`~/.ironclaw/.env`に書き込まれます。
+ウィザードは、データベース接続、NEAR AI認証（ブラウザOAuth経由）、シークレットの暗号化（システムキーチェーンを使用）を処理します。設定は接続されたデータベースに永続化されます。ブートストラップ変数（例：`DATABASE_URL`、`LLM_BACKEND`）は、データベース接続前に利用できるよう`~/.t3claw/.env`に書き込まれます。
 
 ### 代替LLMプロバイダー
 
-IronClawはデフォルトでNEAR AIを使用しますが、多くのLLMプロバイダーをすぐに利用できます。組み込みプロバイダーには**Anthropic**、**OpenAI**、**Google Gemini**、**MiniMax**、**Mistral**、**Ollama**（ローカル）が含まれます。**OpenRouter**（300以上のモデル）、**Together AI**、**Fireworks AI**、セルフホストサーバー（**vLLM**、**LiteLLM**）などのOpenAI互換サービスもサポートされています。
+T3ClawはデフォルトでNEAR AIを使用しますが、多くのLLMプロバイダーをすぐに利用できます。組み込みプロバイダーには**Anthropic**、**OpenAI**、**Google Gemini**、**MiniMax**、**Mistral**、**Ollama**（ローカル）が含まれます。**OpenRouter**（300以上のモデル）、**Together AI**、**Fireworks AI**、セルフホストサーバー（**vLLM**、**LiteLLM**）などのOpenAI互換サービスもサポートされています。
 
 ウィザードでプロバイダーを選択するか、環境変数を直接設定してください：
 
@@ -185,7 +185,7 @@ LLM_MODEL=anthropic/claude-sonnet-4
 
 ## セキュリティ
 
-IronClawは、データを保護し悪用を防ぐために多層防御を実装しています。
+T3Clawは、データを保護し悪用を防ぐために多層防御を実装しています。
 
 ### WASMサンドボックス
 
@@ -279,17 +279,17 @@ WASM ──► 許可リスト ──► リーク    ──► 認証情報 ─
 
 ## 使い方
 
-Engine v2 は現在オプトインです。従来のエージェントループではなく新しいエンジンを使いたい場合は、IronClaw を `ENGINE_V2=true` 付きで起動してください。
+Engine v2 は現在オプトインです。従来のエージェントループではなく新しいエンジンを使いたい場合は、T3Claw を `ENGINE_V2=true` 付きで起動してください。
 
 ```bash
 # 初回セットアップ（データベース、認証などを設定）
-ironclaw onboard
+t3claw onboard
 
 # インストール済みバイナリを起動
-ironclaw
+t3claw
 
 # Engine v2 でインストール済みバイナリを起動
-ENGINE_V2=true ironclaw
+ENGINE_V2=true t3claw
 
 # ソースからインタラクティブREPLを起動
 cargo run
@@ -298,7 +298,7 @@ cargo run
 ENGINE_V2=true cargo run
 
 # Engine v2 をデバッグログ付きで起動
-ENGINE_V2=true RUST_LOG=ironclaw=debug cargo run
+ENGINE_V2=true RUST_LOG=t3claw=debug cargo run
 ```
 
 ## 開発
@@ -311,7 +311,7 @@ cargo fmt
 cargo clippy --all --benches --tests --examples --all-features
 
 # テスト実行
-createdb ironclaw_test
+createdb t3claw_test
 cargo test
 
 # 特定のテストを実行
@@ -323,7 +323,7 @@ cargo test test_name
 
 ## OpenClawの系譜
 
-IronClawは[OpenClaw](https://github.com/openclaw/openclaw)にインスパイアされたRust再実装です。完全な対応表は[FEATURE_PARITY.md](FEATURE_PARITY.md)をご覧ください。
+T3Clawは[OpenClaw](https://github.com/openclaw/openclaw)にインスパイアされたRust再実装です。完全な対応表は[FEATURE_PARITY.md](FEATURE_PARITY.md)をご覧ください。
 
 主な違い：
 

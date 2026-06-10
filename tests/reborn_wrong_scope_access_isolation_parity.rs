@@ -3,14 +3,14 @@
 mod reborn_support;
 mod support;
 
-use ironclaw_host_api::{TenantId, UserId};
-use ironclaw_loop_support::HostManagedModelResponse;
-use ironclaw_threads::ThreadScope;
-use ironclaw_turns::{TurnActor, TurnScope, TurnStatus};
 use reborn_support::{
     harness::{RebornBinaryE2EHarness, RecordingTestCapabilityPort, trace_tool_call_response},
     model_replay::RebornTraceReplayModelGateway,
 };
+use t3claw_host_api::{TenantId, UserId};
+use t3claw_loop_support::HostManagedModelResponse;
+use t3claw_threads::ThreadScope;
+use t3claw_turns::{TurnActor, TurnScope, TurnStatus};
 
 #[tokio::test]
 async fn reborn_wrong_scope_access_isolation_parity() {

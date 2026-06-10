@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use ironclaw::channels::{OutgoingResponse, StatusUpdate};
+use t3claw::channels::{OutgoingResponse, StatusUpdate};
 
 use crate::support::test_rig::TestRig;
 
@@ -287,7 +287,7 @@ fn is_safety_warning(msg: &str) -> bool {
 
 #[cfg(feature = "libsql")]
 async fn capture_engine_threads() -> Vec<ThreadSummary> {
-    let traces = ironclaw::bridge::engine_retrospectives_for_test().await;
+    let traces = t3claw::bridge::engine_retrospectives_for_test().await;
     traces.into_iter().map(thread_summary_from).collect()
 }
 
@@ -297,8 +297,8 @@ async fn capture_engine_threads() -> Vec<ThreadSummary> {
 }
 
 #[cfg(feature = "libsql")]
-fn thread_summary_from(trace: ironclaw_engine::executor::trace::ExecutionTrace) -> ThreadSummary {
-    use ironclaw_engine::executor::trace::IssueSeverity;
+fn thread_summary_from(trace: t3claw_engine::executor::trace::ExecutionTrace) -> ThreadSummary {
+    use t3claw_engine::executor::trace::IssueSeverity;
 
     let issues = trace
         .issues
@@ -340,8 +340,8 @@ fn thread_summary_from(trace: ironclaw_engine::executor::trace::ExecutionTrace) 
 /// either worth snapshotting or explicitly ignored, not silently swallowed
 /// under the default `Debug` string. The duplication is the enforcement.
 #[cfg(feature = "libsql")]
-fn event_kind_name(kind: &ironclaw_engine::EventKind) -> &'static str {
-    use ironclaw_engine::EventKind;
+fn event_kind_name(kind: &t3claw_engine::EventKind) -> &'static str {
+    use t3claw_engine::EventKind;
     match kind {
         EventKind::StateChanged { .. } => "StateChanged",
         EventKind::StepStarted { .. } => "StepStarted",

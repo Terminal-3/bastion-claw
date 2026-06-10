@@ -16,7 +16,7 @@
 //! - Capabilities that are possible but approval/auth/resource-dependent
 //!   stay visible and fail structurally at action time.
 
-use ironclaw_host_api::runtime_policy::{
+use t3claw_host_api::runtime_policy::{
     EffectiveRuntimePolicy, FilesystemBackendKind, NetworkMode, ProcessBackendKind,
 };
 
@@ -58,7 +58,7 @@ pub fn is_visible_under(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ironclaw_host_api::runtime_policy::{
+    use t3claw_host_api::runtime_policy::{
         ApprovalPolicy, AuditMode, DeploymentMode, RuntimeProfile, SecretMode,
     };
 

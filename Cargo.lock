@@ -3952,1602 +3952,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d98f6fed1fde3f8c21bc40a1abb88dd75e67924f9cffc3ef95607bad8017f8e2"
 
 [[package]]
-name = "ironclaw"
-version = "0.29.1"
-dependencies = [
- "aes",
- "aes-gcm",
- "agent-client-protocol",
- "aho-corasick",
- "anyhow",
- "async-trait",
- "axum 0.8.9",
- "base64 0.22.1",
- "blake3",
- "bollard",
- "bs58",
- "bytes",
- "chrono",
- "chrono-tz",
- "clap",
- "clap_complete",
- "cookie",
- "cron",
- "crossterm 0.29.0",
- "deadpool-postgres",
- "dirs",
- "dotenvy",
- "ed25519-dalek",
- "eventsource-stream",
- "flate2",
- "fs4",
- "futures",
- "glob",
- "hex",
- "hkdf",
- "hmac 0.12.1",
- "html-to-markdown-rs",
- "http-body-util",
- "hyper 1.9.0",
- "hyper-util",
- "iana-time-zone",
- "insta",
- "ironclaw_approvals",
- "ironclaw_authorization",
- "ironclaw_common",
- "ironclaw_embeddings",
- "ironclaw_engine",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_gateway",
- "ironclaw_host_api",
- "ironclaw_host_runtime",
- "ironclaw_llm",
- "ironclaw_loop_support",
- "ironclaw_memory",
- "ironclaw_network",
- "ironclaw_oauth",
- "ironclaw_processes",
- "ironclaw_product_adapters",
- "ironclaw_product_workflow",
- "ironclaw_reborn",
- "ironclaw_reborn_composition",
- "ironclaw_reborn_traces",
- "ironclaw_resources",
- "ironclaw_run_state",
- "ironclaw_runtime_policy",
- "ironclaw_safety",
- "ironclaw_secrets",
- "ironclaw_skills",
- "ironclaw_threads",
- "ironclaw_triggers",
- "ironclaw_trust",
- "ironclaw_tui",
- "ironclaw_turns",
- "ironclaw_wasm",
- "json5",
- "jsonschema",
- "jsonwebtoken",
- "libsql",
- "lru 0.16.4",
- "md-5 0.10.6",
- "mime_guess",
- "open",
- "pdf-extract",
- "pgvector",
- "postgres-types",
- "pretty_assertions",
- "pty-process",
- "rand 0.8.6",
- "readabilityrs",
- "refinery",
- "regex",
- "reqwest",
- "rig-core",
- "rust_decimal",
- "rust_decimal_macros",
- "rustls 0.23.40",
- "rustls-native-certs 0.8.3",
- "rustyline",
- "secrecy",
- "secret-service",
- "security-framework 3.7.0",
- "semver",
- "serde",
- "serde_json",
- "serde_yml",
- "sha2 0.10.9",
- "subtle",
- "tar",
- "tempfile",
- "termimad",
- "testcontainers-modules",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
- "tokio-stream",
- "tokio-test",
- "tokio-tungstenite 0.26.2",
- "tokio-util",
- "toml 0.8.23",
- "tower 0.5.3",
- "tower-http 0.6.11",
- "tracing",
- "tracing-subscriber",
- "tracing-test",
- "url",
- "urlencoding",
- "uuid",
- "wasmparser 0.246.2",
- "wasmtime",
- "wasmtime-wasi",
- "webpki-roots 0.26.11",
- "zbus",
- "zip",
-]
-
-[[package]]
-name = "ironclaw_agent_loop"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "chrono",
- "futures",
- "ironclaw_agent_loop",
- "ironclaw_common",
- "ironclaw_host_api",
- "ironclaw_turns",
- "serde",
- "serde_jcs",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_approvals"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_authorization",
- "ironclaw_events",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_run_state",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_architecture"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
-name = "ironclaw_auth"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "ironclaw_common",
- "ironclaw_host_api",
- "secrecy",
- "serde",
- "serde_json",
- "subtle",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_authorization"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_trust",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_capabilities"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_approvals",
- "ironclaw_authorization",
- "ironclaw_dispatcher",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_processes",
- "ironclaw_resources",
- "ironclaw_run_state",
- "ironclaw_trust",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_common"
-version = "0.4.2"
-dependencies = [
- "base64 0.22.1",
- "chrono-tz",
- "dirs",
- "hex",
- "rand 0.8.6",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_conversations"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_safety",
- "ironclaw_triggers",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_dispatcher"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_resources",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-test",
-]
-
-[[package]]
-name = "ironclaw_embeddings"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "aws-config",
- "aws-sdk-bedrockruntime",
- "aws-smithy-types",
- "ironclaw_llm",
- "lru 0.16.4",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "cron",
- "ironclaw_common",
- "ironclaw_skills",
- "monty",
- "pretty_assertions",
- "regex",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_event_projections"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_memory",
- "ironclaw_reborn_event_store",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_event_streams"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_host_api",
- "ironclaw_outbound",
- "ironclaw_turns",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_events"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_host_api",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_extensions"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_trust",
- "parking_lot",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "url",
-]
-
-[[package]]
-name = "ironclaw_filesystem"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "deadpool-postgres",
- "ironclaw_host_api",
- "ironclaw_safety",
- "libsql",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "tracing-test",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_first_party_extension_ports"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_loop_support",
- "ironclaw_skills",
- "ironclaw_turns",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_first_party_extensions"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "blake3",
- "futures-util",
- "glob",
- "ironclaw_auth",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_safety",
- "ironclaw_skills",
- "regex",
- "serde_json",
- "similar",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_gateway"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_hooks"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "chrono",
- "futures",
- "ironclaw_events",
- "ironclaw_host_api",
- "ironclaw_prompt_envelope",
- "ironclaw_turns",
- "ironclaw_wasm_limiter",
- "lru 0.16.4",
- "rust_decimal",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "uuid",
- "wasmtime",
- "wat",
-]
-
-[[package]]
-name = "ironclaw_hooks_libsql"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "chrono",
- "ironclaw_hooks",
- "ironclaw_host_api",
- "libsql",
- "rust_decimal",
- "tempfile",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_hooks_parity"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "deadpool-postgres",
- "ironclaw_hooks",
- "ironclaw_hooks_libsql",
- "ironclaw_hooks_postgres",
- "ironclaw_host_api",
- "libsql",
- "rust_decimal",
- "tempfile",
- "tokio",
- "tokio-postgres",
-]
-
-[[package]]
-name = "ironclaw_hooks_postgres"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake3",
- "chrono",
- "deadpool-postgres",
- "ironclaw_hooks",
- "ironclaw_host_api",
- "rust_decimal",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_host_api"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "rust_decimal",
- "rust_decimal_macros",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "static_assertions",
- "thiserror 2.0.18",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "ironclaw_host_runtime"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bollard",
- "chrono",
- "chrono-tz",
- "deadpool-postgres",
- "dirs",
- "futures-util",
- "hex",
- "ironclaw_approvals",
- "ironclaw_authorization",
- "ironclaw_capabilities",
- "ironclaw_dispatcher",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_first_party_extensions",
- "ironclaw_host_api",
- "ironclaw_mcp",
- "ironclaw_memory",
- "ironclaw_network",
- "ironclaw_process_sandbox",
- "ironclaw_processes",
- "ironclaw_product_adapter_registry",
- "ironclaw_prompt_envelope",
- "ironclaw_reborn_event_store",
- "ironclaw_resources",
- "ironclaw_run_state",
- "ironclaw_runtime_policy",
- "ironclaw_safety",
- "ironclaw_scripts",
- "ironclaw_secrets",
- "ironclaw_skills",
- "ironclaw_triggers",
- "ironclaw_trust",
- "ironclaw_turns",
- "ironclaw_wasm",
- "jsonschema",
- "libc",
- "libsql",
- "rust_decimal",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "url",
- "uuid",
- "wat",
- "wit-component 0.245.1",
- "wit-parser 0.245.1",
- "zeroize",
- "zip",
-]
-
-[[package]]
-name = "ironclaw_llm"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "aws-config",
- "aws-sdk-bedrockruntime",
- "aws-smithy-types",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "dirs",
- "eventsource-stream",
- "futures",
- "insta",
- "ironclaw_common",
- "ironclaw_safety",
- "open",
- "rand 0.8.6",
- "regex",
- "reqwest",
- "rig-core",
- "rust_decimal",
- "rust_decimal_macros",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-test",
- "url",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_loop_support"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "dashmap",
- "futures",
- "hex",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_host_runtime",
- "ironclaw_memory",
- "ironclaw_process_sandbox",
- "ironclaw_resources",
- "ironclaw_safety",
- "ironclaw_skills",
- "ironclaw_threads",
- "ironclaw_trust",
- "ironclaw_turns",
- "jsonschema",
- "parking_lot",
- "rust_decimal",
- "rust_decimal_macros",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-test",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_mcp"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "ironclaw_extensions",
- "ironclaw_host_api",
- "ironclaw_resources",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_memory"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_memory",
- "ironclaw_safety",
- "jsonschema",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_network"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_host_api",
- "percent-encoding",
- "reqwest",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "zeroize",
-]
-
-[[package]]
-name = "ironclaw_oauth"
-version = "0.1.0"
-dependencies = [
- "ironclaw_common",
- "thiserror 2.0.18",
- "tokio",
- "urlencoding",
-]
-
-[[package]]
-name = "ironclaw_outbound"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "deadpool-postgres",
- "hex",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_turns",
- "libsql",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_process_sandbox"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_host_api",
- "ironclaw_processes",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_processes"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_reborn_event_store",
- "ironclaw_resources",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_product_adapter_registry"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ironclaw_extensions",
- "ironclaw_host_api",
- "ironclaw_product_adapters",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
-]
-
-[[package]]
-name = "ironclaw_product_adapters"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_host_api",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_product_workflow"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "ironclaw_approvals",
- "ironclaw_auth",
- "ironclaw_authorization",
- "ironclaw_common",
- "ironclaw_conversations",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_host_api",
- "ironclaw_host_runtime",
- "ironclaw_loop_support",
- "ironclaw_outbound",
- "ironclaw_product_adapters",
- "ironclaw_product_workflow",
- "ironclaw_reborn",
- "ironclaw_reborn_composition",
- "ironclaw_run_state",
- "ironclaw_telegram_v2_adapter",
- "ironclaw_threads",
- "ironclaw_trust",
- "ironclaw_turns",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_product_workflow_storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "deadpool-postgres",
- "futures-util",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_product_adapters",
- "ironclaw_product_workflow",
- "libsql",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-postgres",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_prompt_envelope"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ironclaw_reborn"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures-util",
- "ironclaw_agent_loop",
- "ironclaw_authorization",
- "ironclaw_event_projections",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_hooks",
- "ironclaw_host_api",
- "ironclaw_host_runtime",
- "ironclaw_llm",
- "ironclaw_loop_support",
- "ironclaw_processes",
- "ironclaw_reborn_event_store",
- "ironclaw_resources",
- "ironclaw_scripts",
- "ironclaw_secrets",
- "ironclaw_skills",
- "ironclaw_threads",
- "ironclaw_trust",
- "ironclaw_turns",
- "libsql",
- "parking_lot",
- "rust_decimal",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-test",
- "wat",
-]
-
-[[package]]
-name = "ironclaw_reborn_cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "clap",
- "clap_complete",
- "dotenvy",
- "hex",
- "ironclaw_reborn_composition",
- "ironclaw_reborn_config",
- "ironclaw_reborn_traces",
- "ironclaw_reborn_webui_ingress",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_reborn_composition"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum 0.8.9",
- "base64 0.22.1",
- "chrono",
- "deadpool-postgres",
- "fs4",
- "futures",
- "hmac 0.12.1",
- "http 1.4.1",
- "http-body-util",
- "ironclaw_approvals",
- "ironclaw_auth",
- "ironclaw_authorization",
- "ironclaw_capabilities",
- "ironclaw_common",
- "ironclaw_conversations",
- "ironclaw_event_projections",
- "ironclaw_event_streams",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_first_party_extension_ports",
- "ironclaw_first_party_extensions",
- "ironclaw_hooks",
- "ironclaw_host_api",
- "ironclaw_host_runtime",
- "ironclaw_llm",
- "ironclaw_loop_support",
- "ironclaw_mcp",
- "ironclaw_network",
- "ironclaw_outbound",
- "ironclaw_processes",
- "ironclaw_product_adapters",
- "ironclaw_product_workflow",
- "ironclaw_product_workflow_storage",
- "ironclaw_reborn",
- "ironclaw_reborn_composition",
- "ironclaw_reborn_config",
- "ironclaw_reborn_event_store",
- "ironclaw_reborn_identity",
- "ironclaw_reborn_openai_compat",
- "ironclaw_reborn_openai_compat_storage",
- "ironclaw_resources",
- "ironclaw_run_state",
- "ironclaw_runtime_policy",
- "ironclaw_safety",
- "ironclaw_secrets",
- "ironclaw_skills",
- "ironclaw_slack_v2_adapter",
- "ironclaw_threads",
- "ironclaw_triggers",
- "ironclaw_trust",
- "ironclaw_turns",
- "ironclaw_wasm_product_adapters",
- "ironclaw_webui_v2",
- "ironclaw_webui_v2_static",
- "libsql",
- "lru 0.16.4",
- "rand 0.8.6",
- "rust_decimal",
- "rust_decimal_macros",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "testcontainers-modules",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.29.0",
- "tokio-util",
- "toml 0.8.23",
- "tower 0.5.3",
- "tower-http 0.6.11",
- "tracing",
- "tracing-test",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_reborn_config"
-version = "0.1.0"
-dependencies = [
- "fs4",
- "serde",
- "tempfile",
- "thiserror 2.0.18",
- "toml 0.8.23",
- "toml_edit 0.22.27",
-]
-
-[[package]]
-name = "ironclaw_reborn_event_store"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "deadpool-postgres",
- "hex",
- "ironclaw_events",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "libsql",
- "rustls 0.23.40",
- "rustls-native-certs 0.8.3",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tokio-postgres-rustls",
- "tracing",
- "urlencoding",
- "webpki-roots 0.26.11",
-]
-
-[[package]]
-name = "ironclaw_reborn_identity"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_reborn_openai_compat"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum 0.8.9",
- "chrono",
- "futures-core",
- "hex",
- "http 1.4.1",
- "http-body-util",
- "ironclaw_host_api",
- "ironclaw_product_adapters",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tower 0.5.3",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_reborn_openai_compat_storage"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "hex",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_product_adapters",
- "ironclaw_reborn_openai_compat",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_reborn_traces"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum 0.8.9",
- "base64 0.22.1",
- "chrono",
- "dirs",
- "hex",
- "ironclaw_common",
- "ironclaw_llm",
- "ironclaw_safety",
- "jsonwebtoken",
- "regex",
- "reqwest",
- "rust_decimal",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_reborn_webui_ingress"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axum 0.8.9",
- "base64 0.22.1",
- "chrono",
- "hex",
- "hmac 0.12.1",
- "http 1.4.1",
- "http-body-util",
- "ironclaw_host_api",
- "ironclaw_product_workflow",
- "ironclaw_reborn_composition",
- "ironclaw_threads",
- "ironclaw_turns",
- "jsonwebtoken",
- "parking_lot",
- "rand 0.8.6",
- "reqwest",
- "rsa",
- "secrecy",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
- "thiserror 2.0.18",
- "tokio",
- "tower 0.5.3",
- "tracing",
- "url",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_resources"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "chrono-tz",
- "deadpool-postgres",
- "fs2",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "libsql",
- "rust_decimal",
- "rust_decimal_macros",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "uuid",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "ironclaw_run_state"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "deadpool-postgres",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "libsql",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_runtime_policy"
-version = "0.1.0"
-dependencies = [
- "ironclaw_host_api",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ironclaw_safety"
-version = "0.2.2"
-dependencies = [
- "aho-corasick",
- "criterion",
- "regex",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "ironclaw_scripts"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "ironclaw_extensions",
- "ironclaw_host_api",
- "ironclaw_resources",
- "rust_decimal_macros",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
-]
-
-[[package]]
-name = "ironclaw_secrets"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "async-trait",
- "chrono",
- "hkdf",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "rand 0.8.6",
- "secrecy",
- "secret-service",
- "security-framework 3.7.0",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_skills"
-version = "0.3.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "libc",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yml",
- "sha2 0.10.9",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "urlencoding",
-]
-
-[[package]]
-name = "ironclaw_slack_v2_adapter"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_product_adapters",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_telegram_v2_adapter"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ironclaw_product_adapters",
- "ironclaw_turns",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_threads"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "futures",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_safety",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_triggers"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "cron",
- "deadpool-postgres",
- "hex",
- "ironclaw_host_api",
- "ironclaw_turns",
- "libsql",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tempfile",
- "testcontainers-modules",
- "thiserror 2.0.18",
- "tokio",
- "tokio-postgres",
- "tracing",
- "ulid",
-]
-
-[[package]]
-name = "ironclaw_trust"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ironclaw_host_api",
- "serde",
- "serde_json",
- "static_assertions",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "ironclaw_tui"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "chrono",
- "image",
- "ironclaw_common",
- "pulldown-cmark",
- "ratatui",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tui-textarea",
- "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "ironclaw_turns"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "hex",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "static_assertions",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ironclaw_wasm"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "ironclaw_dispatcher",
- "ironclaw_events",
- "ironclaw_extensions",
- "ironclaw_filesystem",
- "ironclaw_host_api",
- "ironclaw_resources",
- "ironclaw_wasm_limiter",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
- "wat",
- "wit-component 0.245.1",
- "wit-parser 0.245.1",
-]
-
-[[package]]
-name = "ironclaw_wasm_limiter"
-version = "0.1.0"
-dependencies = [
- "tracing",
- "wasmtime",
-]
-
-[[package]]
-name = "ironclaw_wasm_product_adapters"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "hex",
- "hmac 0.12.1",
- "http 1.4.1",
- "ironclaw_product_adapters",
- "ironclaw_wasm_sandbox_core",
- "serde_json",
- "sha2 0.10.9",
- "subtle",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "wasmtime",
- "wat",
- "wit-component 0.245.1",
- "wit-parser 0.245.1",
-]
-
-[[package]]
-name = "ironclaw_wasm_sandbox_core"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.18",
- "tracing",
- "wasmtime",
- "wasmtime-wasi",
-]
-
-[[package]]
-name = "ironclaw_webui_v2"
-version = "0.1.0"
-dependencies = [
- "async-stream",
- "async-trait",
- "axum 0.8.9",
- "chrono",
- "futures",
- "http 1.4.1",
- "http-body-util",
- "ironclaw_host_api",
- "ironclaw_product_adapters",
- "ironclaw_product_workflow",
- "ironclaw_threads",
- "ironclaw_turns",
- "ironclaw_webui_v2",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite 0.29.0",
- "tower 0.5.3",
- "tracing",
-]
-
-[[package]]
-name = "ironclaw_webui_v2_static"
-version = "0.1.0"
-dependencies = [
- "axum 0.8.9",
- "http 1.4.1",
- "http-body-util",
- "ironclaw_webui_v2_static",
- "rand 0.8.6",
- "tokio",
- "tower 0.5.3",
- "tracing",
-]
-
-[[package]]
 name = "is-docker"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9069,6 +7473,1602 @@ dependencies = [
  "rustix 0.38.44",
  "windows-sys 0.59.0",
  "winx",
+]
+
+[[package]]
+name = "t3claw"
+version = "0.29.1"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "agent-client-protocol",
+ "aho-corasick",
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "blake3",
+ "bollard",
+ "bs58",
+ "bytes",
+ "chrono",
+ "chrono-tz",
+ "clap",
+ "clap_complete",
+ "cookie",
+ "cron",
+ "crossterm 0.29.0",
+ "deadpool-postgres",
+ "dirs",
+ "dotenvy",
+ "ed25519-dalek",
+ "eventsource-stream",
+ "flate2",
+ "fs4",
+ "futures",
+ "glob",
+ "hex",
+ "hkdf",
+ "hmac 0.12.1",
+ "html-to-markdown-rs",
+ "http-body-util",
+ "hyper 1.9.0",
+ "hyper-util",
+ "iana-time-zone",
+ "insta",
+ "json5",
+ "jsonschema",
+ "jsonwebtoken",
+ "libsql",
+ "lru 0.16.4",
+ "md-5 0.10.6",
+ "mime_guess",
+ "open",
+ "pdf-extract",
+ "pgvector",
+ "postgres-types",
+ "pretty_assertions",
+ "pty-process",
+ "rand 0.8.6",
+ "readabilityrs",
+ "refinery",
+ "regex",
+ "reqwest",
+ "rig-core",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "rustls 0.23.40",
+ "rustls-native-certs 0.8.3",
+ "rustyline",
+ "secrecy",
+ "secret-service",
+ "security-framework 3.7.0",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "sha2 0.10.9",
+ "subtle",
+ "t3claw_approvals",
+ "t3claw_authorization",
+ "t3claw_common",
+ "t3claw_embeddings",
+ "t3claw_engine",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_gateway",
+ "t3claw_host_api",
+ "t3claw_host_runtime",
+ "t3claw_llm",
+ "t3claw_loop_support",
+ "t3claw_memory",
+ "t3claw_network",
+ "t3claw_oauth",
+ "t3claw_processes",
+ "t3claw_product_adapters",
+ "t3claw_product_workflow",
+ "t3claw_reborn",
+ "t3claw_reborn_composition",
+ "t3claw_reborn_traces",
+ "t3claw_resources",
+ "t3claw_run_state",
+ "t3claw_runtime_policy",
+ "t3claw_safety",
+ "t3claw_secrets",
+ "t3claw_skills",
+ "t3claw_threads",
+ "t3claw_triggers",
+ "t3claw_trust",
+ "t3claw_tui",
+ "t3claw_turns",
+ "t3claw_wasm",
+ "tar",
+ "tempfile",
+ "termimad",
+ "testcontainers-modules",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "tokio-stream",
+ "tokio-test",
+ "tokio-tungstenite 0.26.2",
+ "tokio-util",
+ "toml 0.8.23",
+ "tower 0.5.3",
+ "tower-http 0.6.11",
+ "tracing",
+ "tracing-subscriber",
+ "tracing-test",
+ "url",
+ "urlencoding",
+ "uuid",
+ "wasmparser 0.246.2",
+ "wasmtime",
+ "wasmtime-wasi",
+ "webpki-roots 0.26.11",
+ "zbus",
+ "zip",
+]
+
+[[package]]
+name = "t3claw_agent_loop"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_jcs",
+ "serde_json",
+ "t3claw_agent_loop",
+ "t3claw_common",
+ "t3claw_host_api",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_approvals"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "t3claw_authorization",
+ "t3claw_events",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_run_state",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_architecture"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "t3claw_auth"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "subtle",
+ "t3claw_common",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_authorization"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_trust",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_capabilities"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde_json",
+ "t3claw_approvals",
+ "t3claw_authorization",
+ "t3claw_dispatcher",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_processes",
+ "t3claw_resources",
+ "t3claw_run_state",
+ "t3claw_trust",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_common"
+version = "0.4.2"
+dependencies = [
+ "base64 0.22.1",
+ "chrono-tz",
+ "dirs",
+ "hex",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_conversations"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_safety",
+ "t3claw_triggers",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_dispatcher"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_resources",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-test",
+]
+
+[[package]]
+name = "t3claw_embeddings"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "aws-config",
+ "aws-sdk-bedrockruntime",
+ "aws-smithy-types",
+ "lru 0.16.4",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_llm",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_engine"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cron",
+ "monty",
+ "pretty_assertions",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_common",
+ "t3claw_skills",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_event_projections"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_memory",
+ "t3claw_reborn_event_store",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_event_streams"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_host_api",
+ "t3claw_outbound",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_events"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_extensions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_trust",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "url",
+]
+
+[[package]]
+name = "t3claw_filesystem"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "deadpool-postgres",
+ "libsql",
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "t3claw_safety",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "tracing-test",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_first_party_extension_ports"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_loop_support",
+ "t3claw_skills",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_first_party_extensions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "blake3",
+ "futures-util",
+ "glob",
+ "regex",
+ "serde_json",
+ "similar",
+ "t3claw_auth",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_safety",
+ "t3claw_skills",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_gateway"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_hooks"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "chrono",
+ "futures",
+ "lru 0.16.4",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "t3claw_events",
+ "t3claw_host_api",
+ "t3claw_prompt_envelope",
+ "t3claw_turns",
+ "t3claw_wasm_limiter",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "wasmtime",
+ "wat",
+]
+
+[[package]]
+name = "t3claw_hooks_libsql"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "chrono",
+ "libsql",
+ "rust_decimal",
+ "t3claw_hooks",
+ "t3claw_host_api",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_hooks_parity"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "deadpool-postgres",
+ "libsql",
+ "rust_decimal",
+ "t3claw_hooks",
+ "t3claw_hooks_libsql",
+ "t3claw_hooks_postgres",
+ "t3claw_host_api",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+]
+
+[[package]]
+name = "t3claw_hooks_postgres"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake3",
+ "chrono",
+ "deadpool-postgres",
+ "rust_decimal",
+ "t3claw_hooks",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_host_api"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "static_assertions",
+ "thiserror 2.0.18",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "t3claw_host_runtime"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bollard",
+ "chrono",
+ "chrono-tz",
+ "deadpool-postgres",
+ "dirs",
+ "futures-util",
+ "hex",
+ "jsonschema",
+ "libc",
+ "libsql",
+ "rust_decimal",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_approvals",
+ "t3claw_authorization",
+ "t3claw_capabilities",
+ "t3claw_dispatcher",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_first_party_extensions",
+ "t3claw_host_api",
+ "t3claw_mcp",
+ "t3claw_memory",
+ "t3claw_network",
+ "t3claw_process_sandbox",
+ "t3claw_processes",
+ "t3claw_product_adapter_registry",
+ "t3claw_prompt_envelope",
+ "t3claw_reborn_event_store",
+ "t3claw_resources",
+ "t3claw_run_state",
+ "t3claw_runtime_policy",
+ "t3claw_safety",
+ "t3claw_scripts",
+ "t3claw_secrets",
+ "t3claw_skills",
+ "t3claw_triggers",
+ "t3claw_trust",
+ "t3claw_turns",
+ "t3claw_wasm",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "url",
+ "uuid",
+ "wat",
+ "wit-component 0.245.1",
+ "wit-parser 0.245.1",
+ "zeroize",
+ "zip",
+]
+
+[[package]]
+name = "t3claw_llm"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "aws-config",
+ "aws-sdk-bedrockruntime",
+ "aws-smithy-types",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "dirs",
+ "eventsource-stream",
+ "futures",
+ "insta",
+ "open",
+ "rand 0.8.6",
+ "regex",
+ "reqwest",
+ "rig-core",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_common",
+ "t3claw_safety",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_loop_support"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "dashmap",
+ "futures",
+ "hex",
+ "jsonschema",
+ "parking_lot",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_host_runtime",
+ "t3claw_memory",
+ "t3claw_process_sandbox",
+ "t3claw_resources",
+ "t3claw_safety",
+ "t3claw_skills",
+ "t3claw_threads",
+ "t3claw_trust",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_mcp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "serde_json",
+ "t3claw_extensions",
+ "t3claw_host_api",
+ "t3claw_resources",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_memory"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_memory",
+ "t3claw_safety",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_network"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "percent-encoding",
+ "reqwest",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+ "zeroize",
+]
+
+[[package]]
+name = "t3claw_oauth"
+version = "0.1.0"
+dependencies = [
+ "t3claw_common",
+ "thiserror 2.0.18",
+ "tokio",
+ "urlencoding",
+]
+
+[[package]]
+name = "t3claw_outbound"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "deadpool-postgres",
+ "hex",
+ "libsql",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_process_sandbox"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "t3claw_processes",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_processes"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "serde",
+ "serde_json",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_reborn_event_store",
+ "t3claw_resources",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_product_adapter_registry"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_extensions",
+ "t3claw_host_api",
+ "t3claw_product_adapters",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "t3claw_product_adapters"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_product_workflow"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_approvals",
+ "t3claw_auth",
+ "t3claw_authorization",
+ "t3claw_common",
+ "t3claw_conversations",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_host_api",
+ "t3claw_host_runtime",
+ "t3claw_loop_support",
+ "t3claw_outbound",
+ "t3claw_product_adapters",
+ "t3claw_product_workflow",
+ "t3claw_reborn",
+ "t3claw_reborn_composition",
+ "t3claw_run_state",
+ "t3claw_telegram_v2_adapter",
+ "t3claw_threads",
+ "t3claw_trust",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_product_workflow_storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "deadpool-postgres",
+ "futures-util",
+ "libsql",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_product_adapters",
+ "t3claw_product_workflow",
+ "tempfile",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_prompt_envelope"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "t3claw_reborn"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "libsql",
+ "parking_lot",
+ "rust_decimal",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "t3claw_agent_loop",
+ "t3claw_authorization",
+ "t3claw_event_projections",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_hooks",
+ "t3claw_host_api",
+ "t3claw_host_runtime",
+ "t3claw_llm",
+ "t3claw_loop_support",
+ "t3claw_processes",
+ "t3claw_reborn_event_store",
+ "t3claw_resources",
+ "t3claw_scripts",
+ "t3claw_secrets",
+ "t3claw_skills",
+ "t3claw_threads",
+ "t3claw_trust",
+ "t3claw_turns",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-test",
+ "wat",
+]
+
+[[package]]
+name = "t3claw_reborn_cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "clap",
+ "clap_complete",
+ "dotenvy",
+ "hex",
+ "reqwest",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_reborn_composition",
+ "t3claw_reborn_config",
+ "t3claw_reborn_traces",
+ "t3claw_reborn_webui_ingress",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_reborn_composition"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "deadpool-postgres",
+ "fs4",
+ "futures",
+ "hmac 0.12.1",
+ "http 1.4.1",
+ "http-body-util",
+ "libsql",
+ "lru 0.16.4",
+ "rand 0.8.6",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_approvals",
+ "t3claw_auth",
+ "t3claw_authorization",
+ "t3claw_capabilities",
+ "t3claw_common",
+ "t3claw_conversations",
+ "t3claw_event_projections",
+ "t3claw_event_streams",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_first_party_extension_ports",
+ "t3claw_first_party_extensions",
+ "t3claw_hooks",
+ "t3claw_host_api",
+ "t3claw_host_runtime",
+ "t3claw_llm",
+ "t3claw_loop_support",
+ "t3claw_mcp",
+ "t3claw_network",
+ "t3claw_outbound",
+ "t3claw_processes",
+ "t3claw_product_adapters",
+ "t3claw_product_workflow",
+ "t3claw_product_workflow_storage",
+ "t3claw_reborn",
+ "t3claw_reborn_composition",
+ "t3claw_reborn_config",
+ "t3claw_reborn_event_store",
+ "t3claw_reborn_identity",
+ "t3claw_reborn_openai_compat",
+ "t3claw_reborn_openai_compat_storage",
+ "t3claw_resources",
+ "t3claw_run_state",
+ "t3claw_runtime_policy",
+ "t3claw_safety",
+ "t3claw_secrets",
+ "t3claw_skills",
+ "t3claw_slack_v2_adapter",
+ "t3claw_threads",
+ "t3claw_triggers",
+ "t3claw_trust",
+ "t3claw_turns",
+ "t3claw_wasm_product_adapters",
+ "t3claw_webui_v2",
+ "t3claw_webui_v2_static",
+ "tempfile",
+ "testcontainers-modules",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tokio-util",
+ "toml 0.8.23",
+ "tower 0.5.3",
+ "tower-http 0.6.11",
+ "tracing",
+ "tracing-test",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_reborn_config"
+version = "0.1.0"
+dependencies = [
+ "fs4",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+ "toml_edit 0.22.27",
+]
+
+[[package]]
+name = "t3claw_reborn_event_store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "deadpool-postgres",
+ "hex",
+ "libsql",
+ "rustls 0.23.40",
+ "rustls-native-certs 0.8.3",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_events",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tokio-postgres-rustls",
+ "tracing",
+ "urlencoding",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
+name = "t3claw_reborn_identity"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_reborn_openai_compat"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "futures-core",
+ "hex",
+ "http 1.4.1",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_host_api",
+ "t3claw_product_adapters",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_reborn_openai_compat_storage"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_product_adapters",
+ "t3claw_reborn_openai_compat",
+ "t3claw_turns",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_reborn_traces"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "dirs",
+ "hex",
+ "jsonwebtoken",
+ "regex",
+ "reqwest",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_common",
+ "t3claw_llm",
+ "t3claw_safety",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_reborn_webui_ingress"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum 0.8.9",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "http 1.4.1",
+ "http-body-util",
+ "jsonwebtoken",
+ "parking_lot",
+ "rand 0.8.6",
+ "reqwest",
+ "rsa",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "t3claw_host_api",
+ "t3claw_product_workflow",
+ "t3claw_reborn_composition",
+ "t3claw_threads",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
+ "url",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_resources"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "deadpool-postgres",
+ "fs2",
+ "libsql",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "t3claw_run_state"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "deadpool-postgres",
+ "libsql",
+ "serde",
+ "serde_json",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_runtime_policy"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "t3claw_safety"
+version = "0.2.2"
+dependencies = [
+ "aho-corasick",
+ "criterion",
+ "regex",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "t3claw_scripts"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "rust_decimal_macros",
+ "serde_json",
+ "t3claw_extensions",
+ "t3claw_host_api",
+ "t3claw_resources",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
+name = "t3claw_secrets"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "async-trait",
+ "chrono",
+ "hkdf",
+ "rand 0.8.6",
+ "secrecy",
+ "secret-service",
+ "security-framework 3.7.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_skills"
+version = "0.3.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "libc",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "sha2 0.10.9",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
+
+[[package]]
+name = "t3claw_slack_v2_adapter"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_product_adapters",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_telegram_v2_adapter"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "t3claw_product_adapters",
+ "t3claw_turns",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_threads"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_safety",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_triggers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "cron",
+ "deadpool-postgres",
+ "hex",
+ "libsql",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "t3claw_host_api",
+ "t3claw_turns",
+ "tempfile",
+ "testcontainers-modules",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "ulid",
+]
+
+[[package]]
+name = "t3claw_trust"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "t3claw_host_api",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "t3claw_tui"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "chrono",
+ "image",
+ "pulldown-cmark",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "t3claw_common",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tui-textarea",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "t3claw_turns"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "static_assertions",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "t3claw_wasm"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde_json",
+ "t3claw_dispatcher",
+ "t3claw_events",
+ "t3claw_extensions",
+ "t3claw_filesystem",
+ "t3claw_host_api",
+ "t3claw_resources",
+ "t3claw_wasm_limiter",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wat",
+ "wit-component 0.245.1",
+ "wit-parser 0.245.1",
+]
+
+[[package]]
+name = "t3claw_wasm_limiter"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "wasmtime",
+]
+
+[[package]]
+name = "t3claw_wasm_product_adapters"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "hex",
+ "hmac 0.12.1",
+ "http 1.4.1",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "t3claw_product_adapters",
+ "t3claw_wasm_sandbox_core",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wat",
+ "wit-component 0.245.1",
+ "wit-parser 0.245.1",
+]
+
+[[package]]
+name = "t3claw_wasm_sandbox_core"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
+name = "t3claw_webui_v2"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "axum 0.8.9",
+ "chrono",
+ "futures",
+ "http 1.4.1",
+ "http-body-util",
+ "serde",
+ "serde_json",
+ "t3claw_host_api",
+ "t3claw_product_adapters",
+ "t3claw_product_workflow",
+ "t3claw_threads",
+ "t3claw_turns",
+ "t3claw_webui_v2",
+ "tokio",
+ "tokio-tungstenite 0.29.0",
+ "tower 0.5.3",
+ "tracing",
+]
+
+[[package]]
+name = "t3claw_webui_v2_static"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.9",
+ "http 1.4.1",
+ "http-body-util",
+ "rand 0.8.6",
+ "t3claw_webui_v2_static",
+ "tokio",
+ "tower 0.5.3",
+ "tracing",
 ]
 
 [[package]]

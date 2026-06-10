@@ -32,8 +32,8 @@ from helpers import api_get, api_post, AUTH_TOKEN, wait_for_ready
 # ---------------------------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_V2_APPROVAL_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-approval-e2e-")
-_V2_APPROVAL_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-approval-e2e-home-")
+_V2_APPROVAL_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-approval-e2e-")
+_V2_APPROVAL_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-approval-e2e-home-")
 
 
 def _forward_coverage_env(env: dict):
@@ -85,15 +85,15 @@ async def _set_tool_permission(base_url: str, tool_name: str, state: str):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-async def v2_approval_server(ironclaw_binary, mock_llm_server):
-    """Start ironclaw with ENGINE_V2=true for tool approval flow tests.
+async def v2_approval_server(t3claw_binary, mock_llm_server):
+    """Start t3claw with ENGINE_V2=true for tool approval flow tests.
 
     No custom skills needed — the built-in http tool requires approval for
     POST requests, which is what the mock LLM generates for the
     "make approval post <label>" pattern.
     """
     home_dir = _V2_APPROVAL_HOME_TMPDIR.name
-    os.makedirs(os.path.join(home_dir, ".ironclaw"), exist_ok=True)
+    os.makedirs(os.path.join(home_dir, ".t3claw"), exist_ok=True)
 
     # Find two free ports
     socks = []
@@ -109,8 +109,8 @@ async def v2_approval_server(ironclaw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=debug",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
         "HTTP_ALLOW_LOCALHOST": "true",
@@ -140,7 +140,7 @@ async def v2_approval_server(ironclaw_binary, mock_llm_server):
     _forward_coverage_env(env)
 
     proc = await asyncio.create_subprocess_exec(
-        ironclaw_binary, "--no-onboard",
+        t3claw_binary, "--no-onboard",
         stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -510,21 +510,21 @@ class TestV2EngineApprovalFlow:
 # Restart-based persistence test
 # ---------------------------------------------------------------------------
 
-_RESTART_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-restart-e2e-")
-_RESTART_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="ironclaw-v2-restart-e2e-home-")
+_RESTART_DB_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-restart-e2e-")
+_RESTART_HOME_TMPDIR = tempfile.TemporaryDirectory(prefix="t3claw-v2-restart-e2e-home-")
 
 
 @pytest.fixture
-async def restartable_v2_server(ironclaw_binary, mock_llm_server):
-    """A restartable ironclaw instance for testing persistence across restarts."""
+async def restartable_v2_server(t3claw_binary, mock_llm_server):
+    """A restartable t3claw instance for testing persistence across restarts."""
     home_dir = _RESTART_HOME_TMPDIR.name
-    os.makedirs(os.path.join(home_dir, ".ironclaw"), exist_ok=True)
+    os.makedirs(os.path.join(home_dir, ".t3claw"), exist_ok=True)
 
     # Allocate a free gateway port AND a free HTTP channel port. The
     # HTTP channel (`webhook_server`) binds at startup and defaults to
     # `127.0.0.1:8080`; without explicit `HTTP_HOST`/`HTTP_PORT`, this
     # fixture would race every other e2e server (and anything else on
-    # 8080) and the ironclaw binary would exit with "Address already
+    # 8080) and the t3claw binary would exit with "Address already
     # in use". The sibling `v2_approval_server` fixture at the top of
     # this file already allocates both — mirror that.
     socks = []
@@ -540,8 +540,8 @@ async def restartable_v2_server(ironclaw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".ironclaw"),
-        "RUST_LOG": "ironclaw=debug",
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
         "HTTP_ALLOW_LOCALHOST": "true",
@@ -573,7 +573,7 @@ async def restartable_v2_server(ironclaw_binary, mock_llm_server):
     base_url = f"http://127.0.0.1:{gateway_port}"
     proc = None
     # Drain child stdout/stderr into the background. With
-    # `RUST_LOG=ironclaw=debug` startup output exceeds the default
+    # `RUST_LOG=t3claw=debug` startup output exceeds the default
     # 64 KiB pipe buffer; without a drainer the child blocks on its
     # next write, `/api/health` never responds, and the fixture times
     # out with a confusing "server not ready" that is actually
@@ -598,7 +598,7 @@ async def restartable_v2_server(ironclaw_binary, mock_llm_server):
     async def start():
         nonlocal proc
         proc = await asyncio.create_subprocess_exec(
-            ironclaw_binary, "--no-onboard",
+            t3claw_binary, "--no-onboard",
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

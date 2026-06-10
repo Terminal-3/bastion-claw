@@ -9,7 +9,7 @@
 //! # Usage
 //!
 //! ```rust,no_run
-//! use ironclaw::testing::TestHarnessBuilder;
+//! use t3claw::testing::TestHarnessBuilder;
 //!
 //! #[tokio::test]
 //! async fn test_something() {
@@ -20,10 +20,10 @@
 
 pub mod credentials;
 
-// `StubLlm`, `StubErrorKind`, and `fault_injection` live in `ironclaw_llm`
+// `StubLlm`, `StubErrorKind`, and `fault_injection` live in `t3claw_llm`
 // (the natural home for the trait they implement). Re-exported under the
 // existing `crate::testing::*` paths so existing test imports keep working.
-pub use ironclaw_llm::testing::{StubErrorKind, StubLlm, fault_injection};
+pub use t3claw_llm::testing::{StubErrorKind, StubLlm, fault_injection};
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -41,7 +41,7 @@ use crate::channels::{
 use crate::db::Database;
 use crate::error::{ChannelError, LlmError};
 use crate::tools::ToolRegistry;
-use ironclaw_llm::{CompletionRequest, FinishReason, LlmProvider};
+use t3claw_llm::{CompletionRequest, FinishReason, LlmProvider};
 
 /// Create a libSQL-backed test database in a temporary directory.
 ///
@@ -330,7 +330,7 @@ impl TestHarnessBuilder {
         use crate::agent::cost_guard::{CostGuard, CostGuardConfig};
         use crate::config::{SafetyConfig, SkillsConfig};
         use crate::hooks::HookRegistry;
-        use ironclaw_safety::SafetyLayer;
+        use t3claw_safety::SafetyLayer;
 
         let (db, temp_dir) = if let Some(db) = self.db {
             // Caller provided a DB; create a dummy temp dir to satisfy the struct.
@@ -1499,7 +1499,7 @@ mod tests {
     #[tokio::test]
     async fn stub_llm_fault_injector_sequence() {
         use crate::testing::fault_injection::{FaultAction, FaultInjector, FaultType};
-        use ironclaw_llm::LlmProvider;
+        use t3claw_llm::LlmProvider;
 
         let injector = Arc::new(FaultInjector::sequence([
             FaultAction::Fail(FaultType::RateLimited { retry_after: None }),
@@ -1508,7 +1508,7 @@ mod tests {
 
         let stub = StubLlm::new("hello").with_fault_injector(injector);
 
-        let req = ironclaw_llm::CompletionRequest::new(vec![ironclaw_llm::ChatMessage::user("hi")]);
+        let req = t3claw_llm::CompletionRequest::new(vec![t3claw_llm::ChatMessage::user("hi")]);
 
         // First call should fail with RateLimited
         let result = stub.complete(req.clone()).await;

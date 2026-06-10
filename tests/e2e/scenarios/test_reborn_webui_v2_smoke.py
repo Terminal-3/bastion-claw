@@ -1,24 +1,24 @@
 """Dedicated Reborn WebChat v2 smoke E2E.
 
-This proves the *new* Reborn surface end-to-end: the `ironclaw-reborn serve`
+This proves the *new* Reborn surface end-to-end: the `t3claw-reborn serve`
 binary (built with the `webui-v2-beta` feature) boots, serves the React SPA
 under `/v2/`, authenticates a bearer caller, and runs one text turn through the
 `/api/webchat/v2/*` endpoints against the deterministic mock LLM.
 
 This is intentionally small and complements the Rust composition tests
-(`crates/ironclaw_reborn_composition/tests/webui_v2_e2e.rs`), which drive the
+(`crates/t3claw_reborn_composition/tests/webui_v2_e2e.rs`), which drive the
 same router in-process via `tower::ServiceExt::oneshot` with no real TCP
 listener or browser. It also differs from `test_reborn_gateway_smoke.py`, which
-exercises the legacy `ironclaw` web channel (`/api/chat/*`) under ENGINE_V2 —
-NOT the `ironclaw-reborn` binary or the v2 webUI.
+exercises the legacy `t3claw` web channel (`/api/chat/*`) under ENGINE_V2 —
+NOT the `t3claw-reborn` binary or the v2 webUI.
 
 Wiring confirmed manually before this test existed:
 - The v2 SPA + `serve` subcommand are gated behind `webui-v2-beta` (transitively
-  enables `libsql`); the binary is `ironclaw-reborn`.
-- LLM is selected via `$IRONCLAW_REBORN_HOME/config.toml` `[llm.default]`; the
+  enables `libsql`); the binary is `t3claw-reborn`.
+- LLM is selected via `$T3CLAW_REBORN_HOME/config.toml` `[llm.default]`; the
   built-in `openai` provider (OpenAI `/v1/chat/completions`) is pointed at the
   mock with a `base_url` override and `api_key_env`.
-- `IRONCLAW_REBORN_WEBUI_TOKEN` must be >= 32 bytes (it doubles as the SSO
+- `T3CLAW_REBORN_WEBUI_TOKEN` must be >= 32 bytes (it doubles as the SSO
   session-signing key); the user id maps the env-bearer caller.
 - `NO_PROXY`/`no_proxy` must cover loopback so the provider's reqwest client
   does not route the mock request through a developer-local HTTP proxy.
@@ -88,7 +88,7 @@ def _write_config_toml(path: Path, mock_llm_server: str) -> None:
     Secrets stay out of the file — only the env-var NAME is referenced.
     """
     path.write_text(
-        f"""api_version = "ironclaw.runtime/v1"
+        f"""api_version = "t3claw.runtime/v1"
 
 [boot]
 profile = "local-dev"
@@ -99,8 +99,8 @@ tenant = "reborn-v2-e2e"
 default_agent = "reborn-v2-e2e-agent"
 
 [webui]
-env_token_var = "IRONCLAW_REBORN_WEBUI_TOKEN"
-env_user_id_var = "IRONCLAW_REBORN_WEBUI_USER_ID"
+env_token_var = "T3CLAW_REBORN_WEBUI_TOKEN"
+env_user_id_var = "T3CLAW_REBORN_WEBUI_USER_ID"
 
 [llm.default]
 provider_id = "openai"
@@ -113,9 +113,9 @@ base_url = "{mock_llm_server}/v1"
 
 
 @pytest.fixture(scope="module")
-async def reborn_v2_server(ironclaw_reborn_binary, mock_llm_server, tmp_path_factory):
-    """Start `ironclaw-reborn serve` with the v2 surface against the mock LLM."""
-    home_dir = tmp_path_factory.mktemp("ironclaw-reborn-v2-home")
+async def reborn_v2_server(t3claw_reborn_binary, mock_llm_server, tmp_path_factory):
+    """Start `t3claw-reborn serve` with the v2 surface against the mock LLM."""
+    home_dir = tmp_path_factory.mktemp("t3claw-reborn-v2-home")
     reborn_home = home_dir / "reborn-home"
     reborn_home.mkdir(parents=True, exist_ok=True)
     _write_config_toml(reborn_home / "config.toml", mock_llm_server)
@@ -134,23 +134,23 @@ async def reborn_v2_server(ironclaw_reborn_binary, mock_llm_server, tmp_path_fac
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": str(home_dir),
-            "IRONCLAW_REBORN_HOME": str(reborn_home),
-            "IRONCLAW_REBORN_PROFILE": "local-dev",
-            "IRONCLAW_REBORN_WEBUI_TOKEN": REBORN_V2_AUTH_TOKEN,
-            "IRONCLAW_REBORN_WEBUI_USER_ID": USER_ID,
+            "T3CLAW_REBORN_HOME": str(reborn_home),
+            "T3CLAW_REBORN_PROFILE": "local-dev",
+            "T3CLAW_REBORN_WEBUI_TOKEN": REBORN_V2_AUTH_TOKEN,
+            "T3CLAW_REBORN_WEBUI_USER_ID": USER_ID,
             "MOCK_LLM_API_KEY": "mock-api-key",
             # Keep the provider's reqwest client off any developer-local HTTP
             # proxy so the loopback mock request is not intercepted (502).
             "NO_PROXY": "127.0.0.1,localhost,::1",
             "no_proxy": "127.0.0.1,localhost,::1",
-            "RUST_LOG": "ironclaw=warn,ironclaw_reborn=warn",
+            "RUST_LOG": "t3claw=warn,t3claw_reborn=warn",
             "RUST_BACKTRACE": "1",
         }
         _forward_coverage_env(env)
 
         with stdout_path.open("wb") as out, stderr_path.open("wb") as err:
             proc = await asyncio.create_subprocess_exec(
-                ironclaw_reborn_binary,
+                t3claw_reborn_binary,
                 "serve",
                 "--host", "127.0.0.1",
                 "--port", str(port),

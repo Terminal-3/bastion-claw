@@ -3,7 +3,7 @@
 # (optionally `--model <id>`) on a PR; this workflow validates auth,
 # parses the command, resolves the PR head SHA, reacts with 🚀, then
 # delegates to nearai/benchmarks's reusable workflow which builds the
-# harness against the PR's ironclaw SHA, runs the suite, compares against
+# harness against the PR's t3claw SHA, runs the suite, compares against
 # a baseline, and posts a markdown comment back here.
 #
 # Setup / usage docs:
@@ -107,7 +107,7 @@ jobs:
             # User-input error — post a helpful reply and exit cleanly
             # (exit 0 keeps the Actions tab green; bad syntax isn't infra
             # failure).
-            gh pr comment "$PR" --repo "$REPO" --body $'Could not parse `/benchmark` command.\n\nUsage: `/benchmark <suite> [--model <model-id>]`\n\nExample: `/benchmark ironclaw-smoke`'
+            gh pr comment "$PR" --repo "$REPO" --body $'Could not parse `/benchmark` command.\n\nUsage: `/benchmark <suite> [--model <model-id>]`\n\nExample: `/benchmark t3claw-smoke`'
             exit 0
           fi
           # Pre-dispatch suite check: refuse unknown suite names before
@@ -155,7 +155,7 @@ jobs:
             model_part=" (model \`$MODEL\`)"
           fi
           gh pr comment "$PR" --repo "$REPO" --body \
-            "🧪 Started \`$SUITE\`${model_part} against ironclaw \`$short_sha\` — [watch run]($RUN_URL)."
+            "🧪 Started \`$SUITE\`${model_part} against t3claw \`$short_sha\` — [watch run]($RUN_URL)."
 
   bench:
     needs: parse
@@ -188,7 +188,7 @@ jobs:
     # small enough to trade for not stalling out every renderer change.
     uses: nearai/benchmarks/.github/workflows/bench-pr-reusable.yml@main
     with:
-      ironclaw-rev: ${{ needs.parse.outputs.head_sha }}
+      t3claw-rev: ${{ needs.parse.outputs.head_sha }}
       pr-repo: ${{ github.repository }}
       pr-number: ${{ github.event.issue.number }}
       suite-name: ${{ needs.parse.outputs.suite }}

@@ -34,7 +34,7 @@ use crate::channels::OutgoingResponse;
 use crate::tenant::SystemScope;
 use crate::workspace::Workspace;
 use crate::workspace::hygiene::HygieneConfig;
-use ironclaw_llm::{ChatMessage, CompletionRequest, LlmProvider, Reasoning};
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider, Reasoning};
 
 /// Configuration for the heartbeat runner.
 #[derive(Debug, Clone)]
@@ -438,7 +438,7 @@ impl HeartbeatRunner {
             // `thread_id` originates from the engine's internal `ConversationId`
             // (rendered as a UUID string) — trust it past the newtype boundary
             // because it was not supplied by a channel adapter.
-            thread_id: thread_id.map(ironclaw_common::ExternalThreadId::from_trusted),
+            thread_id: thread_id.map(t3claw_common::ExternalThreadId::from_trusted),
             attachments: Vec::new(),
             inline_attachments: Vec::new(),
             metadata: serde_json::json!({
@@ -907,7 +907,7 @@ mod tests {
             HeartbeatConfig,
             HygieneConfig,
             Arc<crate::workspace::Workspace>,
-            Arc<dyn ironclaw_llm::LlmProvider>,
+            Arc<dyn t3claw_llm::LlmProvider>,
             Option<tokio::sync::mpsc::Sender<crate::channels::OutgoingResponse>>,
             Option<SystemScope>,
         ) -> tokio::task::JoinHandle<()> = spawn_heartbeat;

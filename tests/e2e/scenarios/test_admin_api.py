@@ -9,10 +9,10 @@ from helpers import AUTH_TOKEN
 
 
 @pytest.fixture()
-async def admin_client(ironclaw_server):
+async def admin_client(t3claw_server):
     """Async HTTP client with admin auth headers."""
     async with httpx.AsyncClient(
-        base_url=ironclaw_server,
+        base_url=t3claw_server,
         headers={
             "Authorization": f"Bearer {AUTH_TOKEN}",
             "Content-Type": "application/json",

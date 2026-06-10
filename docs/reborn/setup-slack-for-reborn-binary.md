@@ -1,6 +1,6 @@
 # Set Up Slack for the Reborn Binary
 
-This guide is for the standalone `ironclaw-reborn serve` Slack host-beta path,
+This guide is for the standalone `t3claw-reborn serve` Slack host-beta path,
 not the legacy v1 Slack WASM channel.
 
 Slack support has two gates:
@@ -17,9 +17,9 @@ For local source runs:
 
 ```bash
 cargo run -q \
-  -p ironclaw_reborn_cli \
+  -p t3claw_reborn_cli \
   --features slack-v2-host-beta \
-  --bin ironclaw-reborn \
+  --bin t3claw-reborn \
   -- serve
 ```
 
@@ -27,9 +27,9 @@ For a local source build:
 
 ```bash
 cargo build \
-  -p ironclaw_reborn_cli \
+  -p t3claw_reborn_cli \
   --features slack-v2-host-beta \
-  --bin ironclaw-reborn
+  --bin t3claw-reborn
 ```
 
 `slack-v2-host-beta` includes `webui-v2-beta`, so do not pass both unless you
@@ -55,7 +55,7 @@ tunnel URL in Slack. The listener defaults to `127.0.0.1:3000`; use
 `serve --host 0.0.0.0 --port 3000` only when intentionally exposing it behind a
 proxy, tunnel, or container port.
 
-Do not use `IRONCLAW_REBORN_PROFILE=local-dev-yolo` for a public listener.
+Do not use `T3CLAW_REBORN_PROFILE=local-dev-yolo` for a public listener.
 That profile grants trusted host access and `serve` refuses non-loopback binds.
 
 ## Environment Variables
@@ -63,43 +63,43 @@ That profile grants trusted host access and `serve` refuses non-loopback binds.
 Minimum local env shape:
 
 ```bash
-export IRONCLAW_REBORN_HOME="$PWD/.reborn-home"
-export IRONCLAW_REBORN_PROFILE="local-dev"
+export T3CLAW_REBORN_HOME="$PWD/.reborn-home"
+export T3CLAW_REBORN_PROFILE="local-dev"
 
-# WebUI env-bearer auth; required by `ironclaw-reborn serve`.
-export IRONCLAW_REBORN_WEBUI_TOKEN="$(openssl rand -hex 32)"
-export IRONCLAW_REBORN_WEBUI_USER_ID="reborn-cli"
+# WebUI env-bearer auth; required by `t3claw-reborn serve`.
+export T3CLAW_REBORN_WEBUI_TOKEN="$(openssl rand -hex 32)"
+export T3CLAW_REBORN_WEBUI_USER_ID="reborn-cli"
 
 # LLM provider selected by [llm.default] in config.toml.
 export OPENAI_API_KEY="sk-..."
 
 # Slack secrets. The config stores only these variable names.
-export IRONCLAW_REBORN_SLACK_SIGNING_SECRET="<slack-signing-secret>"
-export IRONCLAW_REBORN_SLACK_BOT_TOKEN="xoxb-..."
+export T3CLAW_REBORN_SLACK_SIGNING_SECRET="<slack-signing-secret>"
+export T3CLAW_REBORN_SLACK_BOT_TOKEN="xoxb-..."
 ```
 
 Optional public WebUI login or OAuth flows may also need
-`IRONCLAW_REBORN_WEBUI_BASE_URL` and provider-specific SSO variables. The Slack
+`T3CLAW_REBORN_WEBUI_BASE_URL` and provider-specific SSO variables. The Slack
 Events API route itself does not require WebUI SSO.
 
 Docker/Railway env shape:
 
 ```bash
-IRONCLAW_REBORN_SERVE_HOST=0.0.0.0
+T3CLAW_REBORN_SERVE_HOST=0.0.0.0
 PORT=3000
-IRONCLAW_REBORN_HOME=/data/ironclaw-reborn
-IRONCLAW_REBORN_PROFILE=local-dev
-IRONCLAW_REBORN_WEBUI_TOKEN=<random-hex-32-bytes-or-longer>
-IRONCLAW_REBORN_WEBUI_USER_ID=reborn-cli
-IRONCLAW_REBORN_SLACK_SIGNING_SECRET=<slack-signing-secret>
-IRONCLAW_REBORN_SLACK_BOT_TOKEN=xoxb-...
+T3CLAW_REBORN_HOME=/data/t3claw-reborn
+T3CLAW_REBORN_PROFILE=local-dev
+T3CLAW_REBORN_WEBUI_TOKEN=<random-hex-32-bytes-or-longer>
+T3CLAW_REBORN_WEBUI_USER_ID=reborn-cli
+T3CLAW_REBORN_SLACK_SIGNING_SECRET=<slack-signing-secret>
+T3CLAW_REBORN_SLACK_BOT_TOKEN=xoxb-...
 OPENAI_API_KEY=sk-...
 ```
 
 ## Reborn Config
 
-Edit `$IRONCLAW_REBORN_HOME/config.toml`. If the file does not exist yet, run
-`ironclaw-reborn config init` or start the Docker image once to seed it.
+Edit `$T3CLAW_REBORN_HOME/config.toml`. If the file does not exist yet, run
+`t3claw-reborn config init` or start the Docker image once to seed it.
 
 Minimal Slack config:
 
@@ -109,8 +109,8 @@ enabled = true
 installation_id = "install-alpha"
 team_id = "T1234567890"
 api_app_id = "A1234567890"
-signing_secret_env = "IRONCLAW_REBORN_SLACK_SIGNING_SECRET"
-bot_token_env = "IRONCLAW_REBORN_SLACK_BOT_TOKEN"
+signing_secret_env = "T3CLAW_REBORN_SLACK_SIGNING_SECRET"
+bot_token_env = "T3CLAW_REBORN_SLACK_BOT_TOKEN"
 ```
 
 Field notes:
@@ -121,10 +121,10 @@ Field notes:
 | `installation_id` | Yes | Stable local id for this Slack app/workspace installation. Choose a durable operator-owned string. |
 | `team_id` | Yes | Slack workspace/team id, usually visible as `team_id` in Events API payloads. |
 | `api_app_id` | Yes | Slack app id, visible as `api_app_id` in Events API payloads. Required for personal-binding pairing. |
-| `signing_secret_env` | No | Env var containing the Slack signing secret. Defaults to `IRONCLAW_REBORN_SLACK_SIGNING_SECRET`. |
-| `bot_token_env` | No | Env var containing the Slack bot token. Defaults to `IRONCLAW_REBORN_SLACK_BOT_TOKEN`. |
+| `signing_secret_env` | No | Env var containing the Slack signing secret. Defaults to `T3CLAW_REBORN_SLACK_SIGNING_SECRET`. |
+| `bot_token_env` | No | Env var containing the Slack bot token. Defaults to `T3CLAW_REBORN_SLACK_BOT_TOKEN`. |
 | `slack_user_id` | No | Legacy static Slack user mapping. Omit for the pairing-code flow. |
-| `user_id` | No | Reborn user id for the legacy mapped user and host-mediated Slack egress. Defaults to `IRONCLAW_REBORN_WEBUI_USER_ID`. |
+| `user_id` | No | Reborn user id for the legacy mapped user and host-mediated Slack egress. Defaults to `T3CLAW_REBORN_WEBUI_USER_ID`. |
 | `shared_subject_user_id` | No | Reborn user scope for shared Slack channel turns. Omit when using explicit channel routes. |
 | `[[slack.channel_routes]]` | No | Static Slack channel id to Reborn user scope mappings for app mentions and thread replies. |
 
@@ -136,8 +136,8 @@ enabled = true
 installation_id = "install-alpha"
 team_id = "T1234567890"
 api_app_id = "A1234567890"
-signing_secret_env = "IRONCLAW_REBORN_SLACK_SIGNING_SECRET"
-bot_token_env = "IRONCLAW_REBORN_SLACK_BOT_TOKEN"
+signing_secret_env = "T3CLAW_REBORN_SLACK_SIGNING_SECRET"
+bot_token_env = "T3CLAW_REBORN_SLACK_BOT_TOKEN"
 
 # Optional: one shared Reborn subject for unrouted shared-channel turns.
 shared_subject_user_id = "slack-team-agent"
@@ -161,7 +161,7 @@ Create or edit a Slack app at `api.slack.com/apps`.
 
 Basic Information:
 
-- Copy `Signing Secret` into `IRONCLAW_REBORN_SLACK_SIGNING_SECRET`.
+- Copy `Signing Secret` into `T3CLAW_REBORN_SLACK_SIGNING_SECRET`.
 - Copy `App ID` into `[slack].api_app_id`.
 
 OAuth & Permissions:
@@ -177,7 +177,7 @@ OAuth & Permissions:
   - `mpim:history` if the bot should receive group-DM message events.
   - `files:read` if Slack file attachments should be downloaded and processed.
 - Install or reinstall the app to the workspace after changing scopes.
-- Copy `Bot User OAuth Token` into `IRONCLAW_REBORN_SLACK_BOT_TOKEN`.
+- Copy `Bot User OAuth Token` into `T3CLAW_REBORN_SLACK_BOT_TOKEN`.
 
 Event Subscriptions:
 
@@ -208,10 +208,10 @@ Minimal app manifest sketch:
 
 ```yaml
 display_information:
-  name: IronClaw Reborn
+  name: T3Claw Reborn
 features:
   bot_user:
-    display_name: IronClaw Reborn
+    display_name: T3Claw Reborn
     always_online: false
 oauth_config:
   scopes:
@@ -248,9 +248,9 @@ Start the service:
 
 ```bash
 cargo run -q \
-  -p ironclaw_reborn_cli \
+  -p t3claw_reborn_cli \
   --features slack-v2-host-beta \
-  --bin ironclaw-reborn \
+  --bin t3claw-reborn \
   -- serve --host 127.0.0.1 --port 3000
 ```
 
@@ -260,7 +260,7 @@ With Docker:
 docker run --rm \
   --env-file .env.reborn \
   -p 127.0.0.1:3000:3000 \
-  ironclaw-reborn:local
+  t3claw-reborn:local
 ```
 
 Verification checklist:
@@ -275,7 +275,7 @@ Verification checklist:
 
 ## Troubleshooting
 
-### [slack].enabled = true requires ... slack-v2-host-beta\n\nRebuild or rerun ironclaw-reborn with --features slack-v2-host-beta.\n\n### Slack route never receives events\n\nConfirm the Slack Request URL is exactly https://<public-host>/webhooks/slack/events, the public URL reaches the Reborn listener, and Socket Mode is disabled for this host-beta path.\n\n### Slack URL verification fails\n\nConfirm IRONCLAW_REBORN_SLACK_SIGNING_SECRET matches the app signing secret and that any proxy preserves the raw request body and Slack signature headers.\n\n### Slack replies fail with missing_scope\n\nAdd or confirm chat:write, reinstall the Slack app, and update IRONCLAW_REBORN_SLACK_BOT_TOKEN if Slack issued a new token.\n\n### Pairing code DM fails\n\nConfirm im:write and chat:write, reinstall the app, and verify the bot token starts with xoxb-.\n\n### Channel mention does not reach Reborn\n\nConfirm the app is invited to the channel, app_mention is subscribed, and [slack].team_id / [slack].api_app_id match the Slack app that emitted the event.\n\n### Shared-channel turns are rejected\n\nAdd a static [[slack.channel_routes]] entry, configure shared_subject_user_id, or use the WebUI Slack channel picker to allow the channel.
+### [slack].enabled = true requires ... slack-v2-host-beta\n\nRebuild or rerun t3claw-reborn with --features slack-v2-host-beta.\n\n### Slack route never receives events\n\nConfirm the Slack Request URL is exactly https://<public-host>/webhooks/slack/events, the public URL reaches the Reborn listener, and Socket Mode is disabled for this host-beta path.\n\n### Slack URL verification fails\n\nConfirm T3CLAW_REBORN_SLACK_SIGNING_SECRET matches the app signing secret and that any proxy preserves the raw request body and Slack signature headers.\n\n### Slack replies fail with missing_scope\n\nAdd or confirm chat:write, reinstall the Slack app, and update T3CLAW_REBORN_SLACK_BOT_TOKEN if Slack issued a new token.\n\n### Pairing code DM fails\n\nConfirm im:write and chat:write, reinstall the app, and verify the bot token starts with xoxb-.\n\n### Channel mention does not reach Reborn\n\nConfirm the app is invited to the channel, app_mention is subscribed, and [slack].team_id / [slack].api_app_id match the Slack app that emitted the event.\n\n### Shared-channel turns are rejected\n\nAdd a static [[slack.channel_routes]] entry, configure shared_subject_user_id, or use the WebUI Slack channel picker to allow the channel.
 
 ## Slack References
 

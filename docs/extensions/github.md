@@ -17,7 +17,7 @@ The GitHub extension allows your agent to interact with GitHub repositories, iss
 To install the GitHub extension, run:
 
 ```bash
-ironclaw registry install github
+t3claw registry install github
 ```
 
 </Step>
@@ -25,9 +25,9 @@ ironclaw registry install github
 <Step title="Configure Browser OAuth (Preferred)">
 
 Create a GitHub OAuth app at [github.com/settings/apps](https://github.com/settings/apps)
-and set its callback URL to the IronClaw OAuth callback URL your gateway uses.
+and set its callback URL to the T3Claw OAuth callback URL your gateway uses.
 
-Then expose the app credentials to IronClaw:
+Then expose the app credentials to T3Claw:
 
 ```bash
 export GITHUB_OAUTH_CLIENT_ID=...
@@ -37,10 +37,10 @@ export GITHUB_OAUTH_CLIENT_SECRET=...
 Now authenticate:
 
 ```bash
-ironclaw tool auth github
+t3claw tool auth github
 ```
 
-IronClaw will open the browser OAuth flow and store the resulting `github_token`.
+T3Claw will open the browser OAuth flow and store the resulting `github_token`.
 
 </Step>
 
@@ -49,7 +49,7 @@ IronClaw will open the browser OAuth flow and store the resulting `github_token`
 If you do not want to run a GitHub OAuth app, you can still use a Personal Access Token:
 
 ```bash
-ironclaw secret set github_token YOUR_TOKEN
+t3claw secret set github_token YOUR_TOKEN
 ```
 
 <Warning>
@@ -112,10 +112,10 @@ On the agent's GitHub account, go to [Settings -> Developer settings -> Personal
 Now that you have either OAuth app credentials or a PAT, authenticate the GitHub extension:
 
 ```bash
-ironclaw tool auth github
+t3claw tool auth github
 ```
 
-If `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` are set, IronClaw
+If `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` are set, T3Claw
 will use browser OAuth. Otherwise it falls back to prompting for a PAT.
 
 </Step>

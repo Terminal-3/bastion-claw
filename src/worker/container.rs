@@ -29,8 +29,8 @@ use crate::worker::autonomous_recovery::{
     EMPTY_TOOL_COMPLETION_NUDGE, FORCE_TEXT_RECOVERY_PROMPT,
 };
 use crate::worker::proxy_llm::ProxyLlmProvider;
-use ironclaw_llm::{ChatMessage, LlmProvider, Reasoning, ReasoningContext, ResponseMetadata};
-use ironclaw_safety::SafetyLayer;
+use t3claw_llm::{ChatMessage, LlmProvider, Reasoning, ReasoningContext, ResponseMetadata};
+use t3claw_safety::SafetyLayer;
 
 /// Configuration for the worker runtime.
 pub struct WorkerConfig {
@@ -72,7 +72,7 @@ pub struct WorkerRuntime {
 impl WorkerRuntime {
     /// Create a new worker runtime.
     ///
-    /// Reads `IRONCLAW_WORKER_TOKEN` from the environment for auth.
+    /// Reads `T3CLAW_WORKER_TOKEN` from the environment for auth.
     pub fn new(config: WorkerConfig) -> Result<Self, WorkerError> {
         let client = Arc::new(WorkerHttpClient::from_env(
             config.orchestrator_url.clone(),
@@ -437,7 +437,7 @@ impl LoopDelegate for ContainerDelegate {
         reasoning: &Reasoning,
         reason_ctx: &mut ReasoningContext,
         _iteration: usize,
-    ) -> Result<ironclaw_llm::RespondOutput, crate::error::Error> {
+    ) -> Result<t3claw_llm::RespondOutput, crate::error::Error> {
         // Container uses respond_with_tools (which may return either text or tool calls)
         reasoning
             .respond_with_tools(reason_ctx)
@@ -521,7 +521,7 @@ impl LoopDelegate for ContainerDelegate {
 
     async fn execute_tool_calls(
         &self,
-        tool_calls: Vec<ironclaw_llm::ToolCall>,
+        tool_calls: Vec<t3claw_llm::ToolCall>,
         content: Option<String>,
         reason_ctx: &mut ReasoningContext,
         reasoning: Option<String>,

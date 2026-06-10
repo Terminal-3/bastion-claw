@@ -6,15 +6,15 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::Stream;
-use ironclaw_common::{ExtensionName, ExternalThreadId, ExternalThreadIdError, JobResultStatus};
+use t3claw_common::{ExtensionName, ExternalThreadId, ExternalThreadIdError, JobResultStatus};
 use uuid::Uuid;
 
 use crate::error::ChannelError;
 
-// Channel-agnostic attachment types live in `ironclaw_common`.
+// Channel-agnostic attachment types live in `t3claw_common`.
 // Re-exported here so the existing `crate::channels::AttachmentKind` /
 // `crate::channels::IncomingAttachment` import paths keep working.
-pub use ironclaw_common::{AttachmentKind, IncomingAttachment};
+pub use t3claw_common::{AttachmentKind, IncomingAttachment};
 
 /// A message received from an external channel.
 #[derive(Debug, Clone)]
@@ -43,7 +43,7 @@ pub struct IncomingMessage {
     ///
     /// This is the *external* channel-supplied thread identifier (e.g. a
     /// Telegram chat id, Slack `thread_ts`, or web-UI UUID string) — **not**
-    /// the internal engine [`ironclaw_engine::ThreadId`] UUID. Conversion to
+    /// the internal engine [`t3claw_engine::ThreadId`] UUID. Conversion to
     /// the internal id happens in `SessionManager::resolve_thread`.
     pub thread_id: Option<ExternalThreadId>,
     /// Stable channel/chat/thread scope for this conversation.

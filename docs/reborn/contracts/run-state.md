@@ -1,15 +1,15 @@
-# IronClaw Reborn run-state contract
+# T3Claw Reborn run-state contract
 
 **Date:** 2026-04-25
 **Status:** V1 contract slice
-**Crate:** `crates/ironclaw_run_state`
+**Crate:** `crates/t3claw_run_state`
 **Depends on:** `docs/reborn/contracts/host-api.md`, `docs/reborn/contracts/filesystem.md`, `docs/reborn/contracts/capabilities.md`
 
 ---
 
 ## 1. Purpose
 
-`ironclaw_run_state` stores the current lifecycle state for host-managed invocations and the pending approval requests that can block them.
+`t3claw_run_state` stores the current lifecycle state for host-managed invocations and the pending approval requests that can block them.
 
 It is distinct from runtime events:
 
@@ -123,7 +123,7 @@ Store APIs hide cross-tenant, cross-user, and cross-agent records by returning `
 
 ## 5. Filesystem persistence
 
-Filesystem-backed stores persist through `ironclaw_filesystem::RootFilesystem`, not direct host paths or database APIs.
+Filesystem-backed stores persist through `t3claw_filesystem::RootFilesystem`, not direct host paths or database APIs.
 
 This is intentional. Production can later back `/engine` with a DB-backed filesystem/document-store implementation while Reborn service crates continue depending on host storage traits instead of Postgres/libSQL internals.
 
@@ -163,7 +163,7 @@ spawn process record created -> Completed
 spawn process creation failed -> Failed(error_kind = ProcessSpawn)
 ```
 
-For `spawn_json`, run state tracks the start request lifecycle only. Long-running/background process lifecycle belongs to `ironclaw_processes::ProcessStore` after the start workflow returns a `ProcessId`.
+For `spawn_json`, run state tracks the start request lifecycle only. Long-running/background process lifecycle belongs to `t3claw_processes::ProcessStore` after the start workflow returns a `ProcessId`.
 
 `resume_json` continues a `BlockedApproval` run only after loading an approved request and matching lease under the same tenant/user/agent/invocation scope:
 

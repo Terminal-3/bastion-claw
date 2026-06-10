@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-21
 **Status:** Design approved, revised after spec review
-**Target architecture:** IronClaw Reborn (`crates/ironclaw_*`)
+**Target architecture:** T3Claw Reborn (`crates/t3claw_*`)
 **Target branch:** `reborn-integration` — the Reborn crates and contracts
 referenced below exist on `reborn-integration`, not on `staging`. Any review or
 implementation worktree must branch from `reborn-integration`.
@@ -11,7 +11,7 @@ implementation worktree must branch from `reborn-integration`.
 
 ## 1. Purpose
 
-Add a "trigger loop" to IronClaw Reborn: a way to start an LLM-driven agent
+Add a "trigger loop" to T3Claw Reborn: a way to start an LLM-driven agent
 workflow from something other than a live human message. V1 delivers
 **scheduled (cron) triggers** — "every morning at 8am, summarize my unread
 mail." Webhook and message-regex triggers are planned fast-follow work and the
@@ -35,7 +35,7 @@ freeze index. This design depends on that wiring and must not ship before it.
 The "job queue" a trigger extends is the Reborn turn queue.
 
 The reusable abstraction is **trigger source provider**, not product adapter.
-Product adapters normalize external products into IronClaw messages. Trigger
+Product adapters normalize external products into T3Claw messages. Trigger
 sources decide when a stored trigger should fire. Cron, webhook, and
 message-regex support can share a `TriggerFire` path without pretending that
 cron is an external transport.
@@ -55,7 +55,7 @@ cron is an external transport.
 - Delivery of the final turn output to a configured default notification
   target resolved by the communication delivery policy — gated on Reborn
   outbound being available (see §6).
-- A contract extension to `ironclaw_conversations`: a host-trusted inbound
+- A contract extension to `t3claw_conversations`: a host-trusted inbound
   ingress method (`handle_inbound_turn_with_trusted_scope`).
 
 ### Acceptance criterion
@@ -88,7 +88,7 @@ thread persists.
 | Trigger scope | Inherits the creating user's `tenant/user/agent/project` scope, captured at create time (see §7, M4 — deliberate security decision). |
 | Delivery | Final turn output delivered to a communication-policy-resolved target, gated on Reborn outbound. |
 | Source abstraction | `TriggerSourceProvider` implementations emit `TriggerFire`; they are not product adapters. |
-| Submission seam | `TriggerFire` becomes synthetic inbound through `ironclaw_conversations`, host-trusted ingress path. |
+| Submission seam | `TriggerFire` becomes synthetic inbound through `t3claw_conversations`, host-trusted ingress path. |
 
 ## 4. Verified pipeline and the trusted-ingress requirement
 
@@ -96,18 +96,18 @@ A cron fire is **host-internal**, not an untrusted product adapter. This drives
 the one contract-sensitive piece of the design.
 
 - `InboundTurnService::handle_inbound_turn()`
-  (`crates/ironclaw_conversations/src/inbound.rs:54` on `reborn-integration`)
+  (`crates/t3claw_conversations/src/inbound.rs:54` on `reborn-integration`)
   calls `resolve_or_create_binding()` — the **untrusted** path. It fails closed
   for unpaired actors and does not trust requested scope hints
   (`conversation-binding.md` §4.2, §4.5).
 - The binding service already exposes the correct seam:
   `ConversationBindingService::resolve_or_create_binding_with_trusted_scope(request, trusted_agent_id, trusted_project_id)`
-  (`crates/ironclaw_conversations/src/traits.rs:26`). Trusted scope must come
+  (`crates/t3claw_conversations/src/traits.rs:26`). Trusted scope must come
   from host configuration and is persisted on first bind.
 - `InboundTurnService` exposes a trusted variant that accepts a host-owned
   `TrustedInboundTurnRequest`.
 
-**Required contract extension.** Add a facade method to `ironclaw_conversations`:
+**Required contract extension.** Add a facade method to `t3claw_conversations`:
 
 ```
 InboundTurnService::handle_inbound_turn_with_trusted_scope(
@@ -122,7 +122,7 @@ Same body as `handle_inbound_turn` but routing binding resolution through
 host-vetted scope and does not require a paired external actor*. It must be
 ratified as a contract change (Level-0 gate, see §10), not silently added.
 
-**Rejected alternative.** Have `ironclaw_triggers` compose
+**Rejected alternative.** Have `t3claw_triggers` compose
 `resolve_or_create_binding_with_trusted_scope` + `accept_inbound_message` +
 `submit_turn` itself. This duplicates `InboundTurnService::submit_or_replay`
 (`inbound.rs:91-151` — idempotency replay, submit-key rotation) — a second
@@ -159,7 +159,7 @@ conversation layer owns idempotency storage.
 
 ## 5. Components
 
-### 5.1 New crate: `ironclaw_triggers`
+### 5.1 New crate: `t3claw_triggers`
 
 Owns: the typed `TriggerRepository`, the `TriggerPollerWorker`, the `TriggerId`
 / `TriggerSchedule` / `TriggerSourceKind` domain types, trigger source
@@ -167,9 +167,9 @@ providers, `TriggerFire` construction, and the `trigger_*` capability handlers.
 Does not own turn execution, binding internals, product adapter lifecycles, or
 egress.
 
-Dependency direction: `ironclaw_triggers` depends on `ironclaw_conversations`
-(facade) and `ironclaw_host_api` (vocabulary). It must not depend upward on
-product/runtime orchestration. `cargo test -p ironclaw_architecture` covers the
+Dependency direction: `t3claw_triggers` depends on `t3claw_conversations`
+(facade) and `t3claw_host_api` (vocabulary). It must not depend upward on
+product/runtime orchestration. `cargo test -p t3claw_architecture` covers the
 new edges.
 
 ### 5.2 Data model — `TriggerRecord`
@@ -204,7 +204,7 @@ from a genuine loop failure; `TimedOut` distinguishes a stuck run.
 of the poller loop means "successfully submitted to the turn queue" — a
 synchronous outcome. `last_status = Error` means submission failed. The
 post-run variants (`ApprovalBlocked`, `TimedOut`) require a turn-lifecycle
-feedback path: `ironclaw_triggers` subscribes to an `AgentLoopDriver`
+feedback path: `t3claw_triggers` subscribes to an `AgentLoopDriver`
 completion event (or equivalent Reborn observer interface) and updates
 `last_status` asynchronously when the run ends. If no such observer is
 available in V1, `ApprovalBlocked` and `TimedOut` move to fast-follow;
@@ -229,7 +229,7 @@ same crate computes `next_run_at`.
 
 ### 5.3 Source providers and `TriggerFire`
 
-Trigger sources are provider implementations owned by `ironclaw_triggers`.
+Trigger sources are provider implementations owned by `t3claw_triggers`.
 Their job is to decide **whether** a persisted trigger should fire, compute its
 canonical fire slot, and produce a normalized `TriggerFire`:
 
@@ -237,8 +237,8 @@ canonical fire slot, and produce a normalized `TriggerFire`:
 TriggerFireIdentity {
     trigger_id,
     fire_slot,
-    route_thread_id,     // digest("ironclaw-trigger-route", trigger_id, fire_slot)
-    external_event_id,   // digest("ironclaw-trigger-event", trigger_id, fire_slot)
+    route_thread_id,     // digest("t3claw-trigger-route", trigger_id, fire_slot)
+    external_event_id,   // digest("t3claw-trigger-event", trigger_id, fire_slot)
 }
 
 TriggerFire {
@@ -277,7 +277,7 @@ fires; `InboundTurnService` starts the resulting agent turn.
 ### 5.4 `TriggerPollerWorker`
 
 A background tokio task modelled on `TurnRunnerWorker`
-(`crates/ironclaw_reborn/src/turn_runner.rs`), which is the existing precedent
+(`crates/t3claw_reborn/src/turn_runner.rs`), which is the existing precedent
 for a long-lived Reborn background worker. Loop:
 
 1. Tick every `poll_interval` (config, default ~30s).
@@ -331,8 +331,8 @@ remains deferred, now as an efficiency optimization rather than a correctness
 fix.
 
 The worker is started by the Reborn composition root — the same startup path
-that spawns `TurnRunnerWorker`. `ironclaw_reborn_composition` owns wiring it
-from config; the worker code lives in `ironclaw_triggers`. Implementation must
+that spawns `TurnRunnerWorker`. `t3claw_reborn_composition` owns wiring it
+from config; the worker code lives in `t3claw_triggers`. Implementation must
 confirm the composition root exposes a background-worker spawn hook and add one
 if it does not (H3).
 
@@ -373,12 +373,12 @@ that the conversation layer already owns.
 ### 5.6 Capabilities (`trigger_*`)
 
 `trigger_create`, `trigger_list`, `trigger_remove` are exposed through the
-Reborn capability/dispatch surface (`ironclaw_capabilities` /
-`ironclaw_dispatcher`), not the legacy `src/tools` `ToolDispatcher`. This gives
+Reborn capability/dispatch surface (`t3claw_capabilities` /
+`t3claw_dispatcher`), not the legacy `src/tools` `ToolDispatcher`. This gives
 trigger management the same authorization, audit, and scope mediation as any
 other Reborn capability (CLAUDE.md "Everything Goes Through Tools", applied to
 the Reborn surface). Implementation must confirm the exact registration path in
-`ironclaw_capabilities` and how a capability handler receives its
+`t3claw_capabilities` and how a capability handler receives its
 `TriggerRepository` dependency (M3) — likely via the host runtime service
 bundle that already carries other repositories.
 
@@ -404,11 +404,11 @@ A dedicated trigger thread has no real external channel binding. The intended
 mechanism: on turn completion for a trigger thread, route the final assistant
 message through the communication delivery resolver
 (`2026-05-29-channel-communication-delivery-resolution.md`, proposed in
-nearai/ironclaw#4240) and then through Reborn outbound (`ironclaw_outbound`).
+nearai/ironclaw#4240) and then through Reborn outbound (`t3claw_outbound`).
 The resolver is owned by
-`ironclaw_outbound` and receives enough context to distinguish triggered jobs
+`t3claw_outbound` and receives enough context to distinguish triggered jobs
 from live user messages and approval-needed events; it returns only a candidate
-`ReplyTargetBindingRef`. `ironclaw_outbound` revalidates the target before send.
+`ReplyTargetBindingRef`. `t3claw_outbound` revalidates the target before send.
 The synthetic inbound request owns only trigger ingress identity; it must not
 smuggle the default notification destination through inbound binding state. This
 must **not** be a direct
@@ -416,7 +416,7 @@ must **not** be a direct
 
 **Honest dependency note.** Reborn user-facing event/SSE transport,
 communication delivery resolution, and full product-channel egress are not all
-implemented yet. V1 delivery therefore requires: (a) `ironclaw_outbound` able
+implemented yet. V1 delivery therefore requires: (a) `t3claw_outbound` able
 to validate and prepare delivery to at least one channel, and (b) a configured,
 bound communication target for the trigger creator. If either is missing at
 implementation time, delivery moves to fast-follow and V1 acceptance is the
@@ -456,7 +456,7 @@ proving the trigger loop itself works.
   guard is deferred.
 - **Redaction.** The trigger prompt is user content — it crosses the inbound
   boundary as a `content_ref` and never appears in turn state, lifecycle
-  events, or logs (`conversation-binding.md` §20, `ironclaw_turns` guardrails).
+  events, or logs (`conversation-binding.md` §20, `t3claw_turns` guardrails).
 - **Scope flow.** `tenant / user / agent / project` flows unbroken:
   `trigger_create` → `TriggerRecord` → synthetic inbound → trusted binding →
   `TurnScope` → agent loop. No axis is dropped.
@@ -486,7 +486,7 @@ proving the trigger loop itself works.
   (`.claude/rules/testing.md` — test through the caller).
 - **Persistence parity:** PostgreSQL and libSQL tests for `TriggerRepository`,
   with migration coverage.
-- **Architecture:** `cargo test -p ironclaw_architecture` after the new crate
+- **Architecture:** `cargo test -p t3claw_architecture` after the new crate
   and its dependency edges land.
 - Per-crate `cargo fmt`, `cargo clippy`, `cargo test`, `cargo doc` evidence for
   touched crates.
@@ -502,7 +502,7 @@ proving the trigger loop itself works.
 - The communication delivery resolution design from nearai/ironclaw#4240
   (`2026-05-29-channel-communication-delivery-resolution.md`) must be promoted
   to contracts before trigger delivery or approval notifications ship.
-- `docs/reborn/2026-04-25-current-architecture-map.md` — add `ironclaw_triggers`
+- `docs/reborn/2026-04-25-current-architecture-map.md` — add `t3claw_triggers`
   once the slice lands.
 
 ## 10. Build sequence (informative — full plan is a separate document)
@@ -516,8 +516,8 @@ being far enough along to run an end-to-end turn.
 1. Contract: `handle_inbound_turn_with_trusted_scope` + host-internal ingress
    representation in `conversation-binding.md`; ratify.
 2. Implement `handle_inbound_turn_with_trusted_scope` in
-   `ironclaw_conversations` with caller-level tests.
-3. New crate `ironclaw_triggers`: `TriggerRecord`, `TriggerRepository` trait,
+   `t3claw_conversations` with caller-level tests.
+3. New crate `t3claw_triggers`: `TriggerRecord`, `TriggerRepository` trait,
    `TriggerSourceProvider` / `TriggerFire` / `TriggerFireIdentity` domain
    types, cron validation, in-memory implementation.
 4. PostgreSQL + libSQL `TriggerRepository` implementations + parity tests.
@@ -525,7 +525,7 @@ being far enough along to run an end-to-end turn.
 6. `trigger_*` capabilities + registration on the Reborn capability surface.
 7. Delivery wiring through communication delivery resolution and Reborn outbound
    — only if both are ready (§6); otherwise fast-follow.
-8. Composition wiring in `ironclaw_reborn_composition`; architecture tests.
+8. Composition wiring in `t3claw_reborn_composition`; architecture tests.
 
 ## 11. Rejected review findings (for the record)
 
@@ -533,7 +533,7 @@ The 2026-05-21 spec review was conducted against a worktree based on `staging`,
 where the Reborn crates do not exist. The following findings are artifacts of
 that branch mismatch and are rejected; the files exist on `reborn-integration`:
 
-- **C1** — `ironclaw_conversations` (`inbound.rs`, `traits.rs`) and
+- **C1** — `t3claw_conversations` (`inbound.rs`, `traits.rs`) and
   `conversation-binding.md` exist on `reborn-integration`. Real action taken:
   this doc and the implementation worktree now target `reborn-integration`
   explicitly.

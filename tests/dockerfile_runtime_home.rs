@@ -50,19 +50,19 @@ fn setup_fake_entrypoint() -> FakeEntrypoint {
 
     std::fs::create_dir_all(&bin_dir).expect("bin dir");
     write_executable(
-        &bin_dir.join("ironclaw-reborn"),
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$IRONCLAW_REBORN_TEST_ARGS_FILE\"\n",
+        &bin_dir.join("t3claw-reborn"),
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$T3CLAW_REBORN_TEST_ARGS_FILE\"\n",
     );
     write_executable(
         &bin_dir.join("cp"),
-        "#!/bin/sh\nprintf '%s\\n' 'api_version = \"ironclaw.runtime/v1\"' > \"$2\"\n",
+        "#!/bin/sh\nprintf '%s\\n' 'api_version = \"t3claw.runtime/v1\"' > \"$2\"\n",
     );
 
     FakeEntrypoint {
         _temp: temp,
         bin_dir,
         home_dir,
-        default_config: "/opt/ironclaw/reborn/config.toml".to_string(),
+        default_config: "/opt/t3claw/reborn/config.toml".to_string(),
         args_file,
     }
 }
@@ -78,24 +78,24 @@ fn write_executable(path: &std::path::Path, content: &str) {
 }
 
 #[test]
-fn runtime_image_declares_and_prepares_ironclaw_home() {
+fn runtime_image_declares_and_prepares_t3claw_home() {
     let dockerfile = runtime_dockerfile();
 
     assert!(
-        dockerfile.contains("useradd -m -d /home/ironclaw -u 1000 ironclaw"),
-        "runtime image must create the ironclaw user with the expected home directory",
+        dockerfile.contains("useradd -m -d /home/t3claw -u 1000 t3claw"),
+        "runtime image must create the t3claw user with the expected home directory",
     );
     assert!(
-        dockerfile.contains("ENV HOME=/home/ironclaw"),
-        "runtime image must set HOME to /home/ironclaw for ~/.ironclaw state",
+        dockerfile.contains("ENV HOME=/home/t3claw"),
+        "runtime image must set HOME to /home/t3claw for ~/.t3claw state",
     );
     assert!(
-        dockerfile.contains("WORKDIR /home/ironclaw"),
-        "runtime image must start in the ironclaw home directory",
+        dockerfile.contains("WORKDIR /home/t3claw"),
+        "runtime image must start in the t3claw home directory",
     );
     assert!(
-        dockerfile.contains("mkdir -p /home/ironclaw/.ironclaw"),
-        "runtime image must pre-create ~/.ironclaw before dropping privileges",
+        dockerfile.contains("mkdir -p /home/t3claw/.t3claw"),
+        "runtime image must pre-create ~/.t3claw before dropping privileges",
     );
 }
 
@@ -124,12 +124,12 @@ fn reborn_dockerfile_uses_feature_matched_cache_and_loopback_default() {
 
     assert!(
         dockerfile.contains(
-            "cargo chef cook \\\n    --profile dist \\\n    --package ironclaw_reborn_cli \\\n    --features webui-v2-beta,slack-v2-host-beta"
+            "cargo chef cook \\\n    --profile dist \\\n    --package t3claw_reborn_cli \\\n    --features webui-v2-beta,slack-v2-host-beta"
         ),
         "cargo chef cook must target the Reborn CLI package with the same features as the final build"
     );
     assert!(
-        dockerfile.contains("IRONCLAW_REBORN_SERVE_HOST=127.0.0.1"),
+        dockerfile.contains("T3CLAW_REBORN_SERVE_HOST=127.0.0.1"),
         "image default serve host must stay loopback; Railway should override to 0.0.0.0"
     );
 }
@@ -166,12 +166,12 @@ fn reborn_entrypoint_copies_config_and_builds_default_serve_args() {
         .arg(repo_file("docker/reborn/entrypoint.sh"))
         .env_clear()
         .env("PATH", fake.path_env())
-        .env("IRONCLAW_REBORN_HOME", &fake.home_dir)
-        .env("IRONCLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
-        .env("IRONCLAW_REBORN_SERVE_HOST", "0.0.0.0")
+        .env("T3CLAW_REBORN_HOME", &fake.home_dir)
+        .env("T3CLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
+        .env("T3CLAW_REBORN_SERVE_HOST", "0.0.0.0")
         .env("PORT", "4321")
-        .env("IRONCLAW_REBORN_CONFIRM_HOST_ACCESS", "true")
-        .env("IRONCLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
+        .env("T3CLAW_REBORN_CONFIRM_HOST_ACCESS", "true")
+        .env("T3CLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
         .output()
         .expect("entrypoint should run");
 
@@ -182,7 +182,7 @@ fn reborn_entrypoint_copies_config_and_builds_default_serve_args() {
     );
     assert_eq!(
         std::fs::read_to_string(fake.home_dir.join("config.toml")).expect("copied config"),
-        "api_version = \"ironclaw.runtime/v1\"\n"
+        "api_version = \"t3claw.runtime/v1\"\n"
     );
     assert_eq!(
         std::fs::read_to_string(&fake.args_file).expect("captured args"),
@@ -199,9 +199,9 @@ fn reborn_entrypoint_passes_explicit_args_through() {
         .args(["serve", "--help"])
         .env_clear()
         .env("PATH", fake.path_env())
-        .env("IRONCLAW_REBORN_HOME", &fake.home_dir)
-        .env("IRONCLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
-        .env("IRONCLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
+        .env("T3CLAW_REBORN_HOME", &fake.home_dir)
+        .env("T3CLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
+        .env("T3CLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
         .output()
         .expect("entrypoint should run");
 
@@ -225,17 +225,17 @@ fn reborn_entrypoint_resolves_known_env_placeholders_in_explicit_args() {
         .args([
             "serve",
             "--host",
-            "$IRONCLAW_REBORN_SERVE_HOST",
+            "$T3CLAW_REBORN_SERVE_HOST",
             "--port",
             "$PORT",
         ])
         .env_clear()
         .env("PATH", fake.path_env())
-        .env("IRONCLAW_REBORN_HOME", &fake.home_dir)
-        .env("IRONCLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
-        .env("IRONCLAW_REBORN_SERVE_HOST", "0.0.0.0")
+        .env("T3CLAW_REBORN_HOME", &fake.home_dir)
+        .env("T3CLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
+        .env("T3CLAW_REBORN_SERVE_HOST", "0.0.0.0")
         .env("PORT", "4321")
-        .env("IRONCLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
+        .env("T3CLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
         .output()
         .expect("entrypoint should run");
 
@@ -266,9 +266,9 @@ fn reborn_entrypoint_preserves_existing_config() {
         .args(["serve", "--help"])
         .env_clear()
         .env("PATH", fake.path_env())
-        .env("IRONCLAW_REBORN_HOME", &fake.home_dir)
-        .env("IRONCLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
-        .env("IRONCLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
+        .env("T3CLAW_REBORN_HOME", &fake.home_dir)
+        .env("T3CLAW_REBORN_DEFAULT_CONFIG", &fake.default_config)
+        .env("T3CLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
         .output()
         .expect("entrypoint should run");
 
@@ -285,22 +285,22 @@ fn reborn_entrypoint_preserves_existing_config() {
 
 #[test]
 #[cfg(unix)]
-fn reborn_entrypoint_rejects_default_config_outside_opt_ironclaw() {
+fn reborn_entrypoint_rejects_default_config_outside_opt_t3claw() {
     let fake = setup_fake_entrypoint();
     let output = Command::new("sh")
         .arg(repo_file("docker/reborn/entrypoint.sh"))
         .env_clear()
         .env("PATH", fake.path_env())
-        .env("IRONCLAW_REBORN_HOME", &fake.home_dir)
-        .env("IRONCLAW_REBORN_DEFAULT_CONFIG", "/etc/passwd")
-        .env("IRONCLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
+        .env("T3CLAW_REBORN_HOME", &fake.home_dir)
+        .env("T3CLAW_REBORN_DEFAULT_CONFIG", "/etc/passwd")
+        .env("T3CLAW_REBORN_TEST_ARGS_FILE", &fake.args_file)
         .output()
         .expect("entrypoint should run");
 
     assert!(!output.status.success(), "entrypoint should reject path");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("IRONCLAW_REBORN_DEFAULT_CONFIG must be under /opt/ironclaw"),
+        stderr.contains("T3CLAW_REBORN_DEFAULT_CONFIG must be under /opt/t3claw"),
         "stderr: {stderr}"
     );
 }

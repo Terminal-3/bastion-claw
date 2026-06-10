@@ -4,7 +4,7 @@ sidebarTitle: WebSocket & SSE
 description: Real-time streaming via WebSocket and Server-Sent Events
 ---
 
-IronClaw supports two real-time streaming protocols: **WebSocket** for bidirectional communication (chat, job updates) and **Server-Sent Events (SSE)** for unidirectional log and event streams.
+T3Claw supports two real-time streaming protocols: **WebSocket** for bidirectional communication (chat, job updates) and **Server-Sent Events (SSE)** for unidirectional log and event streams.
 
 ---
 
@@ -19,7 +19,7 @@ ws://localhost:3000/ws
 For TLS-terminated deployments:
 
 ```
-wss://ironclaw.yourdomain.com/ws
+wss://t3claw.yourdomain.com/ws
 ```
 
 ### Authentication
@@ -135,7 +135,7 @@ ws.onclose = (event) => console.log('Closed:', event.code, event.reason);
 WebSocket connections can drop due to network interruptions or server restarts. Implement reconnection with exponential backoff to avoid hammering the server:
 
 ```javascript
-class IronclawSocket {
+class T3ClawSocket {
   constructor(url, token) {
     this.url = url;
     this.token = token;
@@ -191,7 +191,7 @@ class IronclawSocket {
 }
 
 // Usage
-const client = new IronclawSocket('ws://localhost:3000/ws', TOKEN);
+const client = new T3ClawSocket('ws://localhost:3000/ws', TOKEN);
 ```
 
 ---
@@ -235,7 +235,7 @@ Each SSE event has an `event` field indicating its type and a `data` field conta
 
 ```
 event: log
-data: {"level":"info","message":"Job job_01j9abc123 started","module":"ironclaw::agent","ts":"2024-01-15T10:30:00Z"}
+data: {"level":"info","message":"Job job_01j9abc123 started","module":"t3claw::agent","ts":"2024-01-15T10:30:00Z"}
 
 event: tool_call
 data: {"job_id":"job_01j9abc123","tool":"memory_search","ts":"2024-01-15T10:30:01Z"}

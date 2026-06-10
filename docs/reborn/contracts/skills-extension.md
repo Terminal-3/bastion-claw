@@ -16,7 +16,7 @@ visibility enforcement, capability leases, and model-context injection.
 
 This contract intentionally keeps skills out of the kernel. The kernel exposes
 narrow ports and enforces policy. The first-party skills extension is userland
-code, even when it ships with IronClaw and runs in process.
+code, even when it ships with T3Claw and runs in process.
 
 Core invariant:
 
@@ -68,7 +68,7 @@ The canonical portable skill format is a directory bundle:
 ```
 
 `SKILL.md` is the authoritative instruction file. The extension and adapter
-should reuse `ironclaw_skills` for parsing, manifest validation, skill-name
+should reuse `t3claw_skills` for parsing, manifest validation, skill-name
 validation, frontmatter handling, and any compatible selection helpers.
 
 Supporting files are data by default. `scripts/` files do not become executable
@@ -163,9 +163,9 @@ Rules:
 ## 6. Storage boundary
 
 The first-party skills extension stores and reads skills through
-`ironclaw_filesystem::ScopedFilesystem` or an equivalent scoped host API handle.
+`t3claw_filesystem::ScopedFilesystem` or an equivalent scoped host API handle.
 It must not use raw host paths, direct database handles, `src/workspace`, engine
-`MemoryDoc`, or `ironclaw_memory` internals as its architectural boundary.
+`MemoryDoc`, or `t3claw_memory` internals as its architectural boundary.
 
 Initial virtual roots:
 
@@ -260,7 +260,7 @@ Skill trust is an input to policy, not a permission grant. The extension may
 report source trust, provenance, audit state, content hash, and user/admin
 promotion state. Reborn core still computes the effective runtime decision.
 
-The first-party skills extension may be shipped by IronClaw and run in process,
+The first-party skills extension may be shipped by T3Claw and run in process,
 but individual skills remain independently classified. A skill does not become
 trusted because a first-party extension enumerated it.
 
@@ -467,7 +467,7 @@ the relevant slice. Required coverage over the roadmap:
 - the extension cannot read/write outside configured virtual roots;
 - source DTOs reject traversal, absolute paths, scoped aliases, and control
   characters;
-- valid `SKILL.md` bundles parse through `ironclaw_skills`;
+- valid `SKILL.md` bundles parse through `t3claw_skills`;
 - catalog/admin, model selection, and runtime context surfaces do not reuse each
   other's DTOs or leak unsafe fields;
 - malformed visible candidates fail closed with sanitized errors;
@@ -490,9 +490,9 @@ the relevant slice. Required coverage over the roadmap:
 ## 16. Non-goals
 
 - Do not make skills kernel state.
-- Do not move parsing/catalog/lifecycle logic into `ironclaw_turns`.
+- Do not move parsing/catalog/lifecycle logic into `t3claw_turns`.
 - Do not couple Reborn skills to engine `MemoryDoc` or `src/workspace`.
-- Do not make `ironclaw_memory` the skills architectural boundary.
+- Do not make `t3claw_memory` the skills architectural boundary.
 - Do not expose raw filesystem paths, source metadata, capability IDs, secret
   handles, audit internals, hashes, or registry internals to the model.
 - Do not let skill context invoke capabilities or grant tool authority.

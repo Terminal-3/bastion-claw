@@ -20,17 +20,17 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 
-use ironclaw_engine::types::capability::LeaseId;
-use ironclaw_engine::workspace::FilesystemBackend;
-use ironclaw_engine::{
+use t3claw_engine::types::capability::LeaseId;
+use t3claw_engine::workspace::FilesystemBackend;
+use t3claw_engine::{
     CapabilityLease, EffectExecutor, GrantedActions, MountError, ProjectId, ProjectMountFactory,
     ProjectMounts, StepId, ThreadExecutionContext, ThreadId, ThreadType, WorkspaceMounts,
 };
 
-use ironclaw::bridge::EffectBridgeAdapter;
-use ironclaw::hooks::HookRegistry;
-use ironclaw::tools::ToolRegistry;
-use ironclaw_safety::{SafetyConfig, SafetyLayer};
+use t3claw::bridge::EffectBridgeAdapter;
+use t3claw::hooks::HookRegistry;
+use t3claw::tools::ToolRegistry;
+use t3claw_safety::{SafetyConfig, SafetyLayer};
 
 /// Simple factory: every project gets a `FilesystemBackend` rooted at the
 /// supplied tempdir. Used by every test in this file.
@@ -95,7 +95,7 @@ fn make_context(project_id: ProjectId) -> ThreadExecutionContext {
         available_actions_snapshot: None,
         available_action_inventory_snapshot: None,
         conversation_scope: None,
-        gate_controller: ironclaw_engine::CancellingGateController::arc(),
+        gate_controller: t3claw_engine::CancellingGateController::arc(),
         call_approval_granted: false,
         conversation_id: None,
     }

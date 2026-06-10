@@ -13,14 +13,14 @@ mod tests {
     use std::time::Duration;
 
     use async_trait::async_trait;
-    use ironclaw::channels::IncomingMessage;
-    use ironclaw::config::Config;
-    use ironclaw::tools::permissions::{ADMIN_SETTINGS_USER_ID, ADMIN_TOOL_POLICY_KEY};
-    use ironclaw_llm::{
+    use rust_decimal::Decimal;
+    use t3claw::channels::IncomingMessage;
+    use t3claw::config::Config;
+    use t3claw::tools::permissions::{ADMIN_SETTINGS_USER_ID, ADMIN_TOOL_POLICY_KEY};
+    use t3claw_llm::{
         CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
         ToolCompletionResponse,
     };
-    use rust_decimal::Decimal;
 
     use crate::support::test_rig::TestRigBuilder;
 
@@ -42,7 +42,7 @@ mod tests {
         async fn complete(
             &self,
             _request: CompletionRequest,
-        ) -> Result<CompletionResponse, ironclaw::error::LlmError> {
+        ) -> Result<CompletionResponse, t3claw::error::LlmError> {
             Ok(CompletionResponse {
                 content: "ok".to_string(),
                 input_tokens: 0,
@@ -57,7 +57,7 @@ mod tests {
         async fn complete_with_tools(
             &self,
             request: ToolCompletionRequest,
-        ) -> Result<ToolCompletionResponse, ironclaw::error::LlmError> {
+        ) -> Result<ToolCompletionResponse, t3claw::error::LlmError> {
             let names: Vec<String> = request.tools.iter().map(|tool| tool.name.clone()).collect();
             self.seen_tools
                 .lock()

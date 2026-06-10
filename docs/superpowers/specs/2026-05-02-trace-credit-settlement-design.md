@@ -88,13 +88,13 @@ The server owns:
 - admin/operator reporting
 - NEAR settlement outbox, transaction submission, and chain reconciliation
 
-IronClaw owns:
+T3Claw owns:
 
 - local opt-in, redaction, queueing, and upload behavior
 - local credit sync/display using server APIs
 - local credit notices and retry outbox
 
-IronClaw must not compute authoritative credit locally.
+T3Claw must not compute authoritative credit locally.
 
 ### NEAR contract boundary
 
@@ -272,7 +272,7 @@ Holds must be tenant-scoped, audited, reasoned, and visible to admins. Contribut
 
 ### Submission eligibility flow
 
-1. Contributor uploads a redacted `ironclaw.trace_contribution.v1` envelope.
+1. Contributor uploads a redacted `t3claw.trace_contribution.v1` envelope.
 2. Server validates auth-derived tenant and contributor principal.
 3. Server re-runs redaction and computes safe hashes.
 4. Server classifies privacy risk and duplicate/novelty signals.
@@ -514,7 +514,7 @@ This stage can be developed with the first server implementation if transferabil
 - Transferable token markets.
 - Cash-equivalent payouts.
 - Broad public proof of raw training data.
-- Letting client-side IronClaw compute authoritative credit.
+- Letting client-side T3Claw compute authoritative credit.
 - Immediate credit settlement on upload alone.
 - Open corpus downloads.
 - Raw lab-review payloads in contributor APIs.
@@ -572,7 +572,7 @@ Required test families:
 - contributor credit API separates pending, settled, reversed, and held totals
 - credit-account projection rebuild matches stored projection
 - lab attestation signature verification accepts valid signatures and rejects tampered payloads
-- IronClaw credit sync displays server states without calculating authority locally
+- T3Claw credit sync displays server states without calculating authority locally
 - NEAR contract accepts authorized settlement mints and rejects unauthorized mints
 - NEAR contract rejects or omits transfer operations
 - NEAR outbox retries do not double-submit or double-credit a settlement event
@@ -599,7 +599,7 @@ Likely contract areas:
 - NEAR contract crate or package for non-transferable settlement receipts
 - contract integration tests for authorized mint, duplicate prevention, reversal, pause, and transfer rejection
 
-IronClaw follow-up:
+T3Claw follow-up:
 
 - local credit sync/display shape if server response changes
 - CLI/web wording for estimated versus pending versus settled credits

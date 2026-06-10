@@ -1,6 +1,6 @@
 # Reborn Capability Host Contract
 
-`ironclaw_capabilities` is the caller-facing capability invocation service. It coordinates extension descriptor lookup, trust-aware authorization, approval resume, run-state transitions, optional obligation handling, dispatch, and process spawning without depending on concrete runtime crates.
+`t3claw_capabilities` is the caller-facing capability invocation service. It coordinates extension descriptor lookup, trust-aware authorization, approval resume, run-state transitions, optional obligation handling, dispatch, and process spawning without depending on concrete runtime crates.
 
 ## Obligation handling
 

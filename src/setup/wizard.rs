@@ -18,7 +18,7 @@ use std::sync::Arc;
 use deadpool_postgres::Config as PoolConfig;
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::bootstrap::ironclaw_base_dir;
+use crate::bootstrap::t3claw_base_dir;
 use crate::channels::wasm::{
     ChannelCapabilitiesFile, available_channel_names, install_bundled_channel,
 };
@@ -32,9 +32,9 @@ use crate::setup::prompts::{
     confirm, input, optional_input, print_banner, print_error, print_header, print_info,
     print_step, print_success, secret_input, select_many, select_one,
 };
-use ironclaw_llm::auth::AuthPrompt;
-use ironclaw_llm::models::{ModelFetchOptions, build_nearai_model_fetch_config, fetch_models_for};
-use ironclaw_llm::{SessionConfig, SessionManager};
+use t3claw_llm::auth::AuthPrompt;
+use t3claw_llm::models::{ModelFetchOptions, build_nearai_model_fetch_config, fetch_models_for};
+use t3claw_llm::{SessionConfig, SessionManager};
 
 /// `AuthPrompt` impl for the interactive setup wizard: prints the device
 /// code to stdout and tries to open the verification URL in a browser.
@@ -111,7 +111,7 @@ pub struct SetupConfig {
     pub steps: Vec<String>,
 }
 
-/// Interactive setup wizard for IronClaw.
+/// Interactive setup wizard for T3Claw.
 pub struct SetupWizard {
     config: SetupConfig,
     settings: Settings,
@@ -214,7 +214,7 @@ impl SetupWizard {
     /// connection, so users don't have to re-enter everything.
     pub async fn run(&mut self) -> Result<(), SetupError> {
         print_banner();
-        print_header("IronClaw Setup Wizard");
+        print_header("T3Claw Setup Wizard");
 
         if !self.config.steps.is_empty() {
             // Selective step mode: reconnect to existing DB and load settings,
@@ -334,7 +334,7 @@ impl SetupWizard {
                 }
                 self.llm_api_key = Some(SecretString::from(api_key));
                 if self.settings.selected_model.is_none() {
-                    let default = ironclaw_llm::DEFAULT_MODEL;
+                    let default = t3claw_llm::DEFAULT_MODEL;
                     self.settings.selected_model = Some(default.to_string());
                     print_info(&format!("Using default model: {default}"));
                 }
@@ -356,7 +356,7 @@ impl SetupWizard {
                     }
                 }
                 self.llm_api_key = Some(SecretString::from(api_key));
-                let registry = ironclaw_llm::ProviderRegistry::load();
+                let registry = t3claw_llm::ProviderRegistry::load();
                 if self.settings.selected_model.is_none() {
                     let default = registry
                         .find("anthropic")
@@ -379,7 +379,7 @@ impl SetupWizard {
                     }
                 }
                 self.llm_api_key = Some(SecretString::from(api_key));
-                let registry = ironclaw_llm::ProviderRegistry::load();
+                let registry = t3claw_llm::ProviderRegistry::load();
                 if self.settings.selected_model.is_none() {
                     let default = registry
                         .find("openai")
@@ -402,7 +402,7 @@ impl SetupWizard {
                     }
                 }
                 self.llm_api_key = Some(SecretString::from(api_key));
-                let registry = ironclaw_llm::ProviderRegistry::load();
+                let registry = t3claw_llm::ProviderRegistry::load();
                 if self.settings.selected_model.is_none() {
                     let default = registry
                         .find("openrouter")
@@ -519,7 +519,7 @@ impl SetupWizard {
 
         #[allow(unreachable_code)]
         Err(SetupError::Database(
-            "No database configured. Run full setup first (ironclaw onboard).".to_string(),
+            "No database configured. Run full setup first (t3claw onboard).".to_string(),
         ))
     }
 
@@ -528,7 +528,7 @@ impl SetupWizard {
     async fn reconnect_postgres(&mut self) -> Result<(), SetupError> {
         let url = std::env::var("DATABASE_URL").map_err(|_| {
             SetupError::Database(
-                "DATABASE_URL not set. Run full setup first (ironclaw onboard).".to_string(),
+                "DATABASE_URL not set. Run full setup first (t3claw onboard).".to_string(),
             )
         })?;
 
@@ -760,7 +760,7 @@ impl SetupWizard {
         }
 
         println!();
-        print_info("IronClaw uses an embedded SQLite database (libSQL).");
+        print_info("T3Claw uses an embedded SQLite database (libSQL).");
         print_info("No external database server required.");
         println!();
 
@@ -859,7 +859,7 @@ impl SetupWizard {
 
         if major_version < MIN_PG_MAJOR_VERSION {
             return Err(SetupError::Database(format!(
-                "PostgreSQL {} detected. IronClaw requires PostgreSQL {} or later for pgvector support.\n\
+                "PostgreSQL {} detected. T3Claw requires PostgreSQL {} or later for pgvector support.\n\
                  Upgrade: https://www.postgresql.org/download/",
                 version_str, MIN_PG_MAJOR_VERSION
             )));
@@ -884,7 +884,7 @@ impl SetupWizard {
                  Ubuntu:  apt install postgresql-{0}-pgvector\n  \
                  Docker:  use the pgvector/pgvector:pg{0} image\n  \
                  Source:  https://github.com/pgvector/pgvector#installation\n\n\
-                 Then restart PostgreSQL and re-run: ironclaw onboard",
+                 Then restart PostgreSQL and re-run: t3claw onboard",
                 major_version
             )));
         }
@@ -1075,13 +1075,13 @@ impl SetupWizard {
                 // Make visible to optional_env() for any subsequent config resolution.
                 crate::config::inject_single_var("SECRETS_MASTER_KEY", &key_hex);
 
-                // Store hex for write_bootstrap_env to persist to ~/.ironclaw/.env.
+                // Store hex for write_bootstrap_env to persist to ~/.t3claw/.env.
                 self.settings.secrets_master_key_hex = Some(key_hex.clone());
 
                 println!();
                 print_info(&format!(
                     "Master key generated and will be saved to {}",
-                    crate::bootstrap::ironclaw_env_path().display()
+                    crate::bootstrap::t3claw_env_path().display()
                 ));
                 println!();
                 println!("  SECRETS_MASTER_KEY={}", key_hex);
@@ -1186,11 +1186,11 @@ impl SetupWizard {
 
     /// Quick first-run local deployment profile selection.
     ///
-    /// Existing `IRONCLAW_PROFILE` values are respected because
+    /// Existing `T3CLAW_PROFILE` values are respected because
     /// `load_bootstrap_settings()` has already applied them before the wizard
     /// starts. This prompt only fills in the missing first-run local default.
     fn step_quick_local_profile(&mut self) -> Result<(), SetupError> {
-        if crate::config::env_or_override("IRONCLAW_PROFILE").is_some() {
+        if crate::config::env_or_override("T3CLAW_PROFILE").is_some() {
             return Ok(());
         }
 
@@ -1198,7 +1198,7 @@ impl SetupWizard {
             "Local (TUI + background tasks, no Docker sandbox)",
             "Local sandbox (TUI + background tasks + Docker sandbox)",
         ];
-        let choice = select_one("How should IronClaw run on this machine?", &options)
+        let choice = select_one("How should T3Claw run on this machine?", &options)
             .map_err(SetupError::Io)?;
         let profile = match choice {
             0 => QUICK_PROFILE_LOCAL,
@@ -1221,7 +1221,7 @@ impl SetupWizard {
             }
         }
 
-        crate::config::set_runtime_env("IRONCLAW_PROFILE", profile);
+        crate::config::set_runtime_env("T3CLAW_PROFILE", profile);
         crate::config::profile::apply_profile(&mut self.settings)
             .map_err(|e| SetupError::Config(e.to_string()))?;
 
@@ -1270,7 +1270,7 @@ impl SetupWizard {
         let msg = match cfg.source {
             KeySource::Env => format!(
                 "Master key stored in {}",
-                crate::bootstrap::ironclaw_env_path().display()
+                crate::bootstrap::t3claw_env_path().display()
             ),
             KeySource::Keychain => "Master key stored in OS keychain".to_string(),
             KeySource::None => unreachable!(
@@ -1284,13 +1284,13 @@ impl SetupWizard {
     /// Step 3: Inference provider selection.
     ///
     /// The menu is built entirely from the LLM crate's
-    /// [`ironclaw_llm::ProviderRegistry::selectable`] — every supported
+    /// [`t3claw_llm::ProviderRegistry::selectable`] — every supported
     /// backend including the dedicated-config ones (nearai, bedrock,
     /// openai_codex, gemini_oauth) declares its `SetupHint` in
     /// `providers.json`, and dispatch goes through that hint. No
     /// per-backend `if id == "..."` branches live here.
     async fn step_inference_provider(&mut self) -> Result<(), SetupError> {
-        let registry = ironclaw_llm::ProviderRegistry::load();
+        let registry = t3claw_llm::ProviderRegistry::load();
 
         // Show current provider if already configured.
         if let Some(current) = self.settings.llm_backend.clone() {
@@ -1324,7 +1324,7 @@ impl SetupWizard {
         // populated, OR if it's Anthropic and the OAuth-token env var is
         // set instead. Other backends (bedrock = AWS chain, codex = OAuth,
         // nearai = session) have no env-detectable presence.
-        let is_detected = |def: &ironclaw_llm::ProviderDefinition| -> bool {
+        let is_detected = |def: &t3claw_llm::ProviderDefinition| -> bool {
             let primary = def
                 .api_key_env
                 .as_deref()
@@ -1374,7 +1374,7 @@ impl SetupWizard {
     }
 
     /// Run the setup flow for a specific provider, dispatching purely
-    /// off the registry's [`ironclaw_llm::registry::SetupHint`].
+    /// off the registry's [`t3claw_llm::registry::SetupHint`].
     ///
     /// The wizard does not know about per-backend strings — every supported
     /// backend declares its credential collection style in `providers.json`,
@@ -1385,7 +1385,7 @@ impl SetupWizard {
     async fn run_provider_setup(
         &mut self,
         provider_id: &str,
-        registry: &ironclaw_llm::ProviderRegistry,
+        registry: &t3claw_llm::ProviderRegistry,
     ) -> Result<(), SetupError> {
         let def = registry
             .find(provider_id)
@@ -1403,7 +1403,7 @@ impl SetupWizard {
             return Ok(());
         };
 
-        use ironclaw_llm::registry::SetupHint;
+        use t3claw_llm::registry::SetupHint;
         match setup {
             SetupHint::ApiKey {
                 secret_name,
@@ -1635,7 +1635,7 @@ impl SetupWizard {
             return Err(SetupError::Auth("No token provided".to_string()));
         }
 
-        ironclaw_llm::auth::validate_token(ironclaw_llm::auth::AuthBackend::GithubCopilot, &token)
+        t3claw_llm::auth::validate_token(t3claw_llm::auth::AuthBackend::GithubCopilot, &token)
             .await
             .map_err(|e| SetupError::Auth(e.to_string()))?;
 
@@ -1645,9 +1645,9 @@ impl SetupWizard {
     async fn setup_github_copilot_device_login(&mut self) -> Result<(), SetupError> {
         self.set_llm_backend_preserving_model("github_copilot");
 
-        print_info("Authorize IronClaw with GitHub Copilot in your browser.");
-        let outcome = ironclaw_llm::auth::start_login(
-            ironclaw_llm::auth::LoginRequest::GithubCopilot,
+        print_info("Authorize T3Claw with GitHub Copilot in your browser.");
+        let outcome = t3claw_llm::auth::start_login(
+            t3claw_llm::auth::LoginRequest::GithubCopilot,
             &WizardAuthPrompt,
         )
         .await
@@ -1834,9 +1834,9 @@ impl SetupWizard {
             self.settings.selected_model = None;
         }
 
-        ironclaw_llm::auth::start_login(
-            ironclaw_llm::auth::LoginRequest::OpenAiCodex(
-                ironclaw_llm::auth::OpenAiCodexLoginOptions::default(),
+        t3claw_llm::auth::start_login(
+            t3claw_llm::auth::LoginRequest::OpenAiCodex(
+                t3claw_llm::auth::OpenAiCodexLoginOptions::default(),
             ),
             &WizardAuthPrompt,
         )
@@ -1850,7 +1850,7 @@ impl SetupWizard {
     /// Generic Ollama-style setup: just needs a base URL, no API key.
     fn setup_ollama_generic(
         &mut self,
-        def: &ironclaw_llm::ProviderDefinition,
+        def: &t3claw_llm::ProviderDefinition,
     ) -> Result<(), SetupError> {
         self.set_llm_backend_preserving_model(&def.id);
 
@@ -1896,7 +1896,7 @@ impl SetupWizard {
             .or_default();
         let default_region = bedrock
             .extra("region")
-            .unwrap_or(ironclaw_llm::BedrockConfig::DEFAULT_REGION)
+            .unwrap_or(t3claw_llm::BedrockConfig::DEFAULT_REGION)
             .to_string();
 
         let region_input =
@@ -1978,7 +1978,7 @@ impl SetupWizard {
 
         let region = bedrock
             .extra("region")
-            .unwrap_or(ironclaw_llm::BedrockConfig::DEFAULT_REGION);
+            .unwrap_or(t3claw_llm::BedrockConfig::DEFAULT_REGION);
         print_success(&format!("AWS Bedrock configured (region: {})", region));
         Ok(())
     }
@@ -2041,8 +2041,8 @@ impl SetupWizard {
         println!();
 
         let credentials_path = crate::config::GeminiOauthConfig::default_credentials_path();
-        let outcome = ironclaw_llm::auth::start_login(
-            ironclaw_llm::auth::LoginRequest::Gemini { credentials_path },
+        let outcome = t3claw_llm::auth::start_login(
+            t3claw_llm::auth::LoginRequest::Gemini { credentials_path },
             &WizardAuthPrompt,
         )
         .await
@@ -2085,14 +2085,14 @@ impl SetupWizard {
         }
 
         let backend = self.settings.llm_backend.as_deref().unwrap_or("nearai");
-        let registry = ironclaw_llm::ProviderRegistry::load();
+        let registry = t3claw_llm::ProviderRegistry::load();
 
         match backend {
             "nearai" => {
                 // NEAR AI: use existing provider list_models()
                 let fetched = self.fetch_nearai_models().await;
                 let models = if fetched.is_empty() {
-                    ironclaw_llm::default_models()
+                    t3claw_llm::default_models()
                 } else {
                     fetched.iter().map(|m| (m.clone(), m.clone())).collect()
                 };
@@ -2282,7 +2282,7 @@ impl SetupWizard {
             None => return vec![],
         };
 
-        use ironclaw_llm::create_llm_provider;
+        use t3claw_llm::create_llm_provider;
 
         let config = build_nearai_model_fetch_config();
 
@@ -2538,7 +2538,7 @@ impl SetupWizard {
         println!();
 
         // Discover available WASM channels
-        let channels_dir = ironclaw_base_dir().join("channels");
+        let channels_dir = t3claw_base_dir().join("channels");
 
         let mut discovered_channels = discover_wasm_channels(&channels_dir).await;
         let installed_names: HashSet<String> = discovered_channels
@@ -2767,7 +2767,7 @@ impl SetupWizard {
             Some(c) => c,
             None => {
                 print_info("Extension registry not found. Skipping tool installation.");
-                print_info("Install tools manually with: ironclaw tool install <path>");
+                print_info("Install tools manually with: t3claw tool install <path>");
                 return Ok(());
             }
         };
@@ -2785,11 +2785,11 @@ impl SetupWizard {
 
         print_info("Available tools from the extension registry:");
         print_info("Select which tools to install. You can install more later with:");
-        print_info("  ironclaw registry install <name>");
+        print_info("  t3claw registry install <name>");
         println!();
 
         // Check which tools are already installed
-        let tools_dir = ironclaw_base_dir().join("tools");
+        let tools_dir = t3claw_base_dir().join("tools");
 
         let installed_tools = discover_installed_tools(&tools_dir).await;
 
@@ -2829,7 +2829,7 @@ impl SetupWizard {
         let installer = crate::registry::installer::RegistryInstaller::new(
             repo_root.to_path_buf(),
             tools_dir.clone(),
-            ironclaw_base_dir().join("channels"),
+            t3claw_base_dir().join("channels"),
         );
 
         let mut installed_count = 0;
@@ -2856,7 +2856,7 @@ impl SetupWizard {
                     {
                         let provider = auth.provider.as_deref().unwrap_or(&tool.name);
                         // Only mention unique providers (Google tools share auth)
-                        let hint = format!("  {} - ironclaw tool auth {}", provider, tool.name);
+                        let hint = format!("  {} - t3claw tool auth {}", provider, tool.name);
                         if !auth_needed
                             .iter()
                             .any(|h| h.starts_with(&format!("  {} -", provider)))
@@ -2889,7 +2889,7 @@ impl SetupWizard {
 
     /// Step 8: Docker Sandbox -- check Docker installation and availability.
     async fn step_docker_sandbox(&mut self) -> Result<(), SetupError> {
-        print_info("IronClaw can execute code, run builds, and use tools inside Docker");
+        print_info("T3Claw can execute code, run builds, and use tools inside Docker");
         print_info("containers. This keeps your system safe -- commands from the LLM run");
         print_info("in an isolated sandbox with no access to your credentials, limited");
         print_info("filesystem access, and network traffic restricted to an allowlist.");
@@ -3062,7 +3062,7 @@ impl SetupWizard {
         println!();
 
         // Images that contain '/' look like registry references (e.g.
-        // "ghcr.io/nearai/ironclaw-worker:v1"). For those, or when
+        // "ghcr.io/nearaidev/t3claw-worker:v1"). For those, or when
         // auto_pull_image is enabled, attempt a pull before offering a
         // local build — the runtime would do the same thing via
         // SandboxManager::ensure_ready().
@@ -3132,7 +3132,7 @@ impl SetupWizard {
                 "  docker build -f Dockerfile.worker -t {} .",
                 image_name
             ));
-            print_info("or clone the IronClaw repository and build from source.");
+            print_info("or clone the T3Claw repository and build from source.");
         }
 
         Ok(())
@@ -3224,10 +3224,10 @@ impl SetupWizard {
         Ok(saved)
     }
 
-    /// Write bootstrap environment variables to `~/.ironclaw/.env`.
+    /// Write bootstrap environment variables to `~/.t3claw/.env`.
     ///
     /// Only true chicken-and-egg settings are written here — things needed
-    /// before the database is connected: `IRONCLAW_PROFILE`, `DATABASE_BACKEND`,
+    /// before the database is connected: `T3CLAW_PROFILE`, `DATABASE_BACKEND`,
     /// `DATABASE_URL`, `LIBSQL_PATH`, `SECRETS_MASTER_KEY`, `ONBOARD_COMPLETED`, and
     /// channel config vars (Signal, Claude Code sandbox).
     ///
@@ -3240,7 +3240,7 @@ impl SetupWizard {
         let mut env_vars: Vec<(String, String)> = Vec::new();
 
         if let Some(ref profile) = self.selected_deployment_profile {
-            env_vars.push(("IRONCLAW_PROFILE".to_string(), profile.clone()));
+            env_vars.push(("T3CLAW_PROFILE".to_string(), profile.clone()));
         }
 
         if let Some(ref backend) = self.settings.database_backend {
@@ -3482,7 +3482,7 @@ impl SetupWizard {
         loaded
     }
 
-    /// Save settings to the database and `~/.ironclaw/.env`, then print
+    /// Save settings to the database and `~/.t3claw/.env`, then print
     /// a warm completion card with the 3 key facts.
     async fn save_and_summarize(&mut self) -> Result<(), SetupError> {
         use crate::cli::fmt;
@@ -3509,9 +3509,9 @@ impl SetupWizard {
         println!("  {}", sep);
         println!();
 
-        // Title line: checkmark + "ironclaw is ready"
+        // Title line: checkmark + "t3claw is ready"
         println!(
-            "  {}\u{2713}{} {}ironclaw is ready{}",
+            "  {}\u{2713}{} {}t3claw is ready{}",
             fmt::success(),
             fmt::reset(),
             fmt::bold_accent(),
@@ -3591,14 +3591,14 @@ impl SetupWizard {
 
         // Action hints
         println!(
-            "  {}Start chatting:{}   {}ironclaw{}",
+            "  {}Start chatting:{}   {}t3claw{}",
             fmt::dim(),
             fmt::reset(),
             fmt::bold_accent(),
             fmt::reset(),
         );
         println!(
-            "  {}Full setup:{}       {}ironclaw onboard{}",
+            "  {}Full setup:{}       {}t3claw onboard{}",
             fmt::dim(),
             fmt::reset(),
             fmt::bold_accent(),
@@ -3608,7 +3608,7 @@ impl SetupWizard {
 
         if self.config.quick {
             print_info(
-                "Tip: Run `ironclaw onboard` to configure channels, extensions, embeddings, and more.",
+                "Tip: Run `t3claw onboard` to configure channels, extensions, embeddings, and more.",
             );
             println!();
         }
@@ -3867,7 +3867,7 @@ async fn install_selected_registry_channels(
 
         let installer = crate::registry::installer::RegistryInstaller::new(
             repo_root.clone(),
-            ironclaw_base_dir().join("tools"),
+            t3claw_base_dir().join("tools"),
             channels_dir.to_path_buf(),
         );
 
@@ -3987,7 +3987,7 @@ mod tests {
     #[test]
     fn test_wizard_owner_id_uses_resolved_env_scope() {
         let _guard = lock_env();
-        let _owner = EnvGuard::set("IRONCLAW_OWNER_ID", " wizard-owner ");
+        let _owner = EnvGuard::set("T3CLAW_OWNER_ID", " wizard-owner ");
 
         let wizard = SetupWizard::new();
         assert_eq!(wizard.owner_id(), "wizard-owner"); // safety: test-only assertion
@@ -3996,7 +3996,7 @@ mod tests {
     #[test]
     fn test_wizard_owner_id_uses_toml_scope() {
         let _guard = lock_env();
-        let _owner = EnvGuard::clear("IRONCLAW_OWNER_ID");
+        let _owner = EnvGuard::clear("T3CLAW_OWNER_ID");
         let dir = tempdir().unwrap(); // safety: test-only tempdir setup
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "owner_id = \"toml-owner\"\n").unwrap(); // safety: test-only fixture write
@@ -4009,7 +4009,7 @@ mod tests {
     #[test]
     fn test_bootstrap_env_vars_include_selected_deployment_profile() {
         let _guard = lock_env();
-        let _profile = EnvGuard::clear("IRONCLAW_PROFILE");
+        let _profile = EnvGuard::clear("T3CLAW_PROFILE");
         let mut wizard = SetupWizard::with_config(SetupConfig {
             quick: true,
             ..Default::default()
@@ -4021,7 +4021,7 @@ mod tests {
 
         assert!(
             vars.iter().any(|(key, value)| {
-                key == "IRONCLAW_PROFILE" && value == QUICK_PROFILE_LOCAL_SANDBOX
+                key == "T3CLAW_PROFILE" && value == QUICK_PROFILE_LOCAL_SANDBOX
             }),
             "selected deployment profile should be persisted to bootstrap env"
         );
@@ -4035,7 +4035,7 @@ mod tests {
     #[test]
     fn test_bootstrap_env_vars_do_not_persist_unselected_profile() {
         let _guard = lock_env();
-        let _profile = EnvGuard::set("IRONCLAW_PROFILE", QUICK_PROFILE_LOCAL);
+        let _profile = EnvGuard::set("T3CLAW_PROFILE", QUICK_PROFILE_LOCAL);
         let wizard = SetupWizard::with_config(SetupConfig {
             quick: true,
             ..Default::default()
@@ -4044,7 +4044,7 @@ mod tests {
         let vars = wizard.bootstrap_env_vars();
 
         assert!(
-            !vars.iter().any(|(key, _)| key == "IRONCLAW_PROFILE"),
+            !vars.iter().any(|(key, _)| key == "T3CLAW_PROFILE"),
             "only a wizard-selected profile should be written back"
         );
     }
@@ -4052,7 +4052,7 @@ mod tests {
     #[test]
     fn test_apply_quick_local_profile_sets_profile_and_preserves_db_config_on_merge() {
         let _guard = lock_env();
-        let _profile = EnvGuard::clear("IRONCLAW_PROFILE");
+        let _profile = EnvGuard::clear("T3CLAW_PROFILE");
 
         let mut wizard = SetupWizard::with_config(SetupConfig {
             quick: true,
@@ -4138,18 +4138,18 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         let _guard = lock_env();
-        let original = std::env::var_os("IRONCLAW_OWNER_ID");
+        let original = std::env::var_os("T3CLAW_OWNER_ID");
         unsafe {
-            std::env::set_var("IRONCLAW_OWNER_ID", OsString::from_vec(vec![0x66, 0x80]));
+            std::env::set_var("T3CLAW_OWNER_ID", OsString::from_vec(vec![0x66, 0x80]));
         }
 
         let result = SetupWizard::try_with_config_and_toml(Default::default(), None);
 
         unsafe {
             if let Some(value) = original {
-                std::env::set_var("IRONCLAW_OWNER_ID", value);
+                std::env::set_var("T3CLAW_OWNER_ID", value);
             } else {
-                std::env::remove_var("IRONCLAW_OWNER_ID");
+                std::env::remove_var("T3CLAW_OWNER_ID");
             }
         }
 
@@ -4302,10 +4302,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_discover_wasm_channels_nonexistent_dir() {
-        let channels = discover_wasm_channels(
-            &std::env::temp_dir().join("ironclaw_nonexistent_dir_abcxyz123"),
-        )
-        .await;
+        let channels =
+            discover_wasm_channels(&std::env::temp_dir().join("t3claw_nonexistent_dir_abcxyz123"))
+                .await;
         assert!(channels.is_empty());
     }
 
@@ -4544,13 +4543,13 @@ mod tests {
         // to be kept during re-onboarding.
         let mut wizard = SetupWizard::new();
 
-        let mut providers: Vec<ironclaw_llm::registry::ProviderDefinition> =
+        let mut providers: Vec<t3claw_llm::registry::ProviderDefinition> =
             serde_json::from_str(include_str!("../../providers.json")).unwrap();
         // Add a provider with no setup hint
-        providers.push(ironclaw_llm::registry::ProviderDefinition {
+        providers.push(t3claw_llm::registry::ProviderDefinition {
             id: "custom_no_setup".to_string(),
             aliases: vec![],
-            protocol: ironclaw_llm::registry::ProviderProtocol::OpenAiCompletions,
+            protocol: t3claw_llm::registry::ProviderProtocol::OpenAiCompletions,
             default_base_url: Some("http://localhost:9999/v1".to_string()),
             base_url_env: None,
             base_url_required: false,
@@ -4563,7 +4562,7 @@ mod tests {
             setup: None,
             unsupported_params: vec![],
         });
-        let registry = ironclaw_llm::ProviderRegistry::new(providers);
+        let registry = t3claw_llm::ProviderRegistry::new(providers);
 
         let result = wizard
             .run_provider_setup("custom_no_setup", &registry)
@@ -4766,7 +4765,7 @@ mod tests {
         use testcontainers_modules::testcontainers::{ImageExt, runners::AsyncRunner};
 
         let image = testcontainers_modules::postgres::Postgres::default()
-            .with_db_name("ironclaw_test")
+            .with_db_name("t3claw_test")
             .with_user("postgres")
             .with_password("postgres")
             .with_name("pgvector/pgvector")
@@ -4793,7 +4792,7 @@ mod tests {
                 return None;
             }
         };
-        let url = format!("postgres://postgres:postgres@{host}:{port}/ironclaw_test");
+        let url = format!("postgres://postgres:postgres@{host}:{port}/t3claw_test");
         Some((container, url))
     }
 

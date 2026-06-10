@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ironclaw_common::McpServerName;
+use t3claw_common::McpServerName;
 
 use crate::tools::mcp::protocol::{McpRequest, McpResponse};
 use crate::tools::mcp::session::McpSessionManager;
@@ -22,7 +22,7 @@ use crate::tools::tool::ToolError;
 pub struct HttpMcpTransport {
     server_url: String,
     /// Typed name so session-manager lookups cannot accidentally be keyed
-    /// by a free-form string. See `ironclaw_common::identity`.
+    /// by a free-form string. See `t3claw_common::identity`.
     server_name: McpServerName,
     http_client: reqwest::Client,
     session_manager: Option<Arc<McpSessionManager>>,

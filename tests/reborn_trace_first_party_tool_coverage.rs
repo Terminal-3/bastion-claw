@@ -5,8 +5,14 @@ mod support;
 
 use std::{collections::BTreeSet, time::Duration};
 
-use ironclaw_host_api::CapabilityId;
-use ironclaw_host_runtime::{
+use reborn_support::{
+    harness::{HarnessWaitConfig, RebornBinaryE2EHarness, assert_milestone_order},
+    model_replay::{
+        RebornModelReplayStep, RebornScriptedProviderToolCall, RebornTraceReplayModelGateway,
+    },
+};
+use t3claw_host_api::CapabilityId;
+use t3claw_host_runtime::{
     APPLY_PATCH_CAPABILITY_ID, ECHO_CAPABILITY_ID, GLOB_CAPABILITY_ID, GREP_CAPABILITY_ID,
     HTTP_CAPABILITY_ID, HTTP_SAVE_CAPABILITY_ID, JSON_CAPABILITY_ID, LIST_DIR_CAPABILITY_ID,
     MEMORY_READ_CAPABILITY_ID, MEMORY_SEARCH_CAPABILITY_ID, MEMORY_TREE_CAPABILITY_ID,
@@ -16,14 +22,8 @@ use ironclaw_host_runtime::{
     TRIGGER_LIST_CAPABILITY_ID, TRIGGER_REMOVE_CAPABILITY_ID, WRITE_FILE_CAPABILITY_ID,
     builtin_first_party_package,
 };
-use ironclaw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
-use ironclaw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
-use reborn_support::{
-    harness::{HarnessWaitConfig, RebornBinaryE2EHarness, assert_milestone_order},
-    model_replay::{
-        RebornModelReplayStep, RebornScriptedProviderToolCall, RebornTraceReplayModelGateway,
-    },
-};
+use t3claw_loop_support::{HostManagedModelMessageRole, HostManagedModelResponse};
+use t3claw_turns::{TurnStatus, run_profile::LoopHostMilestoneKind};
 
 const REBORN_FIRST_PARTY_E2E_COVERED_CAPABILITIES: &[&str] = &[
     ECHO_CAPABILITY_ID,
@@ -594,7 +594,7 @@ fn skill_md(name: &str, description: &str) -> String {
     format!("---\nname: {name}\ndescription: {description}\n---\nSkill body for {name}.\n")
 }
 
-fn tool_result_count(request: &ironclaw_loop_support::HostManagedModelRequest) -> usize {
+fn tool_result_count(request: &t3claw_loop_support::HostManagedModelRequest) -> usize {
     request
         .messages
         .iter()
