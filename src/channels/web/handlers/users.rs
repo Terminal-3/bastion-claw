@@ -444,6 +444,14 @@ pub async fn users_delete_handler(
         "Database not available".to_string(),
     ))?;
 
+    // Admins cannot delete their own account.
+    if id == admin.user_id {
+        return Err((
+            StatusCode::CONFLICT,
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
     // Prevent deleting the last admin.
     if is_last_admin(store.as_ref(), &id)
         .await
