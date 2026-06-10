@@ -92,7 +92,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 
   t3n-mcp-sidecar:
-    profiles: ["app"]
+    profiles: ["mcp"]
     user: "0:0"
     build:
       context: .
