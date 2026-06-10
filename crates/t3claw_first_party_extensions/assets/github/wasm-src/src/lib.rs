@@ -146,7 +146,7 @@ mod tests {
         let action: GitHubAction = serde_json::from_value(json!({
             "action": "get_pull_request",
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "number": 4286
         }))
         .expect("number should be accepted as a pull request number alias");
@@ -161,7 +161,7 @@ mod tests {
         let action: GitHubAction = serde_json::from_value(json!({
             "action": "get_pull_request_files",
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "pull_number": 4286
         }))
         .expect("pull_number should be accepted as a pull request number alias");

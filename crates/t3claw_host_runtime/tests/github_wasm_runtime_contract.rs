@@ -225,7 +225,7 @@ async fn host_runtime_services_restages_github_product_auth_for_multi_request_wa
             scope,
             json!({
                 "owner": "nearai",
-                "repo": "t3claw",
+                "repo": "ironclaw",
                 "branch": "feature/matrix",
                 "from_ref": "main"
             }),
@@ -686,7 +686,7 @@ async fn bundled_github_wasm_executes_search_get_and_comment_operations() {
     }));
     let get_issue = execute_bundled_github_wasm(
         "github.get_issue",
-        json!({"owner": "nearai", "repo": "t3claw", "issue_number": 2}),
+        json!({"owner": "nearai", "repo": "ironclaw", "issue_number": 2}),
         Arc::clone(&get_issue_http),
     );
     assert_eq!(get_issue.error, None);
@@ -711,7 +711,7 @@ async fn bundled_github_wasm_executes_search_get_and_comment_operations() {
         "github.comment_issue",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "issue_number": 2,
             "body": "Reborn WASM comment",
         }),
@@ -771,7 +771,7 @@ async fn bundled_github_wasm_replies_to_pull_request_comment_under_pr_path() {
         "github.reply_pull_request_comment",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "pr_number": 4280,
             "comment_id": 123456789_u64,
             "body": "Reply from Reborn",
@@ -804,7 +804,7 @@ async fn bundled_github_wasm_returns_json_for_empty_success_responses() {
         "github.trigger_workflow",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "workflow_id": "ci.yml",
             "ref": "main",
             "inputs": {"suite": "smoke"}
@@ -838,7 +838,7 @@ async fn bundled_github_wasm_create_branch_rejects_source_ref_without_sha() {
         "github.create_branch",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "branch": "feature/reborn-github",
             "from_ref": "main"
         }),
@@ -873,7 +873,7 @@ async fn bundled_github_wasm_create_branch_propagates_missing_source_ref() {
         "github.create_branch",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "branch": "feature/reborn-github",
             "from_ref": "missing-branch"
         }),
@@ -904,7 +904,7 @@ async fn bundled_github_wasm_rejects_raw_sha_as_create_branch_source_ref() {
         "github.create_branch",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "branch": "feature/reborn-github",
             "from_ref": "0123456789abcdef0123456789abcdef01234567"
         }),
@@ -954,15 +954,15 @@ async fn bundled_github_wasm_builds_create_repo_fork_and_release_requests() {
     let fork_http = Arc::new(RecordingWasmHostHttp::ok(WasmHttpResponse {
         status: 202,
         headers_json: "{}".to_string(),
-        body: br#"{"name":"t3claw-fork"}"#.to_vec(),
+        body: br#"{"name":"ironclaw-fork"}"#.to_vec(),
     }));
     let fork = execute_bundled_github_wasm(
         "github.fork_repo",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "organization": "nearai-labs",
-            "name": "t3claw-fork",
+            "name": "ironclaw-fork",
             "default_branch_only": true
         }),
         Arc::clone(&fork_http),
@@ -974,7 +974,7 @@ async fn bundled_github_wasm_builds_create_repo_fork_and_release_requests() {
         "https://api.github.com/repos/nearai/ironclaw/forks",
         json!({
             "organization": "nearai-labs",
-            "name": "t3claw-fork",
+            "name": "ironclaw-fork",
             "default_branch_only": true
         }),
     );
@@ -988,7 +988,7 @@ async fn bundled_github_wasm_builds_create_repo_fork_and_release_requests() {
         "github.create_release",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "tag_name": "v1.2.3",
             "target_commitish": "main",
             "name": "v1.2.3",
@@ -1027,7 +1027,7 @@ async fn bundled_github_wasm_rejects_relative_file_path_segments_before_egress()
         "github.get_file_content",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "path": "src/./main.rs"
         }),
         Arc::clone(&http),
@@ -1054,7 +1054,7 @@ async fn bundled_github_wasm_rejects_invalid_review_event_and_merge_method() {
         "github.create_pr_review",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "pr_number": 4280,
             "body": "review body",
             "event": "approve"
@@ -1079,7 +1079,7 @@ async fn bundled_github_wasm_rejects_invalid_review_event_and_merge_method() {
         "github.merge_pull_request",
         json!({
             "owner": "nearai",
-            "repo": "t3claw",
+            "repo": "ironclaw",
             "pr_number": 4280,
             "merge_method": "fast-forward"
         }),
@@ -1685,7 +1685,7 @@ fn assert_single_wasm_request(
     assert_eq!(request.body.as_deref(), expected_body);
 
     let headers: serde_json::Value = serde_json::from_str(&request.headers_json).unwrap();
-    assert_eq!(headers["User-Agent"], "T3Claw-GitHub-Reborn-WASM");
+    assert_eq!(headers["User-Agent"], "IronClaw-GitHub-Reborn-WASM");
     assert_eq!(headers["X-GitHub-Api-Version"], "2026-03-10");
 }
 
@@ -1707,7 +1707,7 @@ fn assert_single_wasm_request_json_body(
     );
 
     let headers: serde_json::Value = serde_json::from_str(&request.headers_json).unwrap();
-    assert_eq!(headers["User-Agent"], "T3Claw-GitHub-Reborn-WASM");
+    assert_eq!(headers["User-Agent"], "IronClaw-GitHub-Reborn-WASM");
     assert_eq!(headers["X-GitHub-Api-Version"], "2026-03-10");
 }
 

@@ -12,7 +12,7 @@ pub(crate) fn github_request(
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": GITHUB_API_VERSION,
-        "User-Agent": "T3Claw-GitHub-Reborn-WASM"
+        "User-Agent": "IronClaw-GitHub-Reborn-WASM"
     });
 
     let body_bytes = body.map(String::into_bytes);
