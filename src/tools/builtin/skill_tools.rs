@@ -2517,7 +2517,7 @@ mod tests {
 
         let blob = super::parse_github_blob_ref(&parsed).expect("blob ref");
         assert_eq!(blob.owner, "nearai");
-        assert_eq!(blob.repo, "t3claw");
+        assert_eq!(blob.repo, "ironclaw");
         assert_eq!(
             blob.blob_segments,
             vec!["feature", "foo", "skills", "demo", "SKILL.md"]
@@ -2532,7 +2532,7 @@ mod tests {
 
         let repo = super::parse_github_repo_ref(&parsed).expect("repo ref");
         assert_eq!(repo.owner, "nearai");
-        assert_eq!(repo.repo, "t3claw");
+        assert_eq!(repo.repo, "ironclaw");
         assert_eq!(
             repo.tree_segments,
             Some(vec![
