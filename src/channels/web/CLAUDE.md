@@ -276,6 +276,7 @@ Claim-next review leases POST `{ lease_ttl_seconds?: i64, review_due_at?: RFC333
 | DELETE | `/api/admin/users/{id}` | Delete user and all data |
 | POST | `/api/admin/users/{id}/suspend` | Suspend a user |
 | POST | `/api/admin/users/{id}/activate` | Re-activate a user |
+| POST | `/api/admin/users/{id}/token` | Create a recovery token for a user (returns plaintext once) |
 | GET | `/api/admin/usage` | Per-user LLM usage stats |
 | GET | `/api/admin/usage/summary` | System-wide usage summary for the admin dashboard |
 | GET | `/api/admin/users/{user_id}/secrets` | List a user's secrets (names only) |
