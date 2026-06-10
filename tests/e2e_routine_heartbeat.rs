@@ -852,7 +852,7 @@ mod tests {
             .emit_system_event(
                 "github",
                 "issue.opened",
-                &serde_json::json!({"repository": "NearAI/T3Claw"}),
+                &serde_json::json!({"repository": "NearAI/IronClaw"}),
                 Some("default"),
             )
             .await;
