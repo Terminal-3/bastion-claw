@@ -76,6 +76,9 @@ impl RegistryMcpEgressPlanner {
 }
 
 impl McpHostHttpEgressPlanner for RegistryMcpEgressPlanner {
+    // If a t3n hosted-MCP manifest is ever added to the registry, the t3n
+    // delegation gate (src/tools/mcp/client.rs) must be re-applied on this
+    // path — it is enforced only in the unix-socket client today.
     fn plan(&self, request: McpHostHttpEgressPlanRequest<'_>) -> McpHostHttpEgressPlan {
         let Some(endpoint) = self.provider_endpoint(request.provider) else {
             return McpHostHttpEgressPlan::default();
