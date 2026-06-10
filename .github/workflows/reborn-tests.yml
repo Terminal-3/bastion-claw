@@ -16,14 +16,11 @@ on:
   pull_request:
     branches:
       - main
-  merge_group:
-    branches:
-      - main
-    types:
-      - checks_requested
+      - staging
   push:
     branches:
       - main
+      - staging
 
 permissions:
   contents: read
@@ -42,7 +39,7 @@ env:
 jobs:
   changes:
     name: Detect Reborn test scope
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       docs_only: ${{ steps.non_diff.outputs.docs_only || steps.diff.outputs.docs_only }}
       has_reborn_tests: ${{ steps.non_diff.outputs.has_reborn_tests || steps.diff.outputs.has_reborn_tests }}
@@ -78,7 +75,7 @@ jobs:
     name: Discover Reborn package crates
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_reborn_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       packages: ${{ steps.packages.outputs.packages }}
     steps:
@@ -127,7 +124,7 @@ jobs:
     name: Test ${{ matrix.package }}
     needs: [changes, package-matrix]
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_reborn_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     env:
       ANTHROPIC_API_KEY: ""
@@ -153,7 +150,7 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: reborn-tests-${{ matrix.package }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
 
       - name: Run crate tests
         run: |
@@ -167,7 +164,7 @@ jobs:
     name: Reborn root tests (${{ matrix.partition }})
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_reborn_tests == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     env:
       ANTHROPIC_API_KEY: ""
@@ -195,14 +192,14 @@ jobs:
         uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: reborn-tests-root-${{ matrix.partition }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
 
       - name: Run Reborn root tests
         run: scripts/ci/run-reborn-root-partition.sh
 
   reborn-tests:
     name: Tests (Reborn)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: always()
     needs:
       - changes

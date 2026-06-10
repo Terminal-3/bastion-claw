@@ -1,16 +1,13 @@
 name: Code Style
 on:
   pull_request:
-  merge_group:
-    branches:
-      - main
-    types:
-      - checks_requested
-  # Pushes to main refresh the rust-cache entries that PR and merge-group
-  # jobs restore from. Non-push runs stay restore-only.
+  # Pushes to main/staging refresh the rust-cache entries that PR jobs
+  # restore from. PR jobs themselves are restore-only (see `save-if`
+  # on the rust-cache steps below).
   push:
     branches:
       - main
+      - staging
 
 permissions:
   contents: read
@@ -29,7 +26,7 @@ env:
 jobs:
   changes:
     name: Detect code changes
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       has_code: ${{ steps.non_pr.outputs.has_code || steps.diff.outputs.has_code }}
       has_boundary_check: ${{ steps.non_pr.outputs.has_boundary_check || steps.diff.outputs.has_boundary_check }}
@@ -77,7 +74,7 @@ jobs:
     name: Configure clippy matrix
     needs: changes
     if: needs.changes.outputs.has_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
@@ -86,17 +83,20 @@ jobs:
           FULL='[{"name":"all-features","flags":"--all-features"},{"name":"default","flags":""},{"name":"libsql-only","flags":"--no-default-features --features libsql"}]'
           SLIM='[{"name":"all-features","flags":"--all-features"}]'
 
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
-            echo "matrix=${SLIM}" >> "$GITHUB_OUTPUT"
-          else
+          # Full matrix on push (cache-warming + verification across configs)
+          # and on PRs targeting main (final promotion gate). Other PRs use
+          # SLIM since lint findings are almost never feature-gated.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.base_ref }}" = "main" ]; then
             echo "matrix=${FULL}" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=${SLIM}" >> "$GITHUB_OUTPUT"
           fi
 
   format:
     name: Formatting
     needs: changes
     if: needs.changes.outputs.has_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -113,7 +113,7 @@ jobs:
     name: Gateway JS syntax
     needs: changes
     if: needs.changes.outputs.has_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -132,7 +132,7 @@ jobs:
     name: cargo-deny
     needs: changes
     if: needs.changes.outputs.has_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -145,7 +145,7 @@ jobs:
     name: Clippy (${{ matrix.name }})
     needs: [changes, clippy-matrix]
     if: needs.changes.outputs.has_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       fail-fast: true
       matrix:
@@ -161,16 +161,26 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # Single shared slot across the clippy matrix. The all-features leg
+          # builds a superset of the other configs; subset legs (push only)
+          # restore from it. Only all-features writes the slot, and only on
+          # main/staging pushes — preventing a subset leg from winning the
+          # cache race and pinning the slot to a partial build.
           shared-key: clippy
-          save-if: ${{ matrix.name == 'all-features' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ matrix.name == 'all-features' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Check lints
         run: cargo clippy --all --tests --examples ${{ matrix.flags }} -- -D warnings
 
   clippy-windows:
     name: Clippy Windows (${{ matrix.name }})
     needs: [changes, clippy-matrix]
-    if: needs.changes.outputs.has_code == 'true' && github.event_name == 'push'
-    runs-on: windows-latest
+    # PR-to-main runs the full Windows matrix; pushes to long-lived branches
+    # run it for cache warming. Other PRs skip Windows lint — windows-build
+    # in test.yml provides the Windows compile signal.
+    if: >
+      needs.changes.outputs.has_code == 'true' &&
+      (github.event_name == 'push' || github.base_ref == 'main')
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     strategy:
       fail-fast: true
       matrix:
@@ -186,8 +196,11 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
+          # Per-variant Windows cache, shared with test.yml's windows-build
+          # job. windows-build runs on push (where save-if allows writes), so
+          # clippy-windows restores from a warm cache on PRs.
           key: windows-${{ matrix.name }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Check lints
         run: cargo clippy --all --tests --examples ${{ matrix.flags }} -- -D warnings
 
@@ -195,7 +208,7 @@ jobs:
     name: Reborn CLI smoke tests
     needs: changes
     if: needs.changes.outputs.has_reborn_cli == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -206,7 +219,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: reborn-cli-smoke
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Test Reborn boot config crate
         run: cargo test -p t3claw_reborn_config
       - name: Test Reborn CLI binary crate
@@ -225,7 +238,7 @@ jobs:
     name: No panics in production code
     needs: changes
     if: needs.changes.outputs.has_code == 'true' && github.event_name != 'push'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -244,7 +257,7 @@ jobs:
     name: Gateway platform/feature boundaries
     needs: changes
     if: needs.changes.outputs.has_code == 'true' || needs.changes.outputs.has_boundary_check == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -259,8 +272,8 @@ jobs:
         run: python3 scripts/check_gateway_boundaries.py test
 
   code-style:
-    name: Code Style (fmt + clippy)
-    runs-on: ubuntu-latest
+    name: Code Style (fmt + gateway-js-syntax + clippy + deny)
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: always()
     needs:
       - changes

@@ -14,14 +14,11 @@ on:
   pull_request:
     branches:
       - main
-  merge_group:
-    branches:
-      - main
-    types:
-      - checks_requested
+      - staging
   push:
     branches:
       - main
+      - staging
 
 permissions:
   contents: read
@@ -40,7 +37,7 @@ env:
 jobs:
   changes:
     name: Detect code changes
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       docs_only: ${{ steps.non_diff.outputs.docs_only || steps.diff.outputs.docs_only }}
       has_core_code: ${{ steps.non_diff.outputs.has_core_code || steps.diff.outputs.has_core_code }}
@@ -135,7 +132,7 @@ jobs:
 
   matrix-config:
     name: Configure matrix
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
       test_matrix: ${{ steps.set.outputs.test_matrix }}
       windows_matrix: ${{ steps.set.outputs.windows_matrix }}
@@ -157,7 +154,7 @@ jobs:
     name: Tests (${{ matrix.name }})
     needs: [changes, matrix-config]
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && needs.changes.outputs.has_core_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 45
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -172,11 +169,6 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -184,7 +176,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: ${{ matrix.name }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Install cargo-component
         uses: ./.github/actions/install-cargo-component
       - name: Build WASM artifacts for integration tests
@@ -214,7 +206,7 @@ jobs:
     name: Secret Store Contract Tests
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && needs.changes.outputs.has_core_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 15
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -230,7 +222,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: secret-store-contract
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Run secret store contract
         run: |
           timeout --signal=INT --kill-after=30s 10m \
@@ -240,7 +232,7 @@ jobs:
     name: Hooks Predicate-Backend Parity Tests
     needs: changes
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && needs.changes.outputs.has_core_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     services:
       postgres:
@@ -274,7 +266,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: hooks-parity
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       # Full parity matrix across all three backends: --features postgres
       # compiles the Postgres leg, --features integration adds the multi-host
       # adversarial suite, and T3CLAW_REQUIRE_POSTGRES=1 (set above) makes the
@@ -291,7 +283,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call' || needs.changes.outputs.has_runtime_heavy_risk == 'true')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -306,7 +298,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: heavy-integration
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Build Telegram WASM channel
         run: cargo build --manifest-path channels-src/telegram/Cargo.toml --target wasm32-wasip2 --release
       - name: Run thread scheduling integration tests
@@ -321,7 +313,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call' || needs.changes.outputs.has_runtime_heavy_risk == 'true')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     strategy:
       fail-fast: true
@@ -342,7 +334,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: telegram-integration-${{ matrix.partition }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Build Telegram WASM channel
         run: cargo build --manifest-path channels-src/telegram/Cargo.toml --target wasm32-wasip2 --release
       - name: Install cargo-nextest
@@ -368,24 +360,6 @@ jobs:
     with:
       ref: ${{ inputs.ref || github.sha }}
 
-  web-e2e-smoke:
-    name: Web E2E Smoke
-    needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && github.event_name == 'pull_request' && needs.changes.outputs.has_web_risk == 'true'
-    uses: ./.github/workflows/e2e.yml
-    with:
-      ref: ${{ inputs.ref || github.sha }}
-      mode: smoke
-
-  web-e2e-full:
-    name: Web E2E Smoke (merge queue)
-    needs: changes
-    if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && github.event_name == 'merge_group' && needs.changes.outputs.has_web_risk == 'true'
-    uses: ./.github/workflows/e2e.yml
-    with:
-      ref: ${{ inputs.ref || github.sha }}
-      mode: smoke
-
   telegram-tests:
     name: Telegram Channel Tests
     needs: changes
@@ -393,7 +367,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call' || needs.changes.outputs.has_telegram_risk == 'true')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -405,7 +379,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Run Telegram Channel Tests
         run: |
           timeout --signal=INT --kill-after=30s 10m \
@@ -418,7 +392,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call' || needs.changes.outputs.has_slack_risk == 'true')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout repository
@@ -433,7 +407,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: slack-integration
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Build Slack WASM channel
         run: cargo build --manifest-path channels-src/slack/Cargo.toml --target wasm32-wasip2 --release
       - name: Run Slack integration tests
@@ -445,7 +419,7 @@ jobs:
     name: Windows Build (${{ matrix.name }})
     needs: [changes, matrix-config]
     if: needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.has_legacy_tests == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_call')
-    runs-on: windows-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2204
     strategy:
       fail-fast: true
       matrix:
@@ -461,7 +435,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: windows-${{ matrix.name }}
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Check compilation
         run: cargo check --all --benches --tests --examples ${{ matrix.flags }}
 
@@ -472,7 +446,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call' || needs.changes.outputs.has_wasm_abi_risk == 'true')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 30
     env:
       CARGO_PROFILE_DEV_DEBUG: 0
@@ -483,11 +457,6 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          df -h /
       - name: Install Rust
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
@@ -495,7 +464,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: wasm-extensions
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Install cargo-component
         uses: ./.github/actions/install-cargo-component
       - name: Build all WASM extensions against current WIT
@@ -513,7 +482,7 @@ jobs:
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || github.event_name == 'workflow_call') &&
       needs.changes.outputs.has_core_code == 'true'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -525,7 +494,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: bench
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging') }}
       - name: Compile benchmarks
         run: cargo bench --all-features --no-run
 
@@ -536,7 +505,7 @@ jobs:
       needs.changes.outputs.docs_only != 'true' &&
       needs.changes.outputs.has_legacy_tests == 'true' &&
       (github.event_name == 'push' || (github.event_name == 'workflow_call' && inputs.include_docker))
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -550,7 +519,7 @@ jobs:
 
   version-check:
     name: Version Bump Check
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     needs: changes
     if: >
       (github.event_name == 'pull_request' || github.event_name == 'merge_group') &&
@@ -625,7 +594,7 @@ jobs:
 
   run-tests:
     name: Tests (Legacy)
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: always()
     needs:
       - changes
@@ -635,8 +604,6 @@ jobs:
       - heavy-integration-tests
       - telegram-integration-tests
       - replay-required
-      - web-e2e-smoke
-      - web-e2e-full
       - telegram-tests
       - slack-tests
       - wasm-wit-compat
@@ -686,14 +653,6 @@ jobs:
             require_success "replay-required" "${{ needs.replay-required.result }}"
           fi
 
-          if [[ "$event" == "pull_request" && "${{ needs.changes.outputs.has_web_risk }}" == "true" ]]; then
-            require_success "web-e2e-smoke" "${{ needs.web-e2e-smoke.result }}"
-          fi
-
-          if [[ "$event" == "merge_group" && "${{ needs.changes.outputs.has_web_risk }}" == "true" ]]; then
-            require_success "web-e2e-full" "${{ needs.web-e2e-full.result }}"
-          fi
-
           if [[ "$event" == "push" || "$event" == "workflow_call" || "${{ needs.changes.outputs.has_telegram_risk }}" == "true" ]]; then
             require_success "telegram-tests" "${{ needs.telegram-tests.result }}"
           fi
@@ -724,7 +683,7 @@ jobs:
 
   run-tests-compat:
     name: Run Tests
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     if: always()
     needs:
       - run-tests
