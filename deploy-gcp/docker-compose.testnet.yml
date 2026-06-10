@@ -1,0 +1,67 @@
+# Compose file used on the GCP testnet VM.
+#
+# Identical to docker-compose.staging.yml except:
+#   1. Images use the :testnet tag (built on push to the testnet branch).
+#   2. T3N_MCP_ENV defaults to "testnet".
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: t3claw
+      POSTGRES_USER: t3claw
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-t3claw}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U t3claw"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  t3claw:
+    profiles: ["app"]
+    image: us-central1-docker.pkg.dev/gen-lang-client-0263867259/t3claw/agent:testnet
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:3000:3000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://t3claw:${POSTGRES_PASSWORD:-t3claw}@postgres:5432/t3claw
+      GATEWAY_ENABLED: "true"
+      GATEWAY_HOST: "0.0.0.0"
+      GATEWAY_PORT: "3000"
+      CLI_ENABLED: "false"
+      ONBOARD_COMPLETED: "true"
+      T3CLAW_IN_DOCKER: "true"
+      SANDBOX_ENABLED: "false"
+      T3N_MCP_SOCKET_PATH: /var/run/t3n-mcp/t3n-mcp.sock
+    volumes:
+      - t3claw_data:/home/t3claw/.t3claw
+      - t3n_mcp_socket:/var/run/t3n-mcp
+
+  t3n-mcp-sidecar:
+    profiles: ["app"]
+    user: "0:0"
+    image: us-central1-docker.pkg.dev/gen-lang-client-0263867259/t3claw/t3n-mcp-sidecar:testnet
+    restart: unless-stopped
+    environment:
+      T3N_SDK_ENV: ${T3N_MCP_ENV:-testnet}
+      T3N_MCP_RPC_URL: ${T3N_MCP_RPC_URL:-}
+      T3N_MCP_DASHBOARD_URL: ${T3N_MCP_DASHBOARD_URL:-}
+      PRIVATE_KEY: ${T3N_MCP_PRIVATE_KEY:-}
+      T3N_MCP_AGENT_SECRET_HEX: ${T3N_MCP_AGENT_SECRET_HEX:-}
+      MCP_SOCKET_PATH: /var/run/t3n-mcp/t3n-mcp.sock
+    volumes:
+      - t3n_mcp_socket:/var/run/t3n-mcp
+
+volumes:
+  pgdata:
+  t3claw_data:
+  t3n_mcp_socket:

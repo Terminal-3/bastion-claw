@@ -1,0 +1,33 @@
+[Unit]
+Description=T3Claw AI Assistant
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/t3claw
+
+# Fetch latest .env from Secret Manager. The secret name is derived from the
+# VM's t3env metadata attribute (staging → t3claw-staging-env, etc.).
+# Uses a helper script to avoid systemd expanding shell variables in ExecStartPre.
+ExecStartPre=/opt/t3claw/fetch-env.sh
+
+# Pull latest images so every restart picks up a new push.
+ExecStartPre=/usr/bin/docker compose --profile app pull
+
+# Start all services (postgres, t3claw, t3n-mcp-sidecar).
+ExecStart=/usr/bin/docker compose --profile app up --remove-orphans
+
+# Bring down containers cleanly on stop/restart.
+ExecStop=/usr/bin/docker compose --profile app down
+
+Restart=always
+RestartSec=10
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=t3claw
+
+[Install]
+WantedBy=multi-user.target
