@@ -4,7 +4,7 @@
 
 ```bash
 git clone https://github.com/Terminal-3/t3-claw.git
-cd t3claw
+cd t3-claw
 ./scripts/dev-setup.sh
 ```
 

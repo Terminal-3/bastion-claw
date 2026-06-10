@@ -465,7 +465,7 @@ Install it with `cargo`, just make sure you have [Rust](https://rustup.rs) insta
 ```bash
 # Clone the repository
 git clone https://github.com/Terminal-3/t3-claw.git
-cd t3claw
+cd t3-claw
 
 # Build
 cargo build --release
