@@ -918,8 +918,8 @@ mod tests {
                 "chat": {"id": -42, "type": "supergroup"},
                 "text": "@t3claw_bot /help",
                 "entities": [
-                    {"type": "mention", "offset": 0, "length": 13},
-                    {"type": "bot_command", "offset": 14, "length": 5}
+                    {"type": "mention", "offset": 0, "length": 11},
+                    {"type": "bot_command", "offset": 12, "length": 5}
                 ]
             }
         }"#;
@@ -1075,7 +1075,7 @@ mod tests {
                     {"file_id": "AAAA", "file_unique_id": "u1", "width": 100, "height": 100, "file_size": 500}
                 ],
                 "caption": "@t3claw_bot please look",
-                "caption_entities": [{"type": "mention", "offset": 0, "length": 13}]
+                "caption_entities": [{"type": "mention", "offset": 0, "length": 11}]
             }
         }"#;
         let parsed =
@@ -1201,7 +1201,7 @@ mod tests {
                 "from": {"id": 777, "is_bot": false, "first_name": "Alice"},
                 "chat": {"id": -42, "type": "supergroup"},
                 "text": "@t3claw_bot please help",
-                "entities": [{"type": "mention", "offset": 0, "length": 13}]
+                "entities": [{"type": "mention", "offset": 0, "length": 11}]
             }
         }"#;
         let parsed =
@@ -1256,7 +1256,7 @@ mod tests {
                 "from": {"id": 777, "is_bot": false, "first_name": "Alice"},
                 "chat": {"id": -42, "type": "supergroup"},
                 "text": "/help@t3claw_bot args here",
-                "entities": [{"type": "bot_command", "offset": 0, "length": 18}]
+                "entities": [{"type": "bot_command", "offset": 0, "length": 16}]
             }
         }"#;
         let parsed =
@@ -1302,7 +1302,7 @@ mod tests {
                 "chat": {"id": -42, "type": "supergroup"},
                 "message_thread_id": 7,
                 "text": "@t3claw_bot hello",
-                "entities": [{"type": "mention", "offset": 0, "length": 13}]
+                "entities": [{"type": "mention", "offset": 0, "length": 11}]
             }
         }"#;
         let parsed =
@@ -1328,7 +1328,7 @@ mod tests {
                 "chat": {"id": -42, "type": "supergroup"},
                 "message_thread_id": 7,
                 "text": "@t3claw_bot more",
-                "entities": [{"type": "mention", "offset": 0, "length": 13}]
+                "entities": [{"type": "mention", "offset": 0, "length": 11}]
             }
         }"#;
         let parsed2 =
