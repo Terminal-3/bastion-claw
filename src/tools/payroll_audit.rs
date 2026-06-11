@@ -26,10 +26,21 @@ use serde_json::Value;
 /// Bare MCP tool names that mark a payroll milestone. The engine seam hands us
 /// the MCP-prefixed form (`t3n_mcp_runPayrollComputation`); [`canonical_tool`]
 /// strips that prefix before matching against these.
+///
+/// Both the original `tee:payroll` names and the z-space names are listed here.
+/// The z-space tools (prefix `z`) are the T3-TS-044 tenant-contract equivalents
+/// running side-by-side during the migration window; they emit identical
+/// milestone shapes, so the same formatters handle both sets.
 const RUN: &str = "runPayrollComputation";
 const ESCALATIONS: &str = "submitEscalationResolutions";
 const DISBURSE: &str = "executeDisbursement";
 const FINALIZE: &str = "finalizeAudit";
+
+/// Z-space (tenant-contract) equivalents — T3-TS-044 side-by-side names.
+const Z_RUN: &str = "zRunPayrollComputation";
+const Z_ESCALATIONS: &str = "zSubmitEscalationResolutions";
+const Z_DISBURSE: &str = "zExecuteDisbursement";
+const Z_FINALIZE: &str = "zFinalizeAudit";
 
 /// Strip the t3n MCP server prefix so the bare names above match.
 ///
@@ -42,13 +53,14 @@ fn canonical_tool(tool_name: &str) -> &str {
     tool_name.strip_prefix("t3n_mcp_").unwrap_or(tool_name)
 }
 
-/// True when `tool_name` is one of the four payroll milestone tools (after
-/// stripping the MCP server prefix). Used by the engine seams to gate cheaply
-/// before parsing any tool output.
+/// True when `tool_name` is one of the payroll milestone tools (after stripping
+/// the MCP server prefix). Covers both the original `tee:payroll` names and the
+/// z-space equivalents introduced by T3-TS-044. Used by the engine seams to
+/// gate cheaply before parsing any tool output.
 pub fn is_payroll_milestone(tool_name: &str) -> bool {
     matches!(
         canonical_tool(tool_name),
-        RUN | ESCALATIONS | DISBURSE | FINALIZE
+        RUN | ESCALATIONS | DISBURSE | FINALIZE | Z_RUN | Z_ESCALATIONS | Z_DISBURSE | Z_FINALIZE
     )
 }
 
@@ -109,10 +121,10 @@ pub fn format_milestone(
 
     if let Some(err) = error {
         let step = match canonical {
-            RUN => "computation",
-            DISBURSE => "disbursement",
-            FINALIZE => "finalisation",
-            ESCALATIONS => "escalation resolution",
+            RUN | Z_RUN => "computation",
+            DISBURSE | Z_DISBURSE => "disbursement",
+            FINALIZE | Z_FINALIZE => "finalisation",
+            ESCALATIONS | Z_ESCALATIONS => "escalation resolution",
             _ => "step",
         };
         return Some(match cycle {
@@ -122,10 +134,10 @@ pub fn format_milestone(
     }
 
     Some(match canonical {
-        RUN => format_run(params, p, cycle),
-        ESCALATIONS => format_escalations(p, cycle),
-        DISBURSE => format_disburse(p, cycle),
-        FINALIZE => format_finalize(p, cycle),
+        RUN | Z_RUN => format_run(params, p, cycle),
+        ESCALATIONS | Z_ESCALATIONS => format_escalations(p, cycle),
+        DISBURSE | Z_DISBURSE => format_disburse(p, cycle),
+        FINALIZE | Z_FINALIZE => format_finalize(p, cycle),
         _ => unreachable!("guarded by is_payroll_milestone"),
     })
 }
@@ -637,6 +649,17 @@ mod tests {
         assert!(is_payroll_milestone("t3n_mcp_submitEscalationResolutions"));
         // Bare names still match (defensive — either seam form works).
         assert!(is_payroll_milestone(RUN));
+
+        // Z-space equivalents (T3-TS-044) — both prefixed and bare forms.
+        assert!(is_payroll_milestone("t3n_mcp_zRunPayrollComputation"));
+        assert!(is_payroll_milestone("t3n_mcp_zExecuteDisbursement"));
+        assert!(is_payroll_milestone("t3n_mcp_zFinalizeAudit"));
+        assert!(is_payroll_milestone("t3n_mcp_zSubmitEscalationResolutions"));
+        assert!(is_payroll_milestone(Z_RUN));
+        assert!(is_payroll_milestone(Z_DISBURSE));
+        assert!(is_payroll_milestone(Z_FINALIZE));
+        assert!(is_payroll_milestone(Z_ESCALATIONS));
+
         // A non-payroll t3n tool does not.
         assert!(!is_payroll_milestone("t3n_mcp_listMyContext"));
 
@@ -655,6 +678,25 @@ mod tests {
         let msg =
             format_milestone("t3n_mcp_executeDisbursement", None, None, Some("boom")).unwrap();
         assert_eq!(msg, "⚠️ Payroll disbursement failed — boom");
+
+        // Z-space names produce the same milestone lines.
+        let msg =
+            format_milestone("t3n_mcp_zRunPayrollComputation", None, Some(&env), None).unwrap();
+        assert!(msg.contains("Payroll cycle started"), "{msg}");
+        assert!(msg.contains("cycle 2026-06"), "{msg}");
+
+        let msg =
+            format_milestone("t3n_mcp_zExecuteDisbursement", None, None, Some("boom")).unwrap();
+        assert_eq!(msg, "⚠️ Payroll disbursement failed — boom");
+
+        let msg =
+            format_milestone("t3n_mcp_zFinalizeAudit", None, None, Some("err")).unwrap();
+        assert!(msg.contains("finalisation failed"), "{msg}");
+
+        let msg =
+            format_milestone("t3n_mcp_zSubmitEscalationResolutions", None, None, Some("err"))
+                .unwrap();
+        assert!(msg.contains("escalation resolution failed"), "{msg}");
     }
 
     #[test]
