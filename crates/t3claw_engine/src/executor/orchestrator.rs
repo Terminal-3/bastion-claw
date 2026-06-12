@@ -1907,6 +1907,7 @@ async fn execute_single_action(
                     call_id: call_id.to_string(),
                     duration_ms: r.duration.as_millis() as u64,
                     params_summary: params_summary.clone(),
+                    result_preview: crate::types::event::result_preview_from_output(&r.output),
                 }
             };
             let result_json = serde_json::json!({
@@ -2156,6 +2157,7 @@ async fn execute_single_action_with_inline_retry(
                 call_id: call_id.to_string(),
                 duration_ms: 0,
                 params_summary: params_summary.clone(),
+                result_preview: crate::types::event::result_preview_from_output(&cached_output),
             };
             accumulated_events.push(event);
             let result_json = serde_json::json!({
@@ -2294,6 +2296,8 @@ fn handle_emit_event(
                 call_id,
                 duration_ms: 0,
                 params_summary: None,
+                // Python-emitted events carry no output payload.
+                result_preview: None,
             }
         }
         "action_failed" => {

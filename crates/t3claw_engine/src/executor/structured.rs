@@ -519,6 +519,9 @@ fn classify_exec_result(
                         &call.action_name,
                         &call.parameters,
                     ),
+                    result_preview: crate::types::event::result_preview_from_output(
+                        &action_result.output,
+                    ),
                 }
             };
             (action_result, event)
@@ -1008,6 +1011,58 @@ mod tests {
             assert_eq!(call_id, "call_r2o5mqBgdNUlH8KzskncUGaX");
             assert_eq!(action_name, "web_search");
         }
+    }
+
+    #[tokio::test]
+    async fn action_executed_event_records_result_preview() {
+        // Regression: per-call outputs were never recorded on
+        // `ActionExecuted`, so tool-call cards in the web UI had empty
+        // bodies for calls without a joined `ActionResult` message.
+        let thread = Thread::new(
+            "test",
+            ThreadType::Foreground,
+            ProjectId::new(),
+            "test-user",
+            ThreadConfig::default(),
+        );
+        let effects: Arc<dyn EffectExecutor> = Arc::new(MockEffects::new(
+            vec![test_action("web_search")],
+            vec![Ok(ActionResult {
+                call_id: String::new(),
+                action_name: "web_search".into(),
+                output: serde_json::json!({"results": ["rust 1.99 released"]}),
+                is_error: false,
+                duration: Duration::from_millis(42),
+            })],
+        ));
+        let leases = Arc::new(LeaseManager::new());
+        let policy = Arc::new(PolicyEngine::new());
+        let ctx = make_exec_context(&thread);
+
+        leases
+            .grant(thread.id, "search", GrantedActions::All, None, None)
+            .await
+            .unwrap();
+
+        let calls = vec![ActionCall {
+            id: "call_preview_1".into(),
+            action_name: "web_search".into(),
+            parameters: serde_json::json!({"query": "test"}),
+        }];
+
+        let result = execute_action_calls(&calls, &thread, &effects, &leases, &policy, &ctx, &[])
+            .await
+            .unwrap();
+
+        let preview = result.events.iter().find_map(|e| match e {
+            EventKind::ActionExecuted { result_preview, .. } => result_preview.as_deref(),
+            _ => None,
+        });
+        assert_eq!(
+            preview,
+            Some(r#"{"results":["rust 1.99 released"]}"#),
+            "ActionExecuted must carry a bounded preview of the action output"
+        );
     }
 
     #[tokio::test]

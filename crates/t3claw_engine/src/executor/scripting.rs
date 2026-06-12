@@ -2245,6 +2245,7 @@ async fn drive_inline_gate(
                 call_id: gate.call_id.clone(),
                 duration_ms: 0,
                 params_summary,
+                result_preview: crate::types::event::result_preview_from_output(&cached_output),
             });
             let monty_val = json_to_monty(&cached_output);
             action_results.push(ActionResult {
@@ -2327,6 +2328,9 @@ async fn drive_inline_gate(
                         call_id: gate.call_id.clone(),
                         duration_ms: result.duration.as_millis() as u64,
                         params_summary,
+                        result_preview: crate::types::event::result_preview_from_output(
+                            &result.output,
+                        ),
                     });
                 }
                 let monty_val = json_to_monty(&result.output);
@@ -2472,6 +2476,7 @@ async fn resolve_tool_future(
                     call_id: call_id.into(),
                     duration_ms: result.duration.as_millis() as u64,
                     params_summary,
+                    result_preview: crate::types::event::result_preview_from_output(&result.output),
                 });
             }
             let monty_val = json_to_monty(&result.output);
@@ -2915,6 +2920,55 @@ mod tests {
                 .is_some(),
             "denied snapshot misses must not consume the lease"
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_tool_future_records_result_preview_on_action_executed() {
+        // Regression: CodeAct (Tier 1) outputs flow back into the Python VM
+        // only, so without a preview on `ActionExecuted` the web UI's
+        // tool-call cards had empty bodies for every CodeAct call.
+        let thread = make_test_thread();
+        let leases = LeaseManager::new();
+        let ctx = make_exec_context(&thread);
+        let effects: Arc<dyn EffectExecutor> =
+            Arc::new(MockEffects::new(vec![test_action("web_search")], vec![]));
+
+        let handle = tokio::spawn(async {
+            (
+                Ok(ActionResult {
+                    call_id: "code_call_1".into(),
+                    action_name: "web_search".into(),
+                    output: serde_json::Value::String("two results found".into()),
+                    is_error: false,
+                    duration: Duration::from_millis(7),
+                }),
+                7u64,
+            )
+        });
+
+        let mut action_results = Vec::new();
+        let mut events = Vec::new();
+        let result = resolve_tool_future(
+            handle,
+            "web_search",
+            "code_call_1",
+            crate::types::capability::LeaseId::new(),
+            None,
+            &leases,
+            &effects,
+            &ctx,
+            &mut action_results,
+            &mut events,
+        )
+        .await;
+
+        assert!(matches!(result, ExtFunctionResult::Return(_)));
+        assert!(matches!(
+            events.as_slice(),
+            [EventKind::ActionExecuted { call_id, result_preview, .. }]
+                if call_id == "code_call_1"
+                    && result_preview.as_deref() == Some("two results found")
+        ));
     }
 
     /// Stub LLM that always returns text "stub". Only used so execute_code

@@ -204,6 +204,40 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}...", &s[..end]) // safety: end is validated by is_char_boundary loop above
     }
 }
+
+/// Byte budget for [`EventKind::ActionExecuted`] `result_preview` values.
+pub const RESULT_PREVIEW_MAX_BYTES: usize = 500;
+
+/// Truncate action output for the event preview without slicing a
+/// multi-byte UTF-8 sequence. The rule is "include every char whose
+/// start index is below the budget", so the last included char may
+/// extend past the budget by up to `len_utf8() - 1` bytes. Mirrors the
+/// host crate's `truncate_tool_result_preview` (the engine must not
+/// depend on the host crate).
+pub fn truncate_result_preview(content: &str) -> String {
+    if content.len() <= RESULT_PREVIEW_MAX_BYTES {
+        return content.to_string();
+    }
+    let end = content
+        .char_indices()
+        .take_while(|(i, _)| *i < RESULT_PREVIEW_MAX_BYTES)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &content[..end]) // safety: end is char-boundary via char_indices
+}
+
+/// Render an action output value as a bounded preview string for
+/// [`EventKind::ActionExecuted`]. A JSON string value is shown as the
+/// string itself (matching how persisted `ActionResult` previews are
+/// rendered); any other value is shown as compact JSON.
+pub fn result_preview_from_output(output: &serde_json::Value) -> Option<String> {
+    let text = match output {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    Some(truncate_result_preview(&text))
+}
 use crate::types::step::{StepId, TokenUsage};
 use crate::types::thread::{ThreadId, ThreadState};
 
@@ -275,6 +309,15 @@ pub enum EventKind {
         /// Short human-readable summary of parameters (e.g., URL for http tool).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         params_summary: Option<String>,
+        /// Bounded preview of the action output (see
+        /// [`truncate_result_preview`]). CodeAct (Tier 1) outputs flow back
+        /// into the Python VM and never become `ActionResult` internal
+        /// messages, so this field is the only place per-call output text
+        /// survives for UI/history projections. `None` for emission sites
+        /// that genuinely have no output in hand and for events persisted
+        /// before the field existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        result_preview: Option<String>,
     },
     ActionFailed {
         step_id: StepId,
@@ -567,5 +610,90 @@ mod tests {
             }
             other => panic!("expected ActionFailed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn action_executed_defaults_missing_result_preview_when_deserializing_legacy_payload() {
+        // Events persisted before `result_preview` existed must still
+        // deserialise (the field is `#[serde(default)]`).
+        let step_id = StepId::new();
+        let legacy_payload = serde_json::json!({
+            "ActionExecuted": {
+                "step_id": step_id,
+                "action_name": "web_search",
+                "call_id": "call_123",
+                "duration_ms": 42,
+                "params_summary": "rust news"
+            }
+        });
+
+        let event_kind: EventKind = serde_json::from_value(legacy_payload)
+            .expect("legacy ActionExecuted should deserialize");
+
+        match event_kind {
+            EventKind::ActionExecuted {
+                step_id: actual_step_id,
+                action_name,
+                call_id,
+                duration_ms,
+                params_summary,
+                result_preview,
+            } => {
+                assert_eq!(actual_step_id, step_id);
+                assert_eq!(action_name, "web_search");
+                assert_eq!(call_id, "call_123");
+                assert_eq!(duration_ms, 42);
+                assert_eq!(params_summary.as_deref(), Some("rust news"));
+                assert_eq!(result_preview, None);
+            }
+            other => panic!("expected ActionExecuted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncate_result_preview_is_multibyte_safe() {
+        use super::{RESULT_PREVIEW_MAX_BYTES, truncate_result_preview};
+
+        // Under budget: unchanged, no ellipsis.
+        assert_eq!(truncate_result_preview("short"), "short");
+
+        // 2-byte chars whose boundaries straddle the budget — the last char
+        // whose start index is below the budget is kept whole.
+        let long = "é".repeat(RESULT_PREVIEW_MAX_BYTES); // 2 bytes per char
+        let truncated = truncate_result_preview(&long);
+        assert!(truncated.ends_with("..."));
+        let body = truncated.trim_end_matches("...");
+        assert!(body.chars().all(|c| c == 'é'), "char sliced mid-sequence");
+        // 500/2 = 250 chars start below the budget.
+        assert_eq!(body.chars().count(), RESULT_PREVIEW_MAX_BYTES / 2);
+
+        // 4-byte char starting just below the budget extends past it intact.
+        let mut tricky = "a".repeat(RESULT_PREVIEW_MAX_BYTES - 1);
+        tricky.push('🎉');
+        tricky.push_str("tail");
+        let truncated = truncate_result_preview(&tricky);
+        assert_eq!(
+            truncated,
+            format!("{}🎉...", "a".repeat(RESULT_PREVIEW_MAX_BYTES - 1))
+        );
+    }
+
+    #[test]
+    fn result_preview_from_output_uses_string_value_directly() {
+        use super::result_preview_from_output;
+
+        // JSON string values render as the string itself, not `"quoted"`.
+        let s = serde_json::Value::String("plain text".into());
+        assert_eq!(
+            result_preview_from_output(&s).as_deref(),
+            Some("plain text")
+        );
+
+        // Non-string values render as compact JSON.
+        let obj = serde_json::json!({"ok": true});
+        assert_eq!(
+            result_preview_from_output(&obj).as_deref(),
+            Some(r#"{"ok":true}"#)
+        );
     }
 }
