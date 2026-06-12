@@ -5461,6 +5461,21 @@ async fn await_thread_outcome(
     // can still resolve it, and the resolver path will deliver the
     // resolution into the parked oneshot.
     if timed_out && state.thread_manager.is_running(thread_id).await {
+        // The foreground await gave up but the engine thread is still
+        // executing — a long gate-free turn, not a parked gate. Without
+        // a handoff the thread completes invisibly: no event forwarding,
+        // no join, no response broadcast, no v1 persist — the user never
+        // sees the reply. Reuse the post-park continuation, which does
+        // exactly that lifecycle (forward events, join on completion,
+        // deliver via channel + SSE, persist) under a one-hour cap.
+        spawn_post_park_continuation(
+            state,
+            agent.channels.clone(),
+            Arc::clone(agent.hooks()),
+            message.clone(),
+            conv_id,
+            thread_id,
+        );
         return Ok(BridgeOutcome::Pending);
     }
 
