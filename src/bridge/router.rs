@@ -5024,6 +5024,35 @@ fn spawn_post_park_continuation(
                         },
                     );
                 }
+                // Failed is terminal — persist tool calls and (on the
+                // gateway SSE path, where no Respond text flows below)
+                // the sanitized summary, mirroring the foreground Failed
+                // arm. Without this a failed post-park turn leaves the
+                // chat blank after reload.
+                if let Some(ref db) = db {
+                    persist_v2_tool_calls(&store, db, thread_id, &message).await;
+                    if sse_will_deliver_to_user {
+                        match resolve_v1_conversation_for_message(db, &message).await {
+                            Ok(cid) => {
+                                if let Err(e) = db
+                                    .add_conversation_message(cid, "assistant", &sanitized)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        thread_id = %thread_id,
+                                        "post-park: failed to persist failure summary: {e}"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    thread_id = %thread_id,
+                                    "post-park: failed to resolve v1 conversation for failure summary: {e}"
+                                );
+                            }
+                        }
+                    }
+                }
                 match bridge_outcome_for_failed_thread(
                     error,
                     debug_detail.as_deref(),
@@ -5651,8 +5680,9 @@ async fn await_thread_outcome(
                 return Ok(BridgeOutcome::Pending);
             }
 
-            // Persist tool_calls only for completed threads — not for
-            // GatePaused (partial tools, would orphan rows on resume).
+            // Persist tool_calls only for terminal outcomes (Completed
+            // here, Failed in its own arm) — never for GatePaused
+            // (partial tools, would orphan rows on resume).
             if let Some(ref db) = state.db {
                 persist_v2_tool_calls(&state.store, db, thread_id, message).await;
             }
@@ -5693,10 +5723,47 @@ async fn await_thread_outcome(
                 sse.broadcast_for_user(
                     &message.user_id,
                     AppEvent::Error {
-                        message: sanitized,
+                        message: sanitized.clone(),
                         thread_id: Some(thread_id.to_string()),
                     },
                 );
+            }
+            // Failed is terminal — no resume will re-run these calls, so
+            // persisting here cannot orphan/duplicate rows the way a
+            // GatePaused persist would. Without this, every tool call the
+            // user watched live vanishes on reload ("LLM data is never
+            // deleted" applies to failed turns too).
+            if let Some(ref db) = state.db {
+                persist_v2_tool_calls(&state.store, db, thread_id, message).await;
+                // The SSE error frame is the only user-visible delivery on
+                // the gateway path (`bridge_outcome_for_failed_thread`
+                // returns NoResponse there) and SSE frames are ephemeral —
+                // persist the sanitized summary so the failure survives a
+                // reload instead of leaving a blank turn. Non-gateway
+                // channels return Respond(sanitized), which the normal
+                // response path persists; writing here too would
+                // double-persist.
+                if sse_will_deliver_to_user {
+                    match resolve_v1_conversation_for_message(db, message).await {
+                        Ok(cid) => {
+                            if let Err(e) = db
+                                .add_conversation_message(cid, "assistant", &sanitized)
+                                .await
+                            {
+                                tracing::warn!(
+                                    thread_id = %thread_id,
+                                    "failed to persist v2 failure summary: {e}"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                thread_id = %thread_id,
+                                "failed to resolve v1 conversation for failure summary: {e}"
+                            );
+                        }
+                    }
+                }
             }
             Ok(bridge_outcome_for_failed_thread(
                 &error,
@@ -6219,10 +6286,12 @@ fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> 
 
 /// Persist v2 engine tool call metadata to the v1 conversation DB.
 ///
-/// Loads the completed thread from the v2 store, builds the call list via
-/// [`v2_tool_calls_json`], and writes a `role="tool_calls"` message so the
-/// chat history API can reconstruct tool call info (name, result preview,
-/// errors, durations) for the web UI.
+/// Loads the (terminal — completed or failed) thread from the v2 store,
+/// builds the call list via [`v2_tool_calls_json`], and writes a
+/// `role="tool_calls"` message so the chat history API can reconstruct
+/// tool call info (name, result preview, errors, durations) for the web
+/// UI. Must not be called for resumable outcomes (GatePaused) — see the
+/// `persist_v2_tool_calls_only_called_from_terminal_arms` test.
 async fn persist_v2_tool_calls(
     store: &std::sync::Arc<dyn Store>,
     db: &std::sync::Arc<dyn Database>,
@@ -13166,16 +13235,19 @@ mod tests {
     }
 
     /// Regression for the bug fixed in commit 652315e8:
-    /// `persist_v2_tool_calls` must only be called from a
-    /// `ThreadOutcome::Completed` arm. If a future refactor moves the
-    /// call out of that arm, partial tool executions on `GatePaused`
-    /// would orphan a `role="tool_calls"` DB row that then duplicates
-    /// when the gate resumes. Pin the call-site invariant by inspecting
-    /// the source of `await_thread_outcome` and any sibling arm-driven
-    /// dispatchers (currently `spawn_post_park_continuation`, which
-    /// re-runs the same outcome match in a background task).
+    /// `persist_v2_tool_calls` must only be called from a *terminal*
+    /// outcome arm — `ThreadOutcome::Completed` or `ThreadOutcome::Failed`.
+    /// If a future refactor moves the call into a `GatePaused` arm,
+    /// partial tool executions would orphan a `role="tool_calls"` DB row
+    /// that then duplicates when the gate resumes. (Failed was added
+    /// alongside Completed so a failed turn's calls survive reload; it is
+    /// terminal, so no resume can duplicate the row.) Pin the call-site
+    /// invariant by inspecting the source of `await_thread_outcome` and
+    /// any sibling arm-driven dispatchers (currently
+    /// `spawn_post_park_continuation`, which re-runs the same outcome
+    /// match in a background task).
     #[test]
-    fn persist_v2_tool_calls_only_called_from_completed_arm() {
+    fn persist_v2_tool_calls_only_called_from_terminal_arms() {
         let source = include_str!("router.rs");
         let (before_fn, _after_fn) = source
             .split_once("async fn persist_v2_tool_calls")
@@ -13184,8 +13256,8 @@ mod tests {
         // The text below the definition is allowed to reference it
         // (doc comments, unit tests). Above the definition there must
         // be at least one call site, and every call site must sit
-        // between a `ThreadOutcome::Completed` opening match arm and
-        // the nearest non-Completed sibling arm.
+        // between a terminal (`Completed`/`Failed`) opening match arm
+        // and the nearest non-terminal sibling arm.
         let call_sites: Vec<usize> = before_fn
             .match_indices("persist_v2_tool_calls(")
             .map(|(idx, _)| idx)
@@ -13195,33 +13267,36 @@ mod tests {
             "expected at least one call site for persist_v2_tool_calls"
         );
 
-        let other_outcome_arms = [
+        let terminal_arms = ["ThreadOutcome::Completed", "ThreadOutcome::Failed"];
+        let non_terminal_arms = [
             "ThreadOutcome::GatePaused",
-            "ThreadOutcome::Failed",
             "ThreadOutcome::Stopped",
             "ThreadOutcome::MaxIterations",
         ];
         for call_idx in &call_sites {
             // Find the most recent match-arm marker preceding this call.
-            // Must be `ThreadOutcome::Completed` — anything else means
-            // the call sits in a non-completion arm and risks the bug.
+            // Must be a terminal arm — anything else means the call sits
+            // in a resumable arm and risks the duplicate-row bug.
             let prefix = &before_fn[..*call_idx];
-            let last_completed = prefix.rfind("ThreadOutcome::Completed");
-            let last_other = other_outcome_arms
+            let last_terminal = terminal_arms
+                .iter()
+                .filter_map(|arm| prefix.rfind(arm))
+                .max();
+            let last_other = non_terminal_arms
                 .iter()
                 .filter_map(|arm| prefix.rfind(arm))
                 .max();
             assert!(
-                last_completed.is_some(),
+                last_terminal.is_some(),
                 "persist_v2_tool_calls call at byte {call_idx} must be inside a \
-                 ThreadOutcome::Completed arm — no preceding Completed marker"
+                 terminal ThreadOutcome arm — no preceding Completed/Failed marker"
             );
             assert!(
-                last_other.unwrap_or(0) < last_completed.unwrap_or(0),
+                last_other.unwrap_or(0) < last_terminal.unwrap_or(0),
                 "persist_v2_tool_calls call at byte {call_idx} must be inside the \
-                 closest enclosing ThreadOutcome::Completed arm; a non-Completed arm \
-                 marker (GatePaused/Failed/Stopped/MaxIterations) appears between \
-                 the Completed marker and the call"
+                 closest enclosing terminal ThreadOutcome arm; a non-terminal arm \
+                 marker (GatePaused/Stopped/MaxIterations) appears between the \
+                 terminal marker and the call"
             );
         }
     }
