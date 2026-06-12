@@ -7286,6 +7286,50 @@ pub async fn get_engine_thread(
     }))
 }
 
+/// Tool calls executed so far by the in-flight engine v2 thread for a
+/// conversation, in the same JSON shape `persist_v2_tool_calls` writes
+/// at turn end (built by [`v2_tool_calls_json`] from the thread's
+/// action events).
+///
+/// `conversation_id` is the gateway chat thread id — the UUID the web
+/// channel sends as the message's conversation scope. The bridge
+/// records that scope on the gate controller's per-execution context
+/// for exactly the lifetime of a turn (registered after
+/// `handle_user_message` allocates the thread, cleared once the engine
+/// task finishes — including the deferred/post-park cleanup paths), so
+/// resolving through that registry returns `Some` only while a turn is
+/// actually in flight. Completed turns read their calls from the
+/// persisted `tool_calls` conversation row instead.
+///
+/// The thread load hits the store adapter's in-memory cache for live
+/// threads, so calling this on every history poll is cheap. Returns
+/// `None` when no engine state is initialised, no turn is in flight for
+/// the conversation, or the resolved thread is not owned by `user_id`.
+pub async fn get_in_flight_tool_calls(
+    user_id: &str,
+    conversation_id: &str,
+) -> Option<Vec<serde_json::Value>> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    let state = guard.as_ref()?;
+
+    let thread_id = state
+        .gate_controller
+        .find_thread_for_scope(user_id, conversation_id)
+        .await?;
+
+    let thread = state.store.load_thread(thread_id).await.ok().flatten()?;
+    // Ownership check mirrors `get_engine_thread`. The per-execution
+    // registry key is already user-scoped, so this is defence in depth
+    // against a mis-registered context ever leaking another user's
+    // calls.
+    if !thread.is_owned_by(user_id) {
+        return None;
+    }
+
+    Some(v2_tool_calls_json(&thread))
+}
+
 /// List steps for a thread.
 pub async fn list_engine_thread_steps(
     thread_id: &str,
@@ -8201,6 +8245,41 @@ pub(crate) mod test_support {
         if let Some(lock) = ENGINE_STATE.get() {
             *lock.write().await = None;
         }
+    }
+
+    /// Register an in-flight execution context on the installed engine
+    /// state's gate controller, mirroring what the bridge does right
+    /// after `handle_user_message` allocates a thread. Lets caller-level
+    /// tests simulate a mid-turn engine thread so
+    /// `get_in_flight_tool_calls` resolves `(user_id, scope)` to
+    /// `thread_id`.
+    ///
+    /// Callers must already hold `ENGINE_STATE_TEST_LOCK` and have
+    /// installed an engine state.
+    pub(crate) async fn register_execution_context_for_scope(
+        user_id: &str,
+        thread_id: ThreadId,
+        scope: &str,
+    ) {
+        let lock = ENGINE_STATE.get().expect("engine state installed");
+        let guard = lock.read().await;
+        let state = guard.as_ref().expect("engine state installed");
+        state
+            .gate_controller
+            .set_execution_context(
+                user_id.to_string(),
+                thread_id,
+                crate::bridge::gate_controller::PerExecutionContext {
+                    conversation_id: t3claw_engine::ConversationId::new(),
+                    source_channel: "gateway".into(),
+                    scope_thread_id: Some(t3claw_common::ExternalThreadId::from_trusted(
+                        scope.to_string(),
+                    )),
+                    channel_metadata: serde_json::Value::Null,
+                    original_message: None,
+                },
+            )
+            .await;
     }
 }
 
@@ -13522,6 +13601,81 @@ mod tests {
         assert_eq!(calls[0]["name"], "echo");
         assert_eq!(calls[0]["tool_call_id"], "call-1");
         assert_eq!(calls[0]["result_preview"], r#"{"output":"hello"}"#);
+    }
+
+    /// `get_in_flight_tool_calls` must resolve the conversation scope to
+    /// the in-flight engine thread via the gate controller's
+    /// per-execution registry, return its action events as calls, and
+    /// scope strictly by user: another user (or an unknown scope, or a
+    /// turn whose context was cleared) gets `None`.
+    #[tokio::test]
+    async fn get_in_flight_tool_calls_resolves_scope_and_enforces_user_scoping() {
+        let _lock = test_support::ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let step_id = t3claw_engine::StepId::new();
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "web_fetch".into(),
+            call_id: "call_1".into(),
+            duration_ms: 42,
+            params_summary: Some("https://example.com".into()),
+            result_preview: Some("fetched body".into()),
+        });
+        thread.add_event(t3claw_engine::EventKind::ActionFailed {
+            step_id,
+            action_name: "shell".into(),
+            call_id: "call_2".into(),
+            error: "exit status 1".into(),
+            duration_ms: 7,
+            params_summary: None,
+        });
+        let thread_id = thread.id;
+        test_support::install_engine_state_with_threads(vec![thread]).await;
+
+        let scope = uuid::Uuid::new_v4().to_string();
+        test_support::register_execution_context_for_scope("alice", thread_id, &scope).await;
+
+        let calls = get_in_flight_tool_calls("alice", &scope)
+            .await
+            .expect("in-flight calls for the owning user");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["name"], "web_fetch");
+        assert_eq!(calls[0]["tool_call_id"], "call_1");
+        assert_eq!(calls[0]["result_preview"], "fetched body");
+        assert_eq!(calls[0]["params_summary"], "https://example.com");
+        assert_eq!(calls[0]["duration_ms"], 42);
+        assert_eq!(calls[1]["name"], "shell");
+        assert_eq!(calls[1]["error"], "exit status 1");
+
+        // Another user must not resolve the same scope.
+        assert!(get_in_flight_tool_calls("mallory", &scope).await.is_none());
+        // Unknown scope: no turn in flight for that conversation.
+        assert!(
+            get_in_flight_tool_calls("alice", "11111111-2222-3333-4444-555555555555")
+                .await
+                .is_none()
+        );
+
+        // Once the bridge clears the execution context (turn finished),
+        // the helper stops reporting in-flight calls.
+        {
+            let guard = ENGINE_STATE.get().expect("installed").read().await;
+            let state = guard.as_ref().expect("installed");
+            state
+                .gate_controller
+                .clear_execution_context("alice", thread_id, t3claw_engine::ConversationId::new())
+                .await;
+        }
+        assert!(get_in_flight_tool_calls("alice", &scope).await.is_none());
+
+        test_support::clear_engine_state().await;
     }
 
     /// Regression for the bug fixed in commit 652315e8:

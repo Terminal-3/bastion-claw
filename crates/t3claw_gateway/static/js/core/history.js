@@ -1,3 +1,39 @@
+// Seed the LIVE tool-activity controller from an in-flight turn's
+// calls-so-far (in_progress.tool_calls from /api/chat/history). Mid-turn
+// re-renders (thread switch, reload) wipe the live cards, so without this
+// the user only sees events that arrive after the re-render. Seeding goes
+// through the same startTool/completeTool/setResult path as live SSE
+// events, which registers each call in entriesByCallId — subsequent
+// tool_completed / tool_result events for the same call_ids update the
+// seeded cards in place, and new tool_started events append. Calls with
+// neither a result nor an error are still running and stay as spinner
+// cards. These cards belong to the live group: finalizeActivityGroup on
+// the final response collapses them into the usual "Used N tools" summary,
+// and the persisted history group is only built on later re-renders.
+function seedInProgressToolCards(toolCalls) {
+  if (!Array.isArray(toolCalls) || toolCalls.length === 0) return;
+  for (const call of toolCalls) {
+    const entry = normalizeHistoryToolCall(call);
+    addToolCard({ call_id: entry.call_id, name: entry.name });
+    if (entry.status !== 'running') {
+      completeToolCard({
+        call_id: entry.call_id,
+        name: entry.name,
+        success: entry.status === 'success',
+        error: entry.error || null,
+        duration_ms: entry.duration_ms,
+      });
+    }
+    if (entry.result_preview) {
+      setToolCardOutput({
+        call_id: entry.call_id,
+        name: entry.name,
+        preview: entry.result_preview,
+      });
+    }
+  }
+}
+
 function isSameInProgressTurn(lastTurn, inProgress) {
   if (!lastTurn || !inProgress) return false;
 
@@ -159,6 +195,9 @@ function loadHistory(before) {
             addMessage('user', data.in_progress.user_input);
           }
         }
+        // Seed before showing the thinking indicator so the dots render
+        // below the in-flight cards, matching the live SSE ordering.
+        seedInProgressToolCards(data.in_progress.tool_calls);
         showActivityThinking(ActivityEntry.t('activity.processing', 'Processing...'));
       } else if (lastTurn && !lastTurn.response && lastTurn.state === 'Processing') {
         showActivityThinking(ActivityEntry.t('activity.processing', 'Processing...'));

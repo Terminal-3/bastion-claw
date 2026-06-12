@@ -427,7 +427,11 @@ pub fn tool_result_for_display(result: &serde_json::Value) -> Option<String> {
 }
 
 /// Parse tool call summary JSON objects into `ToolCallInfo` structs.
-fn parse_tool_call_infos(calls: &[serde_json::Value]) -> Vec<ToolCallInfo> {
+///
+/// `pub(crate)` so `chat_history_handler` can reuse the same parsing
+/// (previews, durations, params_summary) for the in-flight tool calls it
+/// attaches to `InProgressInfo` mid-turn.
+pub(crate) fn parse_tool_call_infos(calls: &[serde_json::Value]) -> Vec<ToolCallInfo> {
     calls
         .iter()
         .map(|c| {

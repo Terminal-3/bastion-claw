@@ -87,7 +87,7 @@ pub struct TurnInfo {
     pub narrative: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCallInfo {
     pub name: String,
     pub has_result: bool,
@@ -165,6 +165,16 @@ pub struct InProgressInfo {
     pub state: String,
     pub user_input: String,
     pub started_at: String,
+    /// Canonical carrier for the in-flight turn's tool calls (engine v2).
+    ///
+    /// Populated at read time by `chat_history_handler` from the live
+    /// engine thread's action events — never persisted into the
+    /// `live_state` conversation metadata this struct is otherwise
+    /// deserialized from (hence `serde(default)`). The frontend seeds
+    /// its live tool-card stream from this list when re-rendering
+    /// mid-turn, so calls executed before the re-render are not lost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallInfo>,
 }
 
 // --- Approval ---
