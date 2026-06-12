@@ -22,6 +22,15 @@ concurrency:
   group: test-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+# The full-feature test build does not fit the runner disk with default
+# dev-profile settings (the all-features leg died on ENOSPC mid-build).
+# Incremental artefacts are useless on throwaway runners, and full debug
+# info multiplies the size of every test binary; line tables keep
+# backtraces readable at a fraction of the size.
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 jobs:
   # ── Skip expensive jobs when only docs/config changed on a PR ──
   changes:
