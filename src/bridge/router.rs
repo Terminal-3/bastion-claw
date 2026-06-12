@@ -4900,6 +4900,7 @@ fn spawn_deferred_context_cleanup(
 fn spawn_post_park_continuation(
     state: &EngineState,
     channels: Arc<crate::channels::ChannelManager>,
+    hooks: Arc<crate::hooks::HookRegistry>,
     message: IncomingMessage,
     conv_id: t3claw_engine::ConversationId,
     thread_id: t3claw_engine::ThreadId,
@@ -4931,7 +4932,22 @@ fn spawn_post_park_continuation(
                     match event {
                         Ok(ref evt) if evt.thread_id == thread_id => {
                             forward_event_to_channel(evt, &channels, &channel_name, &metadata).await;
-                            if let Some(ref sse) = sse {
+                            // When the originating channel is the web
+                            // gateway, `forward_event_to_channel` above has
+                            // already rendered this event as SSE via the
+                            // gateway's `send_status` (stamped with the chat
+                            // thread id from metadata). Broadcasting the same
+                            // kinds again here — stamped with the *engine*
+                            // thread id — duplicated every tool/thinking
+                            // event on the SSE stream under two ids. Only
+                            // the kinds the channel path cannot express
+                            // (CodeExecuted, StateChanged, …) still flow
+                            // through the direct path.
+                            let skip_channel_covered = channel_name == GATEWAY_CHANNEL_NAME
+                                && channel_status_covers_event(&evt.kind);
+                            if let Some(ref sse) = sse
+                                && !skip_channel_covered
+                            {
                                 let skip_verbose = !sse.has_verbose_receivers();
                                 let leak_detector = effect_adapter.safety().leak_detector();
                                 for mut app_event in thread_event_to_app_events(evt, &tid_str) {
@@ -5022,6 +5038,35 @@ fn spawn_post_park_continuation(
                             thread_id: Some(tid_str.clone()),
                         },
                     );
+                }
+                // Failed is terminal — persist tool calls and (on the
+                // gateway SSE path, where no Respond text flows below)
+                // the sanitized summary, mirroring the foreground Failed
+                // arm. Without this a failed post-park turn leaves the
+                // chat blank after reload.
+                if let Some(ref db) = db {
+                    persist_v2_tool_calls(&store, db, thread_id, &message).await;
+                    if sse_will_deliver_to_user {
+                        match resolve_v1_conversation_for_message(db, &message).await {
+                            Ok(cid) => {
+                                if let Err(e) = db
+                                    .add_conversation_message(cid, "assistant", &sanitized)
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        thread_id = %thread_id,
+                                        "post-park: failed to persist failure summary: {e}"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    thread_id = %thread_id,
+                                    "post-park: failed to resolve v1 conversation for failure summary: {e}"
+                                );
+                            }
+                        }
+                    }
                 }
                 match bridge_outcome_for_failed_thread(
                     error,
@@ -5150,6 +5195,38 @@ fn spawn_post_park_continuation(
             }
         };
 
+        // Hook: BeforeOutbound — mirror the agent loop's outbound hook so
+        // post-park responses get the same filter/transform treatment as
+        // foreground turns (which return through `handle_message` and hit
+        // the hook there). Without this, a gate-resumed thread's final
+        // response would bypass outbound hooks entirely.
+        let mut hook_suppressed = false;
+        let response_text = match response_text {
+            Some(text) => {
+                let event = crate::hooks::HookEvent::Outbound {
+                    user_id: user_id.clone(),
+                    channel: channel_name.clone(),
+                    content: text.clone(),
+                    thread_id: message.thread_id.as_ref().map(|t| t.as_str().to_string()),
+                };
+                match hooks.run(&event).await {
+                    Err(err) => {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            "BeforeOutbound hook blocked post-park response: {err}"
+                        );
+                        hook_suppressed = true;
+                        None
+                    }
+                    Ok(crate::hooks::HookOutcome::Continue {
+                        modified: Some(new_content),
+                    }) => Some(new_content),
+                    Ok(_) => Some(text),
+                }
+            }
+            None => None,
+        };
+
         if let Some(ref text) = response_text {
             // SSE Response broadcast (web).
             if let Some(ref sse) = sse {
@@ -5202,6 +5279,19 @@ fn spawn_post_park_continuation(
                     }
                 }
             }
+        }
+
+        if hook_suppressed {
+            // Response suppressed by hook but the turn is complete — still
+            // emit Done so the client knows not to keep waiting (mirrors
+            // the agent loop's suppression path).
+            let _ = channels
+                .send_status(
+                    &channel_name,
+                    StatusUpdate::Status("Done".into()),
+                    &metadata,
+                )
+                .await;
         }
 
         gate_controller
@@ -5325,7 +5415,18 @@ async fn await_thread_outcome(
                 match event {
                     Ok(ref evt) if evt.thread_id == thread_id => {
                         forward_event_to_channel(evt, channels, channel_name, metadata).await;
-                        if let Some(sse) = sse {
+                        // Gateway-originated turns already get this event as
+                        // SSE through `forward_event_to_channel` → gateway
+                        // `send_status` (stamped with the chat thread id) —
+                        // broadcasting the channel-covered kinds again here,
+                        // stamped with the engine thread id, duplicated the
+                        // whole stream under two ids. Direct-path-only kinds
+                        // (CodeExecuted, StateChanged, …) still flow.
+                        let skip_channel_covered = channel_name == GATEWAY_CHANNEL_NAME
+                            && channel_status_covers_event(&evt.kind);
+                        if let Some(sse) = sse
+                            && !skip_channel_covered
+                        {
                             // Mirror the `send_status` gate: verbose-only
                             // events (e.g. `CodeExecuted`, `Warning`) are
                             // only useful when a debug subscriber is
@@ -5398,6 +5499,7 @@ async fn await_thread_outcome(
         spawn_post_park_continuation(
             state,
             agent.channels.clone(),
+            Arc::clone(agent.hooks()),
             message.clone(),
             conv_id,
             thread_id,
@@ -5414,6 +5516,21 @@ async fn await_thread_outcome(
     // can still resolve it, and the resolver path will deliver the
     // resolution into the parked oneshot.
     if timed_out && state.thread_manager.is_running(thread_id).await {
+        // The foreground await gave up but the engine thread is still
+        // executing — a long gate-free turn, not a parked gate. Without
+        // a handoff the thread completes invisibly: no event forwarding,
+        // no join, no response broadcast, no v1 persist — the user never
+        // sees the reply. Reuse the post-park continuation, which does
+        // exactly that lifecycle (forward events, join on completion,
+        // deliver via channel + SSE, persist) under a one-hour cap.
+        spawn_post_park_continuation(
+            state,
+            agent.channels.clone(),
+            Arc::clone(agent.hooks()),
+            message.clone(),
+            conv_id,
+            thread_id,
+        );
         return Ok(BridgeOutcome::Pending);
     }
 
@@ -5589,8 +5706,9 @@ async fn await_thread_outcome(
                 return Ok(BridgeOutcome::Pending);
             }
 
-            // Persist tool_calls only for completed threads — not for
-            // GatePaused (partial tools, would orphan rows on resume).
+            // Persist tool_calls only for terminal outcomes (Completed
+            // here, Failed in its own arm) — never for GatePaused
+            // (partial tools, would orphan rows on resume).
             if let Some(ref db) = state.db {
                 persist_v2_tool_calls(&state.store, db, thread_id, message).await;
             }
@@ -5631,10 +5749,47 @@ async fn await_thread_outcome(
                 sse.broadcast_for_user(
                     &message.user_id,
                     AppEvent::Error {
-                        message: sanitized,
+                        message: sanitized.clone(),
                         thread_id: Some(thread_id.to_string()),
                     },
                 );
+            }
+            // Failed is terminal — no resume will re-run these calls, so
+            // persisting here cannot orphan/duplicate rows the way a
+            // GatePaused persist would. Without this, every tool call the
+            // user watched live vanishes on reload ("LLM data is never
+            // deleted" applies to failed turns too).
+            if let Some(ref db) = state.db {
+                persist_v2_tool_calls(&state.store, db, thread_id, message).await;
+                // The SSE error frame is the only user-visible delivery on
+                // the gateway path (`bridge_outcome_for_failed_thread`
+                // returns NoResponse there) and SSE frames are ephemeral —
+                // persist the sanitized summary so the failure survives a
+                // reload instead of leaving a blank turn. Non-gateway
+                // channels return Respond(sanitized), which the normal
+                // response path persists; writing here too would
+                // double-persist.
+                if sse_will_deliver_to_user {
+                    match resolve_v1_conversation_for_message(db, message).await {
+                        Ok(cid) => {
+                            if let Err(e) = db
+                                .add_conversation_message(cid, "assistant", &sanitized)
+                                .await
+                            {
+                                tracing::warn!(
+                                    thread_id = %thread_id,
+                                    "failed to persist v2 failure summary: {e}"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                thread_id = %thread_id,
+                                "failed to resolve v1 conversation for failure summary: {e}"
+                            );
+                        }
+                    }
+                }
             }
             Ok(bridge_outcome_for_failed_thread(
                 &error,
@@ -6022,12 +6177,177 @@ pub(crate) async fn handle_mission_notification(
     }
 }
 
+/// Byte budget for persisted tool output previews and error strings.
+const TOOL_RESULT_PREVIEW_MAX_BYTES: usize = 500;
+
+/// Truncate tool output for the persisted preview without slicing a
+/// multi-byte UTF-8 sequence. The rule is "include every char whose start
+/// index is below the budget", so the last included char may extend past
+/// the budget by up to `len_utf8() - 1` bytes.
+fn truncate_tool_result_preview(content: &str) -> String {
+    if content.len() <= TOOL_RESULT_PREVIEW_MAX_BYTES {
+        return content.to_string();
+    }
+    let end = content
+        .char_indices()
+        .take_while(|(i, _)| *i < TOOL_RESULT_PREVIEW_MAX_BYTES)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &content[..end]) // safety: end is char-boundary via char_indices
+}
+
+/// Build the persisted `calls` JSON array for a completed v2 thread.
+///
+/// Action events are the authoritative call list: both execution tiers push
+/// `ActionExecuted`/`ActionFailed` onto `thread.events`, including CodeAct
+/// (Tier 1) calls whose outputs flow back into the Python VM and therefore
+/// never appear as `ActionResult` internal messages. Building from messages
+/// alone (the previous behaviour) silently dropped every CodeAct call — a
+/// payroll cycle's `t3n_mcp_*` calls were missing from chat history while
+/// only the Tier-0 `tool_info` discovery calls persisted.
+///
+/// `ActionResult` internal messages still matter — they carry the actual
+/// tool output, which events do not — so they are joined by call id to fill
+/// `result_preview`. Threads with no action events at all (legacy shapes)
+/// fall back to the message-only list.
+fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> {
+    let previews = v2_result_previews(thread);
+    let calls = v2_tool_calls_from_events(&thread.events, &previews);
+
+    if !calls.is_empty() {
+        return calls;
+    }
+
+    // Legacy fallback: threads whose action events were never persisted.
+    let mut calls = Vec::new();
+    for msg in &thread.internal_messages {
+        if msg.role != t3claw_engine::MessageRole::ActionResult {
+            continue;
+        }
+        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
+        let mut obj = serde_json::json!({
+            "name": action_name,
+            "result_preview": truncate_tool_result_preview(&msg.content),
+        });
+        if let Some(ref call_id) = msg.action_call_id {
+            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+        }
+        calls.push(obj);
+    }
+    calls
+}
+
+/// `call_id` → output text, from the thread's `ActionResult` internal
+/// messages. CodeAct call ids (`code_call_N`) restart per code block, so
+/// an id seen twice is ambiguous and dropped rather than mis-joined;
+/// Tier-0 ids are unique.
+fn v2_result_previews(thread: &t3claw_engine::Thread) -> std::collections::HashMap<&str, &str> {
+    let mut previews: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    let mut ambiguous: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for msg in &thread.internal_messages {
+        if msg.role != t3claw_engine::MessageRole::ActionResult {
+            continue;
+        }
+        let Some(call_id) = msg.action_call_id.as_deref().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        if previews.insert(call_id, msg.content.as_str()).is_some() {
+            ambiguous.insert(call_id);
+        }
+    }
+    for call_id in &ambiguous {
+        previews.remove(call_id);
+    }
+    previews
+}
+
+/// Build the `calls` JSON array from action events.
+///
+/// Shared by the turn-end persist path ([`v2_tool_calls_json`], which
+/// reads the completed thread's embedded events) and the mid-turn
+/// in-flight path ([`get_in_flight_tool_calls`], which reads the store's
+/// live event log — the embedded events on a stored `Thread` are stale
+/// while the engine task is still running).
+fn v2_tool_calls_from_events(
+    events: &[t3claw_engine::ThreadEvent],
+    previews: &std::collections::HashMap<&str, &str>,
+) -> Vec<serde_json::Value> {
+    use t3claw_engine::EventKind;
+
+    let mut calls = Vec::new();
+    for event in events {
+        let obj = match &event.kind {
+            EventKind::ActionExecuted {
+                action_name,
+                call_id,
+                duration_ms,
+                params_summary,
+                result_preview,
+                ..
+            } => {
+                // Prefer the joined `ActionResult` message preview (richer —
+                // Tier-0 messages carry the full sanitised output text), then
+                // the event-carried preview (the only output text CodeAct
+                // calls have, since their outputs are consumed inside the
+                // Python VM). An empty preview still marks the call as
+                // completed for the history projection (`has_result` checks
+                // for a non-null value).
+                let preview = previews
+                    .get(call_id.as_str())
+                    .copied()
+                    .filter(|p| !p.is_empty())
+                    .or(result_preview.as_deref())
+                    .unwrap_or("");
+                let mut obj = serde_json::json!({
+                    "name": action_name,
+                    "result_preview": truncate_tool_result_preview(preview),
+                    "duration_ms": duration_ms,
+                });
+                if !call_id.is_empty() {
+                    obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+                }
+                if let Some(summary) = params_summary {
+                    obj["params_summary"] = serde_json::Value::String(summary.clone());
+                }
+                obj
+            }
+            EventKind::ActionFailed {
+                action_name,
+                call_id,
+                error,
+                duration_ms,
+                params_summary,
+                ..
+            } => {
+                let mut obj = serde_json::json!({
+                    "name": action_name,
+                    "error": truncate_tool_result_preview(error),
+                    "duration_ms": duration_ms,
+                });
+                if !call_id.is_empty() {
+                    obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+                }
+                if let Some(summary) = params_summary {
+                    obj["params_summary"] = serde_json::Value::String(summary.clone());
+                }
+                obj
+            }
+            _ => continue,
+        };
+        calls.push(obj);
+    }
+    calls
+}
+
 /// Persist v2 engine tool call metadata to the v1 conversation DB.
 ///
-/// Loads the completed thread from the v2 store, extracts ActionResult
-/// messages (which carry the actual tool output), and writes a
+/// Loads the (terminal — completed or failed) thread from the v2 store,
+/// builds the call list via [`v2_tool_calls_json`], and writes a
 /// `role="tool_calls"` message so the chat history API can reconstruct
-/// tool call info (name, result preview, errors) for the web UI.
+/// tool call info (name, result preview, errors, durations) for the web
+/// UI. Must not be called for resumable outcomes (GatePaused) — see the
+/// `persist_v2_tool_calls_only_called_from_terminal_arms` test.
 async fn persist_v2_tool_calls(
     store: &std::sync::Arc<dyn Store>,
     db: &std::sync::Arc<dyn Database>,
@@ -6054,37 +6374,7 @@ async fn persist_v2_tool_calls(
         }
     };
 
-    // Extract ActionResult messages from the thread's internal transcript.
-    // `internal_messages` has the full execution chain including action
-    // results with actual tool output. `messages` only has user/assistant.
-    let mut calls = Vec::new();
-    for msg in &thread.internal_messages {
-        if msg.role != t3claw_engine::MessageRole::ActionResult {
-            continue;
-        }
-        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
-        let preview = if msg.content.len() > 500 {
-            let end = msg
-                .content
-                .char_indices()
-                .take_while(|(i, _)| *i < 500)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(0);
-            format!("{}...", &msg.content[..end]) // safety: end is char-boundary via char_indices
-        } else {
-            msg.content.clone()
-        };
-        let mut obj = serde_json::json!({
-            "name": action_name,
-            "result_preview": preview,
-        });
-        if let Some(ref call_id) = msg.action_call_id {
-            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
-        }
-        calls.push(obj);
-    }
-
+    let calls = v2_tool_calls_json(&thread);
     if calls.is_empty() {
         return;
     }
@@ -6117,6 +6407,29 @@ async fn persist_v2_tool_calls(
 }
 
 /// Forward an engine ThreadEvent to the channel as a StatusUpdate.
+/// Event kinds that [`forward_event_to_channel`] converts into
+/// `StatusUpdate`s. For gateway-originated turns those StatusUpdates are
+/// rendered as SSE `AppEvent`s by the gateway channel's `send_status`
+/// (stamped with the chat thread id from metadata), so the direct
+/// `thread_event_to_app_events` broadcast must skip exactly these kinds or
+/// every tool/thinking event reaches the browser twice — once per pipeline,
+/// under two different thread ids. Keep this list in lock-step with the
+/// match arms in [`forward_event_to_channel`]; the
+/// `channel_status_covers_event_matches_forwarder` test pins the
+/// correspondence.
+fn channel_status_covers_event(kind: &t3claw_engine::EventKind) -> bool {
+    use t3claw_engine::EventKind;
+    matches!(
+        kind,
+        EventKind::StepStarted { .. }
+            | EventKind::ActionExecuted { .. }
+            | EventKind::ActionFailed { .. }
+            | EventKind::StepCompleted { .. }
+            | EventKind::MessageAdded { .. }
+            | EventKind::SkillActivated { .. }
+    )
+}
+
 async fn forward_event_to_channel(
     event: &t3claw_engine::ThreadEvent,
     channels: &std::sync::Arc<crate::channels::ChannelManager>,
@@ -6140,6 +6453,7 @@ async fn forward_event_to_channel(
             call_id,
             duration_ms,
             params_summary,
+            result_preview,
             ..
         } => {
             let display_name = format_action_display_name(action_name, params_summary);
@@ -6154,6 +6468,19 @@ async fn forward_event_to_channel(
                     metadata,
                 )
                 .await;
+            if let Some(preview) = result_preview.as_deref().filter(|p| !p.is_empty()) {
+                let _ = channels
+                    .send_status(
+                        channel_name,
+                        StatusUpdate::ToolResult {
+                            name: display_name.clone(),
+                            preview: preview.to_string(),
+                            call_id: Some(call_id.clone()),
+                        },
+                        metadata,
+                    )
+                    .await;
+            }
             let _ = channels
                 .send_status(
                     channel_name,
@@ -6406,26 +6733,37 @@ fn thread_event_to_app_events(
             call_id,
             duration_ms,
             params_summary,
+            result_preview,
             ..
         } => {
             let display_name = format_action_display_name(action_name, params_summary);
-            vec![
-                AppEvent::ToolStarted {
+            let mut events = vec![AppEvent::ToolStarted {
+                name: display_name.clone(),
+                detail: params_summary.clone(),
+                call_id: Some(call_id.clone()),
+                thread_id: Some(thread_id.into()),
+            }];
+            // The FE's `tool_result` listener fills the expandable card body
+            // (`setToolCardOutput`, matched by call_id) — without it CodeAct
+            // calls render empty cards.
+            if let Some(preview) = result_preview.as_deref().filter(|p| !p.is_empty()) {
+                events.push(AppEvent::ToolResult {
                     name: display_name.clone(),
-                    detail: params_summary.clone(),
+                    preview: preview.to_string(),
                     call_id: Some(call_id.clone()),
                     thread_id: Some(thread_id.into()),
-                },
-                AppEvent::ToolCompleted {
-                    name: display_name,
-                    success: true,
-                    error: None,
-                    parameters: params_summary.clone(),
-                    call_id: Some(call_id.clone()),
-                    duration_ms: Some(*duration_ms),
-                    thread_id: Some(thread_id.into()),
-                },
-            ]
+                });
+            }
+            events.push(AppEvent::ToolCompleted {
+                name: display_name,
+                success: true,
+                error: None,
+                parameters: params_summary.clone(),
+                call_id: Some(call_id.clone()),
+                duration_ms: Some(*duration_ms),
+                thread_id: Some(thread_id.into()),
+            });
+            events
         }
         EventKind::ActionFailed {
             action_name,
@@ -6967,6 +7305,71 @@ pub async fn get_engine_thread(
         completed_at: thread.completed_at.map(|dt| dt.to_rfc3339()),
         total_cost_usd: thread.total_cost_usd,
     }))
+}
+
+/// Tool calls executed so far by the in-flight engine v2 thread for a
+/// conversation, in the same JSON shape `persist_v2_tool_calls` writes
+/// at turn end (built by [`v2_tool_calls_json`] from the thread's
+/// action events).
+///
+/// `conversation_id` is the gateway chat thread id — the UUID the web
+/// channel sends as the message's conversation scope. The bridge
+/// records that scope on the gate controller's per-execution context
+/// for exactly the lifetime of a turn (registered after
+/// `handle_user_message` allocates the thread, cleared once the engine
+/// task finishes — including the deferred/post-park cleanup paths), so
+/// resolving through that registry returns `Some` only while a turn is
+/// actually in flight. Completed turns read their calls from the
+/// persisted `tool_calls` conversation row instead.
+///
+/// Mid-turn freshness: `load_thread` returns the snapshot from the last
+/// `save_thread`, and the running engine task only saves its `Thread` at
+/// turn boundaries — so the loaded thread's embedded `events` are stale
+/// (typically empty) for the whole turn. The store's per-thread *event
+/// log* is the live source: the orchestrator appends each host call's
+/// event delta via `Store::append_events` as the turn progresses (see
+/// `persist_event_delta` in `t3claw_engine::executor::orchestrator`), so
+/// this reads `load_events` and builds the call list from those. The
+/// loaded thread still provides the ownership check and the
+/// `ActionResult` preview join (stale previews are fine — live events
+/// carry their own `result_preview`).
+///
+/// Both reads hit the store adapter's in-memory caches for live threads,
+/// so calling this on every history poll is cheap. Returns `None` when
+/// no engine state is initialised, no turn is in flight for the
+/// conversation, or the resolved thread is not owned by `user_id`.
+pub async fn get_in_flight_tool_calls(
+    user_id: &str,
+    conversation_id: &str,
+) -> Option<Vec<serde_json::Value>> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    let state = guard.as_ref()?;
+
+    let thread_id = state
+        .gate_controller
+        .find_thread_for_scope(user_id, conversation_id)
+        .await?;
+
+    let thread = state.store.load_thread(thread_id).await.ok().flatten()?;
+    // Ownership check mirrors `get_engine_thread`. The per-execution
+    // registry key is already user-scoped, so this is defence in depth
+    // against a mis-registered context ever leaking another user's
+    // calls.
+    if !thread.is_owned_by(user_id) {
+        return None;
+    }
+
+    // Prefer whichever event source is more complete. The live event log
+    // is the fresh one mid-turn; the embedded list covers threads whose
+    // events were saved on the thread but never appended to the log
+    // (legacy shapes, resumed checkpoints).
+    let live_events = state.store.load_events(thread_id).await.ok()?;
+    if live_events.len() <= thread.events.len() {
+        return Some(v2_tool_calls_json(&thread));
+    }
+    let previews = v2_result_previews(&thread);
+    Some(v2_tool_calls_from_events(&live_events, &previews))
 }
 
 /// List steps for a thread.
@@ -7641,12 +8044,14 @@ pub(crate) mod test_support {
     /// which touch `load_thread` and `list_threads`.
     pub(crate) struct ThreadTestStore {
         threads: TokioRwLock<HashMap<ThreadId, Thread>>,
+        events: TokioRwLock<HashMap<ThreadId, Vec<ThreadEvent>>>,
     }
 
     impl ThreadTestStore {
         pub(crate) fn new() -> Self {
             Self {
                 threads: TokioRwLock::new(HashMap::new()),
+                events: TokioRwLock::new(HashMap::new()),
             }
         }
     }
@@ -7687,11 +8092,28 @@ pub(crate) mod test_support {
         async fn load_steps(&self, _: ThreadId) -> Result<Vec<Step>, EngineError> {
             Ok(vec![])
         }
-        async fn append_events(&self, _: &[ThreadEvent]) -> Result<(), EngineError> {
+        async fn append_events(&self, events: &[ThreadEvent]) -> Result<(), EngineError> {
+            // Real event log with dedupe-by-id, mirroring the production
+            // `HybridStore`: `get_in_flight_tool_calls` reads the live
+            // event log mid-turn, so caller-level tests must be able to
+            // reproduce the engine's append-only persistence sequence.
+            let mut stored = self.events.write().await;
+            for event in events {
+                let log = stored.entry(event.thread_id).or_default();
+                if !log.iter().any(|existing| existing.id == event.id) {
+                    log.push(event.clone());
+                }
+            }
             Ok(())
         }
-        async fn load_events(&self, _: ThreadId) -> Result<Vec<ThreadEvent>, EngineError> {
-            Ok(vec![])
+        async fn load_events(&self, thread_id: ThreadId) -> Result<Vec<ThreadEvent>, EngineError> {
+            Ok(self
+                .events
+                .read()
+                .await
+                .get(&thread_id)
+                .cloned()
+                .unwrap_or_default())
         }
         async fn save_project(&self, _: &Project) -> Result<(), EngineError> {
             Ok(())
@@ -7884,6 +8306,67 @@ pub(crate) mod test_support {
         if let Some(lock) = ENGINE_STATE.get() {
             *lock.write().await = None;
         }
+    }
+
+    /// Register an in-flight execution context on the installed engine
+    /// state's gate controller, mirroring what the bridge does right
+    /// after `handle_user_message` allocates a thread. Lets caller-level
+    /// tests simulate a mid-turn engine thread so
+    /// `get_in_flight_tool_calls` resolves `(user_id, scope)` to
+    /// `thread_id`.
+    ///
+    /// Callers must already hold `ENGINE_STATE_TEST_LOCK` and have
+    /// installed an engine state.
+    /// Append events to the installed engine state's store event log,
+    /// mirroring the engine's mid-turn incremental persistence
+    /// (`persist_event_delta` in the orchestrator): events land in the
+    /// event log only — the saved thread snapshot is NOT updated, exactly
+    /// as in production while a turn is running.
+    ///
+    /// Callers must already hold `ENGINE_STATE_TEST_LOCK` and have
+    /// installed an engine state.
+    pub(crate) async fn append_engine_events(
+        thread_id: ThreadId,
+        kinds: Vec<t3claw_engine::EventKind>,
+    ) {
+        let lock = ENGINE_STATE.get().expect("engine state installed");
+        let guard = lock.read().await;
+        let state = guard.as_ref().expect("engine state installed");
+        let events: Vec<ThreadEvent> = kinds
+            .into_iter()
+            .map(|kind| ThreadEvent::new(thread_id, kind))
+            .collect();
+        state
+            .store
+            .append_events(&events)
+            .await
+            .expect("append events"); // safety: cfg(test) fixture
+    }
+
+    pub(crate) async fn register_execution_context_for_scope(
+        user_id: &str,
+        thread_id: ThreadId,
+        scope: &str,
+    ) {
+        let lock = ENGINE_STATE.get().expect("engine state installed");
+        let guard = lock.read().await;
+        let state = guard.as_ref().expect("engine state installed");
+        state
+            .gate_controller
+            .set_execution_context(
+                user_id.to_string(),
+                thread_id,
+                crate::bridge::gate_controller::PerExecutionContext {
+                    conversation_id: t3claw_engine::ConversationId::new(),
+                    source_channel: "gateway".into(),
+                    scope_thread_id: Some(t3claw_common::ExternalThreadId::from_trusted(
+                        scope.to_string(),
+                    )),
+                    channel_metadata: serde_json::Value::Null,
+                    original_message: None,
+                },
+            )
+            .await;
     }
 }
 
@@ -9105,6 +9588,90 @@ mod tests {
         );
     }
 
+    /// Pins `channel_status_covers_event` to the actual behaviour of
+    /// `forward_event_to_channel`: a kind is "covered" iff the forwarder
+    /// sends at least one StatusUpdate for it. If a new arm is added to the
+    /// forwarder without updating the predicate (or vice versa), gateway
+    /// SSE either duplicates that kind under two thread ids again or drops
+    /// it entirely.
+    #[tokio::test]
+    async fn channel_status_covers_event_matches_forwarder() {
+        use t3claw_engine::EventKind;
+
+        let step_id = t3claw_engine::StepId::new();
+        let kinds: Vec<EventKind> = vec![
+            EventKind::StepStarted { step_id },
+            EventKind::ActionExecuted {
+                step_id,
+                action_name: "echo".into(),
+                call_id: "c1".into(),
+                duration_ms: 1,
+                params_summary: None,
+                result_preview: None,
+            },
+            EventKind::ActionFailed {
+                step_id,
+                action_name: "echo".into(),
+                call_id: "c2".into(),
+                error: "boom".into(),
+                duration_ms: 1,
+                params_summary: None,
+            },
+            EventKind::StepCompleted {
+                step_id,
+                tokens: t3claw_engine::TokenUsage::default(),
+            },
+            // Payload chosen so interpret_message_event returns Some — the
+            // predicate claims the *kind* is covered, so the test fixture
+            // must exercise the emitting branch.
+            EventKind::MessageAdded {
+                role: "Assistant".into(),
+                content_preview: "thinking...".into(),
+            },
+            EventKind::SkillActivated {
+                skill_names: vec!["payroll".into()],
+            },
+            // Direct-path-only kinds: must NOT be covered, so the gateway
+            // suppression never silences them.
+            EventKind::StateChanged {
+                from: t3claw_engine::ThreadState::Created,
+                to: t3claw_engine::ThreadState::Running,
+                reason: None,
+            },
+            EventKind::CodeExecuted {
+                step_id,
+                code: "print(1)".into(),
+                stdout: "1".into(),
+                return_value: None,
+                duration_ms: 1,
+            },
+        ];
+
+        for kind in kinds {
+            let statuses = Arc::new(TokioMutex::new(Vec::new()));
+            let manager = ChannelManager::new();
+            manager
+                .add(Box::new(RecordingStatusChannel {
+                    name: "test".to_string(),
+                    statuses: Arc::clone(&statuses),
+                }))
+                .await;
+            let manager = Arc::new(manager);
+
+            let covered = channel_status_covers_event(&kind);
+            let event = t3claw_engine::ThreadEvent::new(t3claw_engine::ThreadId::new(), kind);
+            forward_event_to_channel(&event, &manager, "test", &serde_json::json!({})).await;
+
+            let sent = !statuses.lock().await.is_empty();
+            assert_eq!(
+                covered, sent,
+                "channel_status_covers_event disagrees with forward_event_to_channel \
+                 for {:?}",
+                event.kind
+            );
+        }
+    }
+
     #[tokio::test]
     async fn forward_event_to_channel_preserves_call_id_for_action_events() {
         let statuses = Arc::new(TokioMutex::new(Vec::new()));
@@ -9125,6 +9692,7 @@ mod tests {
                 call_id: "call-memory-read-1".to_string(),
                 duration_ms: 42,
                 params_summary: Some("notes/today.md".to_string()),
+                result_preview: None,
             },
         );
 
@@ -9152,6 +9720,47 @@ mod tests {
                 && duration_ms == &Some(42)
                 && *success
         ));
+    }
+
+    #[tokio::test]
+    async fn forward_event_to_channel_emits_tool_result_for_event_preview() {
+        let statuses = Arc::new(TokioMutex::new(Vec::new()));
+        let manager = ChannelManager::new();
+        manager
+            .add(Box::new(RecordingStatusChannel {
+                name: "test".to_string(),
+                statuses: Arc::clone(&statuses),
+            }))
+            .await;
+        let manager = Arc::new(manager);
+
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_read".to_string(),
+                call_id: "call-memory-read-1".to_string(),
+                duration_ms: 42,
+                params_summary: Some("notes/today.md".to_string()),
+                result_preview: Some("note contents".to_string()),
+            },
+        );
+
+        forward_event_to_channel(&event, &manager, "test", &serde_json::json!({})).await;
+
+        let statuses = statuses.lock().await;
+        assert_eq!(statuses.len(), 3);
+        assert!(matches!(&statuses[0], StatusUpdate::ToolStarted { .. }));
+        assert!(matches!(
+            &statuses[1],
+            StatusUpdate::ToolResult {
+                call_id,
+                preview,
+                ..
+            } if call_id.as_deref() == Some("call-memory-read-1")
+                && preview == "note contents"
+        ));
+        assert!(matches!(&statuses[2], StatusUpdate::ToolCompleted { .. }));
     }
 
     #[test]
@@ -9197,6 +9806,66 @@ mod tests {
                 && duration_ms == &Some(17)
                 && thread_id.as_deref() == Some("thread-123")
         ));
+    }
+
+    /// Regression: CodeAct (Tier 1) calls never produced a `tool_result`
+    /// SSE event, so live tool-call cards in the web UI had empty bodies.
+    /// An `ActionExecuted` carrying a `result_preview` must bridge to
+    /// `AppEvent::ToolResult` (the FE's `setToolCardOutput` matches it by
+    /// call_id) between ToolStarted and ToolCompleted.
+    #[test]
+    fn thread_event_to_app_events_emits_tool_result_for_event_preview() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "t3n_mcp_finalizeAudit".to_string(),
+                call_id: "code_call_1".to_string(),
+                duration_ms: 196,
+                params_summary: None,
+                result_preview: Some(r#"{"audit":"finalised"}"#.to_string()),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-123");
+
+        assert_eq!(app_events.len(), 3);
+        assert!(matches!(&app_events[0], AppEvent::ToolStarted { .. }));
+        assert!(matches!(
+            &app_events[1],
+            AppEvent::ToolResult {
+                call_id,
+                preview,
+                thread_id,
+                ..
+            } if call_id.as_deref() == Some("code_call_1")
+                && preview == r#"{"audit":"finalised"}"#
+                && thread_id.as_deref() == Some("thread-123")
+        ));
+        assert!(matches!(&app_events[2], AppEvent::ToolCompleted { .. }));
+    }
+
+    /// Events without a preview (legacy persisted shape, or sites with no
+    /// output in hand) must not emit an empty `tool_result`.
+    #[test]
+    fn thread_event_to_app_events_skips_tool_result_without_preview() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_read".to_string(),
+                call_id: "call-1".to_string(),
+                duration_ms: 5,
+                params_summary: None,
+                result_preview: None,
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-123");
+
+        assert_eq!(app_events.len(), 2);
+        assert!(matches!(&app_events[0], AppEvent::ToolStarted { .. }));
+        assert!(matches!(&app_events[1], AppEvent::ToolCompleted { .. }));
     }
 
     #[test]
@@ -12823,17 +13492,356 @@ mod tests {
         );
     }
 
-    /// Regression for the bug fixed in commit 652315e8:
-    /// `persist_v2_tool_calls` must only be called from a
-    /// `ThreadOutcome::Completed` arm. If a future refactor moves the
-    /// call out of that arm, partial tool executions on `GatePaused`
-    /// would orphan a `role="tool_calls"` DB row that then duplicates
-    /// when the gate resumes. Pin the call-site invariant by inspecting
-    /// the source of `await_thread_outcome` and any sibling arm-driven
-    /// dispatchers (currently `spawn_post_park_continuation`, which
-    /// re-runs the same outcome match in a background task).
+    /// Regression: CodeAct (Tier 1) tool calls never appear as
+    /// `ActionResult` internal messages — their outputs flow back into the
+    /// Python VM — so building the persisted `tool_calls` row from messages
+    /// alone dropped every CodeAct call. A payroll run's `t3n_mcp_*` calls
+    /// were missing from chat history while only the Tier-0 `tool_info`
+    /// discovery calls persisted, leaving the web UI with nameless noise.
+    /// The call list must come from `ActionExecuted`/`ActionFailed` thread
+    /// events (emitted by both tiers), with message content joined by call
+    /// id for `result_preview` where it exists.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn persist_v2_tool_calls_includes_codeact_calls_from_events() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(TestStore::new());
+        let db: Arc<dyn crate::db::Database> = Arc::new(
+            crate::db::libsql::LibSqlBackend::new_local(&tmp.path().join("test.db"))
+                .await
+                .expect("local libsql"),
+        );
+        db.run_migrations().await.expect("migrations");
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let step_id = t3claw_engine::StepId::new();
+
+        // Tier-0 call: has both an event and an ActionResult message.
+        thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+            "tool_info_0",
+            "tool_info",
+            r#"{"description":"discovery output"}"#,
+        ));
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "tool_info".into(),
+            call_id: "tool_info_0".into(),
+            duration_ms: 3,
+            params_summary: Some("schema".into()),
+            result_preview: Some("event-side preview".into()),
+        });
+        // CodeAct call: event only (with event-carried preview), no
+        // ActionResult message.
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "t3n_mcp_finalizeAudit".into(),
+            call_id: "code_call_1".into(),
+            duration_ms: 196,
+            params_summary: Some("2026-06-2b7404".into()),
+            result_preview: Some(r#"{"audit":"finalised"}"#.into()),
+        });
+        // CodeAct call from before previews were recorded: event only,
+        // no preview anywhere.
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "t3n_mcp_getStatus".into(),
+            call_id: "code_call_2".into(),
+            duration_ms: 12,
+            params_summary: None,
+            result_preview: None,
+        });
+        // Failed CodeAct call: must persist as an error entry.
+        thread.add_event(t3claw_engine::EventKind::ActionFailed {
+            step_id,
+            action_name: "__codeact__".into(),
+            call_id: "codeact-step-1".into(),
+            error: "TypeError: string indices must be integers".into(),
+            duration_ms: 51,
+            params_summary: None,
+        });
+        let thread_id = thread.id;
+        store.save_thread(&thread).await.unwrap();
+
+        let conv_id = db
+            .create_conversation("web", "test-user", None)
+            .await
+            .expect("create conversation");
+        let message = IncomingMessage::new("web", "test-user", "run payroll")
+            .with_thread(conv_id.to_string());
+
+        let store_arc: Arc<dyn Store> = store;
+        persist_v2_tool_calls(&store_arc, &db, thread_id, &message).await;
+
+        let messages = db
+            .list_conversation_messages(conv_id)
+            .await
+            .expect("list messages");
+        let tool_calls_msg = messages
+            .iter()
+            .find(|m| m.role == "tool_calls")
+            .expect("tool_calls row must be written");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tool_calls_msg.content).expect("valid JSON");
+        let calls = parsed["calls"].as_array().expect("calls array");
+        assert_eq!(calls.len(), 4, "every action event becomes a call entry");
+
+        // Tier-0 call keeps its joined output preview — the richer
+        // ActionResult message wins over the event-carried preview.
+        assert_eq!(calls[0]["name"], "tool_info");
+        assert_eq!(calls[0]["tool_call_id"], "tool_info_0");
+        assert_eq!(calls[0]["params_summary"], "schema");
+        assert_eq!(calls[0]["duration_ms"], 3);
+        assert_eq!(
+            calls[0]["result_preview"],
+            r#"{"description":"discovery output"}"#
+        );
+
+        // CodeAct call carries its real name, and the event-carried
+        // preview lands in the persisted row when no ActionResult
+        // message exists.
+        assert_eq!(calls[1]["name"], "t3n_mcp_finalizeAudit");
+        assert_eq!(calls[1]["tool_call_id"], "code_call_1");
+        assert_eq!(calls[1]["params_summary"], "2026-06-2b7404");
+        assert_eq!(calls[1]["duration_ms"], 196);
+        assert_eq!(calls[1]["result_preview"], r#"{"audit":"finalised"}"#);
+
+        // Legacy CodeAct call with no preview anywhere keeps the empty
+        // (non-null) preview so the history projection marks the call
+        // completed (`has_result`) rather than perpetually running.
+        assert_eq!(calls[2]["name"], "t3n_mcp_getStatus");
+        assert_eq!(calls[2]["result_preview"], "");
+
+        // Failed call persists the error, no result_preview.
+        assert_eq!(calls[3]["name"], "__codeact__");
+        assert_eq!(
+            calls[3]["error"],
+            "TypeError: string indices must be integers"
+        );
+        assert!(calls[3].get("result_preview").is_none());
+    }
+
+    /// CodeAct call ids restart per code block (`code_call_1`, …), so the
+    /// same id can map to different outputs across blocks. The preview join
+    /// must drop ambiguous ids rather than attach the wrong output to a
+    /// call.
     #[test]
-    fn persist_v2_tool_calls_only_called_from_completed_arm() {
+    fn v2_tool_calls_json_drops_ambiguous_preview_joins() {
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let step_id = t3claw_engine::StepId::new();
+        for (name, content) in [("alpha", "alpha output"), ("beta", "beta output")] {
+            thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+                "code_call_1",
+                name,
+                content,
+            ));
+            thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+                step_id,
+                action_name: name.into(),
+                call_id: "code_call_1".into(),
+                duration_ms: 1,
+                params_summary: None,
+                result_preview: None,
+            });
+        }
+
+        let calls = v2_tool_calls_json(&thread);
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            assert_eq!(
+                call["result_preview"], "",
+                "ambiguous call id must not mis-join a preview"
+            );
+        }
+    }
+
+    /// Threads with no persisted action events (legacy shape) must still
+    /// produce the message-derived call list.
+    #[test]
+    fn v2_tool_calls_json_falls_back_to_messages_without_events() {
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+            "call-1",
+            "echo",
+            r#"{"output":"hello"}"#,
+        ));
+
+        let calls = v2_tool_calls_json(&thread);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "echo");
+        assert_eq!(calls[0]["tool_call_id"], "call-1");
+        assert_eq!(calls[0]["result_preview"], r#"{"output":"hello"}"#);
+    }
+
+    /// `get_in_flight_tool_calls` must resolve the conversation scope to
+    /// the in-flight engine thread via the gate controller's
+    /// per-execution registry, return its action events as calls, and
+    /// scope strictly by user: another user (or an unknown scope, or a
+    /// turn whose context was cleared) gets `None`.
+    ///
+    /// Regression: this fixture reproduces the engine's *live*
+    /// persistence sequence. A running turn saves its `Thread` only at
+    /// turn boundaries — mid-turn the stored thread snapshot has NO
+    /// action events; the events exist solely in the store's event log,
+    /// appended incrementally via `Store::append_events` (the
+    /// orchestrator's `persist_event_delta`). The helper must read the
+    /// live event log, not the stale embedded `thread.events` — an
+    /// earlier version of this test pre-embedded the events in the saved
+    /// thread and therefore passed against an implementation that showed
+    /// `tool_calls: []` for the whole turn in production.
+    #[tokio::test]
+    async fn get_in_flight_tool_calls_resolves_scope_and_enforces_user_scoping() {
+        let _lock = test_support::ENGINE_STATE_TEST_LOCK.lock().await;
+
+        // Saved at creation, before any action runs — no embedded events.
+        let thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let thread_id = thread.id;
+        test_support::install_engine_state_with_threads(vec![thread]).await;
+
+        // Mid-turn the engine appends each host call's event delta to the
+        // store's event log; the saved thread snapshot is never updated.
+        let step_id = t3claw_engine::StepId::new();
+        test_support::append_engine_events(
+            thread_id,
+            vec![t3claw_engine::EventKind::ActionExecuted {
+                step_id,
+                action_name: "web_fetch".into(),
+                call_id: "call_1".into(),
+                duration_ms: 42,
+                params_summary: Some("https://example.com".into()),
+                result_preview: Some("fetched body".into()),
+            }],
+        )
+        .await;
+        test_support::append_engine_events(
+            thread_id,
+            vec![t3claw_engine::EventKind::ActionFailed {
+                step_id,
+                action_name: "shell".into(),
+                call_id: "call_2".into(),
+                error: "exit status 1".into(),
+                duration_ms: 7,
+                params_summary: None,
+            }],
+        )
+        .await;
+
+        let scope = uuid::Uuid::new_v4().to_string();
+        test_support::register_execution_context_for_scope("alice", thread_id, &scope).await;
+
+        let calls = get_in_flight_tool_calls("alice", &scope)
+            .await
+            .expect("in-flight calls for the owning user");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["name"], "web_fetch");
+        assert_eq!(calls[0]["tool_call_id"], "call_1");
+        assert_eq!(calls[0]["result_preview"], "fetched body");
+        assert_eq!(calls[0]["params_summary"], "https://example.com");
+        assert_eq!(calls[0]["duration_ms"], 42);
+        assert_eq!(calls[1]["name"], "shell");
+        assert_eq!(calls[1]["error"], "exit status 1");
+
+        // Another user must not resolve the same scope.
+        assert!(get_in_flight_tool_calls("mallory", &scope).await.is_none());
+        // Unknown scope: no turn in flight for that conversation.
+        assert!(
+            get_in_flight_tool_calls("alice", "11111111-2222-3333-4444-555555555555")
+                .await
+                .is_none()
+        );
+
+        // Once the bridge clears the execution context (turn finished),
+        // the helper stops reporting in-flight calls.
+        {
+            let guard = ENGINE_STATE.get().expect("installed").read().await;
+            let state = guard.as_ref().expect("installed");
+            state
+                .gate_controller
+                .clear_execution_context("alice", thread_id, t3claw_engine::ConversationId::new())
+                .await;
+        }
+        assert!(get_in_flight_tool_calls("alice", &scope).await.is_none());
+
+        test_support::clear_engine_state().await;
+    }
+
+    /// Threads whose action events live only on the saved `Thread` (no
+    /// store event-log rows — legacy shapes, resumed checkpoints) must
+    /// still produce their calls: when the live event log is no longer
+    /// than the embedded list, the helper falls back to the embedded
+    /// events (and ultimately the message-derived list).
+    #[tokio::test]
+    async fn get_in_flight_tool_calls_falls_back_to_embedded_events() {
+        let _lock = test_support::ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id: t3claw_engine::StepId::new(),
+            action_name: "memory_search".into(),
+            call_id: "call_9".into(),
+            duration_ms: 5,
+            params_summary: None,
+            result_preview: Some("found 3 docs".into()),
+        });
+        let thread_id = thread.id;
+        test_support::install_engine_state_with_threads(vec![thread]).await;
+
+        let scope = uuid::Uuid::new_v4().to_string();
+        test_support::register_execution_context_for_scope("alice", thread_id, &scope).await;
+
+        let calls = get_in_flight_tool_calls("alice", &scope)
+            .await
+            .expect("calls from embedded events");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "memory_search");
+        assert_eq!(calls[0]["result_preview"], "found 3 docs");
+
+        test_support::clear_engine_state().await;
+    }
+
+    /// Regression for the bug fixed in commit 652315e8:
+    /// `persist_v2_tool_calls` must only be called from a *terminal*
+    /// outcome arm — `ThreadOutcome::Completed` or `ThreadOutcome::Failed`.
+    /// If a future refactor moves the call into a `GatePaused` arm,
+    /// partial tool executions would orphan a `role="tool_calls"` DB row
+    /// that then duplicates when the gate resumes. (Failed was added
+    /// alongside Completed so a failed turn's calls survive reload; it is
+    /// terminal, so no resume can duplicate the row.) Pin the call-site
+    /// invariant by inspecting the source of `await_thread_outcome` and
+    /// any sibling arm-driven dispatchers (currently
+    /// `spawn_post_park_continuation`, which re-runs the same outcome
+    /// match in a background task).
+    #[test]
+    fn persist_v2_tool_calls_only_called_from_terminal_arms() {
         let source = include_str!("router.rs");
         let (before_fn, _after_fn) = source
             .split_once("async fn persist_v2_tool_calls")
@@ -12842,8 +13850,8 @@ mod tests {
         // The text below the definition is allowed to reference it
         // (doc comments, unit tests). Above the definition there must
         // be at least one call site, and every call site must sit
-        // between a `ThreadOutcome::Completed` opening match arm and
-        // the nearest non-Completed sibling arm.
+        // between a terminal (`Completed`/`Failed`) opening match arm
+        // and the nearest non-terminal sibling arm.
         let call_sites: Vec<usize> = before_fn
             .match_indices("persist_v2_tool_calls(")
             .map(|(idx, _)| idx)
@@ -12853,33 +13861,36 @@ mod tests {
             "expected at least one call site for persist_v2_tool_calls"
         );
 
-        let other_outcome_arms = [
+        let terminal_arms = ["ThreadOutcome::Completed", "ThreadOutcome::Failed"];
+        let non_terminal_arms = [
             "ThreadOutcome::GatePaused",
-            "ThreadOutcome::Failed",
             "ThreadOutcome::Stopped",
             "ThreadOutcome::MaxIterations",
         ];
         for call_idx in &call_sites {
             // Find the most recent match-arm marker preceding this call.
-            // Must be `ThreadOutcome::Completed` — anything else means
-            // the call sits in a non-completion arm and risks the bug.
+            // Must be a terminal arm — anything else means the call sits
+            // in a resumable arm and risks the duplicate-row bug.
             let prefix = &before_fn[..*call_idx];
-            let last_completed = prefix.rfind("ThreadOutcome::Completed");
-            let last_other = other_outcome_arms
+            let last_terminal = terminal_arms
+                .iter()
+                .filter_map(|arm| prefix.rfind(arm))
+                .max();
+            let last_other = non_terminal_arms
                 .iter()
                 .filter_map(|arm| prefix.rfind(arm))
                 .max();
             assert!(
-                last_completed.is_some(),
+                last_terminal.is_some(),
                 "persist_v2_tool_calls call at byte {call_idx} must be inside a \
-                 ThreadOutcome::Completed arm — no preceding Completed marker"
+                 terminal ThreadOutcome arm — no preceding Completed/Failed marker"
             );
             assert!(
-                last_other.unwrap_or(0) < last_completed.unwrap_or(0),
+                last_other.unwrap_or(0) < last_terminal.unwrap_or(0),
                 "persist_v2_tool_calls call at byte {call_idx} must be inside the \
-                 closest enclosing ThreadOutcome::Completed arm; a non-Completed arm \
-                 marker (GatePaused/Failed/Stopped/MaxIterations) appears between \
-                 the Completed marker and the call"
+                 closest enclosing terminal ThreadOutcome arm; a non-terminal arm \
+                 marker (GatePaused/Stopped/MaxIterations) appears between the \
+                 terminal marker and the call"
             );
         }
     }

@@ -63,6 +63,7 @@ pub use router::{
     get_engine_project,
     get_engine_projects_overview,
     get_engine_thread,
+    get_in_flight_tool_calls,
     get_pending_gate_by_request_id,
     // Action handlers
     handle_approval,

@@ -73,8 +73,8 @@ use crate::channels::web::types::{
 };
 use crate::channels::web::util::{
     build_turns_from_db_messages, collect_generated_images_from_tool_results,
-    enforce_generated_image_history_budget, tool_error_for_display, tool_result_preview,
-    web_incoming_message,
+    enforce_generated_image_history_budget, parse_tool_call_infos, tool_error_for_display,
+    tool_result_preview, web_incoming_message,
 };
 
 // ── Handlers ──────────────────────────────────────────────────────────
@@ -701,10 +701,11 @@ pub(crate) async fn chat_history_handler(
                 .get_conversation_metadata(thread_id)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            let in_progress = reconcile_in_progress_with_turns(
+            let mut in_progress = reconcile_in_progress_with_turns(
                 &mut turns,
                 in_progress_from_metadata(metadata.as_ref()),
             );
+            attach_in_flight_tool_calls(&mut in_progress, &user.user_id, thread_id).await;
             enforce_generated_image_history_budget(&mut turns);
             return Ok(Json(HistoryResponse {
                 thread_id,
@@ -747,7 +748,7 @@ pub(crate) async fn chat_history_handler(
     }
 
     // Empty thread (just created, no messages yet)
-    let in_progress = if let Some(ref store) = state.store {
+    let mut in_progress = if let Some(ref store) = state.store {
         let metadata = store
             .get_conversation_metadata(thread_id)
             .await
@@ -757,6 +758,7 @@ pub(crate) async fn chat_history_handler(
     } else {
         None
     };
+    attach_in_flight_tool_calls(&mut in_progress, &user.user_id, thread_id).await;
     Ok(Json(HistoryResponse {
         thread_id,
         turns: Vec::new(),
@@ -1170,6 +1172,8 @@ fn turn_info_from_in_memory_turn(t: &crate::agent::session::Turn) -> TurnInfo {
                     result_preview: None,
                     error: tc.error.as_deref().map(tool_error_for_display),
                     rationale: tc.rationale.clone(),
+                    duration_ms: None,
+                    params_summary: None,
                 }
             })
             .collect(),
@@ -1197,6 +1201,7 @@ fn in_progress_from_thread(thread: &crate::agent::session::Thread) -> Option<InP
         state: "Processing".to_string(),
         user_input: turn.user_input.clone(),
         started_at: turn.started_at.to_rfc3339(),
+        tool_calls: Vec::new(),
     })
 }
 
@@ -1232,6 +1237,32 @@ fn in_progress_matches_turn(last_turn: &TurnInfo, in_progress: &InProgressInfo) 
     }
 
     last_turn.response.is_none() && last_turn.user_input == in_progress.user_input
+}
+
+/// Engine v2: enrich a mid-turn `in_progress` projection with the tool
+/// calls the in-flight engine thread has executed so far.
+///
+/// `InProgressInfo.tool_calls` is the canonical carrier for these calls
+/// (see the field docs in `types.rs`): mid-turn the open turn's
+/// persisted `tool_calls` row does not exist yet, so without this the
+/// frontend's re-render path (thread switch, reload) starts from an
+/// empty card stream and only shows events arriving after the
+/// re-render. No-op when the turn is not in progress, the bridge has no
+/// in-flight thread for this conversation (v1 turns, completed turns),
+/// or the thread belongs to another user.
+async fn attach_in_flight_tool_calls(
+    in_progress: &mut Option<InProgressInfo>,
+    user_id: &str,
+    thread_id: Uuid,
+) {
+    let Some(live) = in_progress.as_mut() else {
+        return;
+    };
+    if let Some(calls) =
+        crate::bridge::get_in_flight_tool_calls(user_id, &thread_id.to_string()).await
+    {
+        live.tool_calls = parse_tool_call_infos(&calls);
+    }
 }
 
 fn in_progress_from_metadata(metadata: Option<&serde_json::Value>) -> Option<InProgressInfo> {
@@ -1346,6 +1377,7 @@ fn summary_live_state(summary: &crate::history::ConversationSummary) -> Option<S
         state: "Processing".to_string(),
         user_input: String::new(),
         started_at: started_at.to_string(),
+        tool_calls: Vec::new(),
     }))
     .then(|| live_state.clone())
 }
@@ -1508,6 +1540,8 @@ mod tests {
                 result: None,
                 error: Some("HTTP 502".to_string()),
                 rationale: None,
+                duration_ms: None,
+                params_summary: None,
             }],
             generated_images: Vec::new(),
             narrative: None,
@@ -1521,6 +1555,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "send 'hi' to telegram".to_string(),
                 started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1562,6 +1597,8 @@ mod tests {
                     result: None,
                     error: Some("HTTP 502 on first attempt".to_string()),
                     rationale: None,
+                    duration_ms: None,
+                    params_summary: None,
                 },
                 ToolCallInfo {
                     name: "telegram_send".to_string(),
@@ -1572,6 +1609,8 @@ mod tests {
                     result: Some("{\"message_id\":42}".to_string()),
                     error: None,
                     rationale: None,
+                    duration_ms: None,
+                    params_summary: None,
                 },
             ],
             generated_images: Vec::new(),
@@ -1586,6 +1625,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "send 'hi' to telegram".to_string(),
                 started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1622,6 +1662,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "What is 2+2?".to_string(),
                 started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1653,6 +1694,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "What is 2+2?".to_string(),
                 started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1686,6 +1728,7 @@ mod tests {
                 started_at: (chrono::Utc::now()
                     - chrono::Duration::minutes(IN_PROGRESS_STALE_AFTER_MINUTES + 1))
                 .to_rfc3339(),
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1716,6 +1759,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "Question".to_string(),
                 started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -1748,6 +1792,7 @@ mod tests {
                 state: "Processing".to_string(),
                 user_input: "Legacy question".to_string(),
                 started_at: in_progress_started_at,
+                tool_calls: Vec::new(),
             }),
         );
 
@@ -2340,6 +2385,444 @@ mod tests {
         assert_eq!(turns[0]["state"], "Completed");
         assert_eq!(turns[0]["user_input"], "What is 2+2?");
         assert_eq!(turns[0]["response"], "4");
+    }
+
+    /// Engine v2 mid-turn projection: the bridge dual-writes the bare user
+    /// message and the dispatch path stamps `live_state` with
+    /// `user_message_id: null` (the row id is unknown to the dispatcher).
+    /// History must project the open turn as `Processing` with
+    /// `in_progress` set — not as a `Failed` turn with `in_progress: null`
+    /// — otherwise any mid-turn re-render blanks the conversation for the
+    /// whole multi-minute engine turn.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_projects_engine_v2_open_turn_as_processing() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        // Prior completed turn, then the v2 bridge's dual-written user row
+        // for the in-flight turn (no assistant row yet).
+        db.add_conversation_message(thread_id, "user", "first question")
+            .await
+            .expect("add prior user message");
+        db.add_conversation_message(thread_id, "assistant", "first answer")
+            .await
+            .expect("add prior assistant message");
+        db.add_conversation_message(thread_id, "user", "run payroll")
+            .await
+            .expect("add open user message");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 1,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                "started_at": chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        let in_progress = payload
+            .get("in_progress")
+            .filter(|v| !v.is_null())
+            .expect("in_progress present mid-turn");
+        assert_eq!(in_progress["state"], "Processing");
+        assert_eq!(in_progress["user_input"], "run payroll");
+
+        let turns = payload["turns"].as_array().expect("turns array");
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0]["state"], "Completed");
+        assert_eq!(turns[0]["response"], "first answer");
+        assert_eq!(
+            turns[1]["state"], "Processing",
+            "open v2 turn must not project as Failed"
+        );
+        assert_eq!(turns[1]["user_input"], "run payroll");
+    }
+
+    /// Engine v2 mid-turn: the open turn has no persisted `tool_calls`
+    /// row yet (that is only written at turn end), so the calls executed
+    /// so far must be surfaced on `in_progress.tool_calls` — resolved
+    /// from the live engine thread via the bridge's per-execution
+    /// context. Without this, any mid-turn re-render (thread switch,
+    /// reload) wipes the live tool cards and the user only sees events
+    /// that arrive afterwards.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_surfaces_in_flight_tool_calls_mid_turn() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let _lock = crate::bridge::test_support::ENGINE_STATE_TEST_LOCK
+            .lock()
+            .await;
+        crate::bridge::test_support::clear_engine_state().await;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        db.add_conversation_message(thread_id, "user", "run payroll")
+            .await
+            .expect("add open user message");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 0,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                "started_at": chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+
+        // The in-flight engine thread: two completed action events so
+        // far (one success with preview, one failure), no final
+        // response yet. Mirrors the live persistence sequence — the
+        // thread is saved at creation with NO events (a running turn
+        // only saves its Thread at turn boundaries) and the action
+        // events exist solely in the store's event log, appended
+        // incrementally by the orchestrator's `persist_event_delta`.
+        let engine_thread = t3claw_engine::Thread::new(
+            "run payroll",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let engine_thread_id = engine_thread.id;
+        crate::bridge::test_support::install_engine_state_with_threads(vec![engine_thread]).await;
+        let step_id = t3claw_engine::StepId::new();
+        crate::bridge::test_support::append_engine_events(
+            engine_thread_id,
+            vec![
+                t3claw_engine::EventKind::ActionExecuted {
+                    step_id,
+                    action_name: "t3n_mcp_getStatus".into(),
+                    call_id: "code_call_1".into(),
+                    duration_ms: 120,
+                    params_summary: Some("cycle-42".into()),
+                    result_preview: Some(r#"{"status":"open"}"#.into()),
+                },
+                t3claw_engine::EventKind::ActionFailed {
+                    step_id,
+                    action_name: "t3n_mcp_submitBatch".into(),
+                    call_id: "code_call_2".into(),
+                    error: "batch rejected".into(),
+                    duration_ms: 30,
+                    params_summary: None,
+                },
+            ],
+        )
+        .await;
+        crate::bridge::test_support::register_execution_context_for_scope(
+            "test-user",
+            engine_thread_id,
+            &thread_id.to_string(),
+        )
+        .await;
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        let in_progress = payload
+            .get("in_progress")
+            .filter(|v| !v.is_null())
+            .expect("in_progress present mid-turn");
+        assert_eq!(in_progress["state"], "Processing");
+        let calls = in_progress["tool_calls"]
+            .as_array()
+            .expect("in-flight tool calls attached to in_progress");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0]["name"], "t3n_mcp_getStatus");
+        assert_eq!(calls[0]["call_id"], "code_call_1");
+        assert_eq!(calls[0]["has_result"], true);
+        assert_eq!(calls[0]["has_error"], false);
+        assert_eq!(calls[0]["result_preview"], r#"{"status":"open"}"#);
+        assert_eq!(calls[0]["params_summary"], "cycle-42");
+        assert_eq!(calls[0]["duration_ms"], 120);
+        assert_eq!(calls[1]["name"], "t3n_mcp_submitBatch");
+        assert_eq!(calls[1]["has_error"], true);
+        assert_eq!(calls[1]["error"], "batch rejected");
+
+        // The open turn itself still has no persisted tool_calls — the
+        // in_progress payload is the canonical mid-turn carrier.
+        let turns = payload["turns"].as_array().expect("turns array");
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["state"], "Processing");
+        assert!(
+            turns[0]["tool_calls"]
+                .as_array()
+                .is_none_or(|c| c.is_empty()),
+            "open turn must not duplicate the in-flight calls"
+        );
+
+        crate::bridge::test_support::clear_engine_state().await;
+    }
+
+    /// Same as above, but through the empty-thread branch: the v2 bridge
+    /// stamps `live_state` before its user-row dual-write lands, so a
+    /// poll can see metadata with zero persisted messages. The in-flight
+    /// calls must still ride on `in_progress.tool_calls`.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_surfaces_in_flight_tool_calls_for_empty_thread() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let _lock = crate::bridge::test_support::ENGINE_STATE_TEST_LOCK
+            .lock()
+            .await;
+        crate::bridge::test_support::clear_engine_state().await;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 0,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                "started_at": chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+
+        // Live persistence sequence: thread saved without events; the
+        // action event exists only in the store's event log.
+        let engine_thread = t3claw_engine::Thread::new(
+            "run payroll",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let engine_thread_id = engine_thread.id;
+        crate::bridge::test_support::install_engine_state_with_threads(vec![engine_thread]).await;
+        crate::bridge::test_support::append_engine_events(
+            engine_thread_id,
+            vec![t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_search".into(),
+                call_id: "call_1".into(),
+                duration_ms: 9,
+                params_summary: None,
+                result_preview: Some("3 hits".into()),
+            }],
+        )
+        .await;
+        crate::bridge::test_support::register_execution_context_for_scope(
+            "test-user",
+            engine_thread_id,
+            &thread_id.to_string(),
+        )
+        .await;
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        assert!(
+            payload["turns"].as_array().expect("turns").is_empty(),
+            "empty-thread branch must report no persisted turns"
+        );
+        let in_progress = payload
+            .get("in_progress")
+            .filter(|v| !v.is_null())
+            .expect("in_progress present for empty thread mid-turn");
+        let calls = in_progress["tool_calls"]
+            .as_array()
+            .expect("in-flight tool calls attached on the empty-thread branch");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "memory_search");
+        assert_eq!(calls[0]["result_preview"], "3 hits");
+
+        crate::bridge::test_support::clear_engine_state().await;
+    }
+
+    /// Engine v2 post-park completion: when the foreground dispatch returned
+    /// `Pending` the live_state is deliberately left in place, and the
+    /// post-park continuation later persists the assistant row without
+    /// clearing it. The projection must treat the persisted response as
+    /// terminal — completed turn, `in_progress` gone — despite the leftover
+    /// `Processing` metadata.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_retires_engine_v2_live_state_after_post_park_response() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 0,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                // Fresh enough to pass the staleness guard, but older than
+                // the assistant row written below.
+                "started_at": (chrono::Utc::now() - chrono::Duration::minutes(2)).to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+        db.add_conversation_message(thread_id, "user", "run payroll")
+            .await
+            .expect("add user message");
+        // Post-park continuation persisted the final response (or the
+        // sanitized failure summary — same projection shape).
+        db.add_conversation_message(thread_id, "assistant", "payroll complete")
+            .await
+            .expect("add assistant message");
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        assert!(
+            payload
+                .get("in_progress")
+                .map(|v| v.is_null())
+                .unwrap_or(true),
+            "completed turn must retire the leftover Processing live_state"
+        );
+        let turns = payload["turns"].as_array().expect("turns array");
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["state"], "Completed");
+        assert_eq!(turns[0]["response"], "payroll complete");
+        assert!(
+            turns[0]["completed_at"].as_str().is_some(),
+            "concluded turn must carry completed_at"
+        );
     }
 
     #[cfg(feature = "libsql")]

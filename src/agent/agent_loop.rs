@@ -1817,9 +1817,21 @@ impl Agent {
         if self.config.engine_v2 {
             match &submission {
                 Submission::UserInput { content } => {
-                    return crate::bridge::handle_with_engine(self, message, content)
-                        .await
-                        .map(HandleOutcome::from);
+                    // Live-state bracket: project this turn as in-progress in
+                    // the v1 conversation metadata so `GET /api/chat/history`
+                    // reports a `Processing` turn and `in_progress` while the
+                    // engine executes. v2 turns run for minutes, and without
+                    // this any mid-turn re-render rebuilds from history that
+                    // contains only the bare user message (projected as a
+                    // `Failed` turn). v1 writes the same metadata from
+                    // `persist_user_message`; see `begin_engine_v2_live_state`.
+                    let live_state_conversation = self.begin_engine_v2_live_state(message).await;
+                    let result = crate::bridge::handle_with_engine(self, message, content).await;
+                    if let Some(conversation_id) = live_state_conversation {
+                        self.conclude_engine_v2_live_state(message, conversation_id, &result)
+                            .await;
+                    }
+                    return result.map(HandleOutcome::from);
                 }
                 Submission::ApprovalResponse { approved, always } => {
                     // Reaching here means the message is a slash command (/approve,

@@ -988,12 +988,15 @@ mod tests {
             Ok(vec![])
         }
         async fn append_events(&self, events: &[ThreadEvent]) -> Result<(), EngineError> {
+            // Dedupe by event id per the trait contract: the execution
+            // path appends incrementally mid-turn and re-appends the full
+            // list at turn end.
             let mut stored = self.events.write().await;
             for event in events {
-                stored
-                    .entry(event.thread_id)
-                    .or_default()
-                    .push(event.clone());
+                let log = stored.entry(event.thread_id).or_default();
+                if !log.iter().any(|existing| existing.id == event.id) {
+                    log.push(event.clone());
+                }
             }
             Ok(())
         }

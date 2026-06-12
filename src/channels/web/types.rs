@@ -87,7 +87,7 @@ pub struct TurnInfo {
     pub narrative: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCallInfo {
     pub name: String,
     pub has_result: bool,
@@ -103,6 +103,13 @@ pub struct ToolCallInfo {
     /// Agent's reasoning for choosing this tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
+    /// Wall-clock execution time, when the persisted call recorded one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Short human-readable parameter summary (e.g. URL for the http tool),
+    /// matching the live SSE card's `name(summary)` display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_summary: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -158,6 +165,16 @@ pub struct InProgressInfo {
     pub state: String,
     pub user_input: String,
     pub started_at: String,
+    /// Canonical carrier for the in-flight turn's tool calls (engine v2).
+    ///
+    /// Populated at read time by `chat_history_handler` from the live
+    /// engine thread's action events — never persisted into the
+    /// `live_state` conversation metadata this struct is otherwise
+    /// deserialized from (hence `serde(default)`). The frontend seeds
+    /// its live tool-card stream from this list when re-rendering
+    /// mid-turn, so calls executed before the re-render are not lost.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCallInfo>,
 }
 
 // --- Approval ---

@@ -352,6 +352,30 @@ impl BridgeGateController {
         });
     }
 
+    /// Resolve the engine thread currently executing for `(user_id,
+    /// scope)`, where `scope` is the caller-side conversation scope the
+    /// channel sent with the message (for the web gateway: the chat
+    /// thread UUID). The per-execution registry holds an entry for
+    /// exactly the lifetime of a turn — written once the engine
+    /// allocates the thread, cleared when the engine task finishes — so
+    /// a `Some` here means that conversation has a turn in flight.
+    ///
+    /// Scoped by `user_id` via the registry key, so one user can never
+    /// resolve another user's thread. The registry only ever holds a
+    /// handful of entries (one per in-flight turn), so a linear scan is
+    /// fine.
+    pub async fn find_thread_for_scope(&self, user_id: &str, scope: &str) -> Option<ThreadId> {
+        self.per_execution
+            .lock()
+            .await
+            .iter()
+            .find(|(key, context)| {
+                key.user_id == user_id
+                    && context.scope_thread_id.as_ref().map(|t| t.as_str()) == Some(scope)
+            })
+            .map(|(key, _)| key.thread_id)
+    }
+
     /// Drop the pre-execution `(user, conversation)`-keyed entry
     /// without touching any `(user, thread)`-keyed entry. Used on the
     /// bridge error path when `handle_user_message` failed before

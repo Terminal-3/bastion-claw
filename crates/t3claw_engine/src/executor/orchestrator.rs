@@ -30,7 +30,9 @@ use monty::{
 };
 use tracing::{debug, warn};
 
-use super::scripting::{execute_code, json_to_monty, monty_to_json, monty_to_string};
+use super::scripting::{
+    execute_code, json_to_monty, monty_to_json, monty_to_string, normalise_result_envelope_for_vm,
+};
 use super::thread_context::thread_execution_context;
 use crate::capability::lease::LeaseManager;
 use crate::capability::policy::PolicyEngine;
@@ -450,6 +452,12 @@ pub async fn execute_orchestrator(
 ) -> Result<OrchestratorResult, EngineError> {
     let mut total_tokens = TokenUsage::default();
 
+    // Events already on the thread were persisted by the caller
+    // (`ExecutionLoop::persist_runtime_state` runs immediately before this
+    // function); track from here so each mid-turn flush appends only the
+    // delta this run produced.
+    let mut persisted_event_count = thread.events.len();
+
     // Build context variables for the orchestrator
     let (input_names, input_values) = build_orchestrator_inputs(thread, persisted_state);
 
@@ -646,6 +654,17 @@ pub async fn execute_orchestrator(
                     other => ExtFunctionResult::NotFound(other.to_string()),
                 };
 
+                // Persist any events this host call pushed onto the thread
+                // so store-backed readers (the chat history's in-flight
+                // tool-call projection, the engine events API) see mid-turn
+                // progress. Without this the orchestrator path persisted
+                // events only after the whole turn, so `Store::load_events`
+                // stayed empty for the turn's full duration. Appending early
+                // is retention-aligned (LLM data is never deleted), and
+                // `append_events` deduplicates by event id, so the caller's
+                // final full persist cannot double these rows.
+                persist_event_delta(store, thread, &mut persisted_event_count).await;
+
                 // Resume the orchestrator VM
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     call.resume(ext_result, PrintWriter::CollectString(&mut stdout))
@@ -709,6 +728,39 @@ pub async fn execute_orchestrator(
                 });
             }
         }
+    }
+}
+
+/// Append the events pushed since the last flush to the store's event log.
+///
+/// Called once per orchestrator host-function call, so a multi-minute turn
+/// surfaces its `ActionExecuted`/`ActionFailed` events to store-backed
+/// readers as it progresses instead of all at once at turn end. Appends
+/// only `thread.events[*persisted_event_count..]` — cheap when nothing new
+/// was pushed. Failures are logged and the counter left untouched so the
+/// delta is retried on the next host call (and ultimately covered by the
+/// caller's final persist).
+async fn persist_event_delta(
+    store: Option<&Arc<dyn Store>>,
+    thread: &Thread,
+    persisted_event_count: &mut usize,
+) {
+    let Some(store) = store else {
+        return;
+    };
+    let total = thread.events.len();
+    if *persisted_event_count >= total {
+        return;
+    }
+    match store
+        .append_events(&thread.events[*persisted_event_count..])
+        .await
+    {
+        Ok(()) => *persisted_event_count = total,
+        Err(e) => debug!(
+            thread_id = %thread.id,
+            "failed to append mid-turn event delta: {e}"
+        ),
     }
 }
 
@@ -1045,7 +1097,13 @@ async fn handle_execute_code_step(
                 .map(|r| {
                     serde_json::json!({
                         "action_name": r.action_name,
-                        "output": r.output,
+                        // VM-facing only: the orchestrator driver builds
+                        // `state[action_name]` from this, so JSON-string
+                        // outputs (MCP/sidecar text envelopes) must arrive
+                        // as structures, matching what a live `await`
+                        // returned inside the code block. Raw outputs were
+                        // already broadcast via events above.
+                        "output": crate::executor::scripting::normalise_tool_output_for_vm(&r.output),
                         "is_error": r.is_error,
                         "duration_ms": r.duration.as_millis(),
                     })
@@ -1387,7 +1445,12 @@ async fn handle_execute_action(
             &serde_json::json!({}),
         );
     }
-    ExtFunctionResult::Return(json_to_monty(&result_json))
+    // The events above carry the raw output; only the VM-facing envelope
+    // gets its `output` re-hydrated from a JSON-encoded string (MCP /
+    // sidecar text envelopes) into a structure Python can subscript.
+    ExtFunctionResult::Return(json_to_monty(&normalise_result_envelope_for_vm(
+        &result_json,
+    )))
 }
 
 /// Handle `__execute_actions_parallel__(calls)`.
@@ -1857,7 +1920,9 @@ async fn handle_execute_actions_parallel(
             }
         }
 
-        results_json.push(result_json.clone());
+        // Events were emitted with the raw output above; normalise only
+        // the VM-facing copy (JSON-string outputs become structures).
+        results_json.push(normalise_result_envelope_for_vm(&result_json));
     }
 
     thread.updated_at = chrono::Utc::now();
@@ -1907,6 +1972,7 @@ async fn execute_single_action(
                     call_id: call_id.to_string(),
                     duration_ms: r.duration.as_millis() as u64,
                     params_summary: params_summary.clone(),
+                    result_preview: crate::types::event::result_preview_from_output(&r.output),
                 }
             };
             let result_json = serde_json::json!({
@@ -2156,6 +2222,7 @@ async fn execute_single_action_with_inline_retry(
                 call_id: call_id.to_string(),
                 duration_ms: 0,
                 params_summary: params_summary.clone(),
+                result_preview: crate::types::event::result_preview_from_output(&cached_output),
             };
             accumulated_events.push(event);
             let result_json = serde_json::json!({
@@ -2294,6 +2361,8 @@ fn handle_emit_event(
                 call_id,
                 duration_ms: 0,
                 params_summary: None,
+                // Python-emitted events carry no output payload.
+                result_preview: None,
             }
         }
         "action_failed" => {
@@ -3539,6 +3608,108 @@ mod tests {
             MontyObject::Int(v) => v,
             other => panic!("Expected int, got: {other:?}"),
         }
+    }
+
+    /// Run a Python program (with orchestrator helpers in scope) that ends
+    /// with `FINAL(str_expr)` and return the string value.
+    fn eval_python_str(program: &str) -> String {
+        let helpers_end = DEFAULT_ORCHESTRATOR
+            .find("\ndef run_loop(")
+            .unwrap_or(DEFAULT_ORCHESTRATOR.len());
+        let helpers = &DEFAULT_ORCHESTRATOR[..helpers_end];
+
+        let code = format!("{helpers}\n{program}");
+        match run_python_final(code) {
+            MontyObject::String(v) => v,
+            other => panic!("Expected string, got: {other:?}"),
+        }
+    }
+
+    // ── format_output failed-block recovery note ─────────────────
+    //
+    // Regression for the live payroll repeat-auth incident: a CodeAct block
+    // ran t3n_mcp_createT3nAuthSession / addUserDid / listMyContext
+    // successfully, then errored on result parsing. The next steps re-ran
+    // the entire trio because nothing told the model that (a) the calls had
+    // already succeeded and their outputs were saved in state[...], and
+    // (b) variables assigned in the failed block would not be available in
+    // the next block. format_output must spell both out on failure.
+
+    #[test]
+    fn format_output_failed_block_lists_succeeded_calls_and_blocks_rerun() {
+        let program = r#"
+result = {
+    "stdout": "=== Session ===\n\nError: Traceback (most recent call last): ...",
+    "had_error": True,
+    "return_value": None,
+    "action_results": [
+        {"action_name": "t3n_mcp_createT3nAuthSession", "output": "{\"status\": \"success\"}", "is_error": False},
+        {"action_name": "t3n_mcp_addUserDid", "output": "{\"status\": \"success\"}", "is_error": False},
+    ],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(out.contains("do NOT call those tools again"), "{out}");
+        assert!(
+            out.contains("state['t3n_mcp_createT3nAuthSession']"),
+            "{out}"
+        );
+        assert!(out.contains("state['t3n_mcp_addUserDid']"), "{out}");
+        assert!(
+            out.contains("NOT available in your next code block"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn format_output_failed_block_without_calls_points_at_state() {
+        let program = r#"
+result = {
+    "stdout": "NameError: name 'session' is not defined",
+    "had_error": True,
+    "action_results": [],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(
+            out.contains("NOT available in your next code block"),
+            "{out}"
+        );
+        assert!(out.contains("state['<tool_name>']"), "{out}");
+    }
+
+    #[test]
+    fn format_output_successful_block_has_no_recovery_note() {
+        let program = r#"
+result = {
+    "stdout": "ok",
+    "had_error": False,
+    "action_results": [{"action_name": "time", "output": "{}", "is_error": False}],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(!out.contains("[orchestrator]"), "{out}");
+    }
+
+    #[test]
+    fn format_output_recovery_note_survives_front_truncation() {
+        // format_output truncates from the FRONT (keeps the tail), so the
+        // recovery note appended after a huge stdout must still be present.
+        let program = r#"
+result = {
+    "stdout": "x" * 9000,
+    "had_error": True,
+    "action_results": [{"action_name": "tool_a", "output": "ok", "is_error": False}],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(out.starts_with("... (truncated) ..."), "{out}");
+        assert!(out.contains("do NOT call those tools again"), "{out}");
+        assert!(out.contains("state['tool_a']"), "{out}");
     }
 
     // ── __regex_match__ host function reachability ───────────────
@@ -5501,6 +5672,99 @@ FINAL(batch_error_count)
         assert!(
             action_failed,
             "expected ActionFailed event alongside CodeExecutionFailed"
+        );
+    }
+
+    /// Regression: the orchestrator must persist event deltas to the
+    /// store's event log *as the turn progresses*, not only at turn end.
+    ///
+    /// Before `persist_event_delta`, the only `append_events` calls were
+    /// the caller's (`ExecutionLoop::persist_runtime_state` before/after
+    /// `execute_orchestrator`, and `ThreadManager`'s final persist), so a
+    /// multi-minute turn showed an empty event log to every store-backed
+    /// reader — the chat history's in-flight `tool_calls` projection sat
+    /// at `[]` until the turn completed.
+    ///
+    /// The script emits an `ActionExecuted` event and then dies with a
+    /// runtime error, so `execute_orchestrator` returns `Err` and never
+    /// reaches any end-of-turn persist. The event must already be in the
+    /// store: only the per-host-call delta append can have put it there.
+    #[tokio::test]
+    async fn orchestrator_appends_event_deltas_to_store_mid_turn() {
+        let llm: Arc<dyn LlmBackend> = Arc::new(ModelCapturingLlm {
+            captured: tokio::sync::Mutex::new(Vec::new()),
+        });
+        let effects: Arc<dyn EffectExecutor> = Arc::new(NoopEffects);
+        let leases = Arc::new(LeaseManager::new());
+        let policy = Arc::new(PolicyEngine::new());
+        let store: Arc<dyn Store> = Arc::new(crate::tests::InMemoryStore::new());
+
+        let mut thread = Thread::new(
+            "goal",
+            crate::types::thread::ThreadType::Foreground,
+            ProjectId::new(),
+            "test-user",
+            crate::types::thread::ThreadConfig::default(),
+        );
+        thread.transition_to(ThreadState::Running, None).unwrap();
+        let thread_id = thread.id;
+
+        let code = r#"
+__emit_event__("action_executed", action_name="web_fetch", call_id="call_1")
+x = 1 / 0
+"#;
+
+        let (_signal_tx, mut signal_rx) = crate::runtime::messaging::signal_channel(8);
+        let gate: Arc<dyn crate::gate::GateController> =
+            crate::gate::CancellingGateController::arc();
+
+        let result = execute_orchestrator(
+            code,
+            &mut thread,
+            &llm,
+            &effects,
+            &leases,
+            &policy,
+            &mut signal_rx,
+            None,
+            None,
+            Some(&store),
+            None,
+            &gate,
+            &serde_json::json!({}),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "script must die mid-turn so no end-of-turn persist runs"
+        );
+
+        let persisted = store.load_events(thread_id).await.unwrap();
+        assert!(
+            persisted.iter().any(|e| matches!(
+                &e.kind,
+                EventKind::ActionExecuted { action_name, call_id, .. }
+                    if action_name == "web_fetch" && call_id == "call_1"
+            )),
+            "mid-turn event must be in the store's event log before turn end; got {} events",
+            persisted.len()
+        );
+
+        // Re-appending the full event list (what `ThreadManager`'s final
+        // persist does for completed threads) must not duplicate rows —
+        // `append_events` dedupes by event id.
+        store.append_events(&thread.events).await.unwrap();
+        let after_final = store.load_events(thread_id).await.unwrap();
+        let unique_ids: std::collections::HashSet<_> = after_final.iter().map(|e| e.id.0).collect();
+        assert_eq!(
+            unique_ids.len(),
+            after_final.len(),
+            "final full persist must not double event rows"
+        );
+        assert_eq!(
+            after_final.len(),
+            thread.events.len(),
+            "event log and thread events must agree after the final persist"
         );
     }
 }

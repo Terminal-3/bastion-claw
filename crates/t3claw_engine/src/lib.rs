@@ -232,7 +232,15 @@ pub(crate) mod tests {
                 .collect())
         }
         async fn append_events(&self, events: &[ThreadEvent]) -> Result<(), EngineError> {
-            self.events.write().await.extend(events.iter().cloned());
+            // Dedupe by event id per the trait contract: execution paths
+            // append incrementally mid-turn and re-append overlapping
+            // ranges at turn end.
+            let mut stored = self.events.write().await;
+            for event in events {
+                if !stored.iter().any(|existing| existing.id == event.id) {
+                    stored.push(event.clone());
+                }
+            }
             Ok(())
         }
         async fn load_events(&self, thread_id: ThreadId) -> Result<Vec<ThreadEvent>, EngineError> {

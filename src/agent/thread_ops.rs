@@ -1175,6 +1175,103 @@ impl Agent {
         }
     }
 
+    /// Engine v2: mark the message's v1 conversation as having an
+    /// in-progress turn before dispatching to the bridge.
+    ///
+    /// The v2 path never touches the v1 in-memory session, so the web
+    /// history projection is built entirely from the v1 conversation
+    /// table — a bare user message with no assistant reply projects as a
+    /// `Failed` turn with `in_progress: null` for the whole multi-minute
+    /// turn. Writing the same `live_state` metadata v1 writes from
+    /// `persist_user_message` lets `chat_history_handler`'s reconcile
+    /// step relabel the open turn as `Processing` and surface
+    /// `in_progress` mid-turn.
+    ///
+    /// Resolves the conversation through
+    /// `get_or_create_scoped_conversation` — the exact resolution the
+    /// bridge uses for its user/assistant dual-writes — so the metadata
+    /// lands on the row the history API reads. Returns `None` (no
+    /// projection) when the message has no conversation scope or no
+    /// store is configured; such messages cannot be addressed by the
+    /// history API's per-thread lookup anyway.
+    pub(super) async fn begin_engine_v2_live_state(
+        &self,
+        message: &IncomingMessage,
+    ) -> Option<Uuid> {
+        let scope = message.conversation_scope()?;
+        let store = Arc::clone(self.store()?);
+
+        let conversation_id = match store
+            .get_or_create_scoped_conversation(&message.user_id, &message.channel, scope)
+            .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::debug!(
+                    user = %message.user_id,
+                    channel = %message.channel,
+                    "engine v2: skipping live-state projection, scoped conversation unavailable: {e}"
+                );
+                return None;
+            }
+        };
+
+        // Next turn index = user messages already persisted. The reconcile
+        // step uses this to suppress a live state that is older than the
+        // newest persisted turn, so it must point one past the existing
+        // turns. Best-effort: a read failure degrades to 0, which can only
+        // under-report (suppressing the affordance, never fabricating it).
+        let turn_number = match store.list_conversation_messages(conversation_id).await {
+            Ok(messages) => messages.iter().filter(|m| m.role == "user").count(),
+            Err(_) => 0,
+        };
+
+        // `user_message_id` stays `None`: the bridge persists the user row
+        // itself after this runs, so the reconcile step matches the open
+        // turn by content instead. Messages whose dual-written content is
+        // augmented (attachments) will not match and fall back to the
+        // suppressed (pre-fix) projection rather than a wrong one.
+        self.persist_processing_live_state(
+            conversation_id,
+            &message.channel,
+            &message.user_id,
+            ProcessingLiveState {
+                turn_number,
+                user_message_id: None,
+                user_input: &message.content,
+                started_at: Utc::now(),
+            },
+        )
+        .await;
+
+        Some(conversation_id)
+    }
+
+    /// Engine v2: settle the live-state projection opened by
+    /// [`Self::begin_engine_v2_live_state`] once the bridge returns.
+    ///
+    /// Terminal outcomes (`Respond`, `NoResponse`, `Err`) clear the
+    /// metadata — by this point the bridge has already persisted the
+    /// assistant response or sanitized failure summary, so the history
+    /// projection is complete without it. `Pending` keeps it: the engine
+    /// thread is still executing (foreground-timeout handoff) or parked
+    /// at a gate (the `pending_gate` payload drives the UI), and the
+    /// post-park continuation's persisted assistant message plus the
+    /// projection's staleness guard (`IN_PROGRESS_STALE_AFTER_MINUTES`)
+    /// retire the affordance without a callback from the bridge.
+    pub(super) async fn conclude_engine_v2_live_state(
+        &self,
+        message: &IncomingMessage,
+        conversation_id: Uuid,
+        outcome: &Result<crate::bridge::BridgeOutcome, Error>,
+    ) {
+        if matches!(outcome, Ok(crate::bridge::BridgeOutcome::Pending)) {
+            return;
+        }
+        self.clear_conversation_live_state(conversation_id, &message.channel, &message.user_id)
+            .await;
+    }
+
     /// Persist the user message to the DB at turn start (before the agentic loop).
     ///
     /// This ensures the user message is durable even if the process crashes
@@ -3928,6 +4025,138 @@ mod tests {
         }
         let body = serde_json::to_string_pretty(&vec![record]).expect("trace record serializes");
         std::fs::write(path, body).expect("trace record writes");
+    }
+
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_engine_v2_live_state_marks_processing_then_clears_on_terminal_outcome() {
+        let (agent, db, _temp_dir) = make_trace_capture_agent(Arc::new(StubLlm::new("done"))).await;
+        let thread_id = Uuid::new_v4();
+        let message = IncomingMessage::new("gateway", "v2-user", "run payroll")
+            .with_thread(thread_id.to_string());
+
+        let conversation_id = agent
+            .begin_engine_v2_live_state(&message)
+            .await
+            .expect("scoped conversation resolves for UUID thread scope");
+        // UUID scopes must resolve to the same conversation id the web
+        // history API queries (and the bridge dual-writes into).
+        assert_eq!(conversation_id, thread_id);
+
+        let metadata = db
+            .get_conversation_metadata(conversation_id)
+            .await
+            .expect("metadata read")
+            .expect("conversation metadata present");
+        let live = metadata.get("live_state").expect("live_state written");
+        assert_eq!(
+            live.get("state").and_then(|v| v.as_str()),
+            Some("Processing")
+        );
+        assert_eq!(
+            live.get("user_input").and_then(|v| v.as_str()),
+            Some("run payroll")
+        );
+        // The bridge persists the user row itself, so the projection
+        // matches by content — the id must stay unset. libsql stores
+        // metadata via `json_patch`, which drops null keys, so accept
+        // either an explicit null or an absent key.
+        assert!(live.get("user_message_id").is_none_or(|v| v.is_null()));
+        assert_eq!(live.get("turn_number").and_then(|v| v.as_u64()), Some(0));
+
+        agent
+            .conclude_engine_v2_live_state(
+                &message,
+                conversation_id,
+                &Ok(crate::bridge::BridgeOutcome::Respond("done".into())),
+            )
+            .await;
+        let metadata = db
+            .get_conversation_metadata(conversation_id)
+            .await
+            .expect("metadata read")
+            .expect("conversation metadata present");
+        assert!(
+            metadata.get("live_state").is_none_or(|v| v.is_null()),
+            "terminal outcome must clear the live projection"
+        );
+    }
+
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_engine_v2_live_state_kept_on_pending_outcome() {
+        let (agent, db, _temp_dir) = make_trace_capture_agent(Arc::new(StubLlm::new("done"))).await;
+        let thread_id = Uuid::new_v4();
+        let message = IncomingMessage::new("gateway", "v2-user", "long running turn")
+            .with_thread(thread_id.to_string());
+
+        let conversation_id = agent
+            .begin_engine_v2_live_state(&message)
+            .await
+            .expect("scoped conversation resolves");
+        agent
+            .conclude_engine_v2_live_state(
+                &message,
+                conversation_id,
+                &Ok(crate::bridge::BridgeOutcome::Pending),
+            )
+            .await;
+
+        let metadata = db
+            .get_conversation_metadata(conversation_id)
+            .await
+            .expect("metadata read")
+            .expect("conversation metadata present");
+        assert_eq!(
+            metadata
+                .get("live_state")
+                .and_then(|v| v.get("state"))
+                .and_then(|v| v.as_str()),
+            Some("Processing"),
+            "a parked/handed-off thread is still executing — keep the projection"
+        );
+    }
+
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_engine_v2_live_state_counts_prior_turns_and_skips_scopeless_messages() {
+        let (agent, db, _temp_dir) = make_trace_capture_agent(Arc::new(StubLlm::new("done"))).await;
+        let thread_id = Uuid::new_v4();
+        let message = IncomingMessage::new("gateway", "v2-user", "second question")
+            .with_thread(thread_id.to_string());
+
+        // Seed one completed turn the way the bridge dual-write does.
+        db.get_or_create_scoped_conversation("v2-user", "gateway", &thread_id.to_string())
+            .await
+            .expect("seed conversation");
+        db.add_conversation_message(thread_id, "user", "first question")
+            .await
+            .expect("seed user row");
+        db.add_conversation_message(thread_id, "assistant", "first answer")
+            .await
+            .expect("seed assistant row");
+
+        let conversation_id = agent
+            .begin_engine_v2_live_state(&message)
+            .await
+            .expect("scoped conversation resolves");
+        let metadata = db
+            .get_conversation_metadata(conversation_id)
+            .await
+            .expect("metadata read")
+            .expect("conversation metadata present");
+        assert_eq!(
+            metadata
+                .get("live_state")
+                .and_then(|v| v.get("turn_number"))
+                .and_then(|v| v.as_u64()),
+            Some(1),
+            "live turn must index one past the persisted turns"
+        );
+
+        // No conversation scope → no projection target → no-op.
+        let scopeless = IncomingMessage::new("cli", "v2-user", "hello");
+        assert!(agent.begin_engine_v2_live_state(&scopeless).await.is_none());
     }
 
     #[cfg(feature = "libsql")]

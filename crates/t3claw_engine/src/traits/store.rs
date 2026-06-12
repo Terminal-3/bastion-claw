@@ -39,6 +39,14 @@ pub trait Store: Send + Sync {
 
     // ── Event operations ────────────────────────────────────
 
+    /// Append events to the per-thread event log.
+    ///
+    /// Implementations MUST deduplicate by `ThreadEvent::id`: callers
+    /// append incrementally during execution (per orchestrator host call,
+    /// per execution-loop step) and then re-append overlapping ranges at
+    /// turn end (`ThreadManager`'s final persist appends the full
+    /// `thread.events` list), so an event id already in the log must not
+    /// produce a second row in `load_events`.
     async fn append_events(&self, events: &[ThreadEvent]) -> Result<(), EngineError>;
     async fn load_events(&self, thread_id: ThreadId) -> Result<Vec<ThreadEvent>, EngineError>;
 

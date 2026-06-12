@@ -5,6 +5,35 @@ function rememberSseEventId(event) {
   window.__e2e.lastSseEventId = event.lastEventId;
 }
 
+// A received chat event proves the stream is healthy. Belt-and-braces clear
+// of the reconnect UI for any path where `onopen` did not fire (or fired
+// before a stale warning banner was shown): reset the attempt counter,
+// cancel the pending banner timer and manual-retry timer, restore the status
+// dot, and remove a lingering warning banner. The success flash from
+// `onopen` ('connection-banner-success') is left alone — it removes itself
+// after 2 s.
+function markSseStreamHealthy() {
+  _reconnectAttempts = 0;
+  if (_connectionLostTimer) {
+    clearTimeout(_connectionLostTimer);
+    _connectionLostTimer = null;
+  }
+  if (_sseRetryTimer) {
+    clearTimeout(_sseRetryTimer);
+    _sseRetryTimer = null;
+  }
+  const dot = document.getElementById('sse-dot');
+  if (dot && dot.classList.contains('disconnected')) {
+    dot.classList.remove('disconnected');
+    const statusEl = document.getElementById('sse-status');
+    if (statusEl) statusEl.textContent = I18n.t('status.connected');
+  }
+  const banner = document.getElementById('connection-banner');
+  if (banner && banner.classList.contains('connection-banner-warning')) {
+    banner.remove();
+  }
+}
+
 function connectSSE(lastEventIdOverride) {
   if (eventSource) eventSource.close();
   cleanupConnectionState();
@@ -33,6 +62,7 @@ function connectSSE(lastEventIdOverride) {
   const addTrackedEventListener = (eventType, handler) => {
     eventSource.addEventListener(eventType, (event) => {
       rememberSseEventId(event);
+      markSseStreamHealthy();
       handler(event);
     });
   };
@@ -92,7 +122,21 @@ function connectSSE(lastEventIdOverride) {
     sseHasConnectedBefore = true;
   };
 
-  eventSource.onerror = () => {
+  eventSource.onerror = (err) => {
+    // EventSource quirk: `onerror` is just a listener for events of type
+    // 'error', so a server-sent `event: error` frame (AppEvent::Error — an
+    // agent-level error rendered as a chat bubble by the named 'error'
+    // listener below) ALSO lands here. The transport is healthy in that
+    // case (readyState OPEN, the event carries `data`) and no `open` event
+    // will ever follow, so treating it as a connection failure used to pin
+    // a "Reconnecting (attempt 1)" banner forever while events kept
+    // flowing. Genuine transport errors are plain Events without `data`
+    // and leave readyState at CONNECTING (browser retrying) or CLOSED.
+    const es = (err && err.target) || eventSource;
+    if ((err && typeof err.data === 'string') || es.readyState === EventSource.OPEN) {
+      return;
+    }
+
     _sseDisconnectedAt = _sseDisconnectedAt || Date.now();
     _reconnectAttempts++;
     document.getElementById('sse-dot').classList.add('disconnected');
@@ -115,6 +159,19 @@ function connectSSE(lastEventIdOverride) {
           showConnectionBanner(I18n.t('connection.reconnecting', { count: _reconnectAttempts }), 'warning');
         }
       }, 3000);
+    }
+
+    // The browser only auto-reconnects retryable failures (readyState
+    // CONNECTING). A non-retryable response (401/5xx during a restart,
+    // wrong content type) closes the EventSource permanently — schedule a
+    // manual reconnect with capped backoff so "Reconnecting" stays true.
+    // connectSSE() resumes from _lastSseEventId, preserving catch-up.
+    if (es.readyState === EventSource.CLOSED && !_sseRetryTimer) {
+      const backoffMs = Math.min(15000, 1000 * Math.pow(2, Math.min(_reconnectAttempts - 1, 4)));
+      _sseRetryTimer = setTimeout(() => {
+        _sseRetryTimer = null;
+        connectSSE();
+      }, backoffMs);
     }
   };
 

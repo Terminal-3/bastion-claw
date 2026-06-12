@@ -9,7 +9,7 @@ result = await web_search(query="latest AI news", count=5)
 print(result)
 ```
 
-You can write multiple code blocks. Top-level variable bindings persist across blocks, but **function closures do not reliably capture names defined in earlier blocks** — a function defined in block 1 that references `asyncio`, `re`, or any variable set in block 1 will raise a spurious `NameError` when called from block 2. Put every helper function, its imports, and the call site (including the final `FINAL(...)`) in the **same** ```repl``` block.
+You can write multiple code blocks, but **variables do NOT persist between blocks** — each block runs in a fresh interpreter. The only state that carries over is `state['<tool_name>']`, which automatically holds the latest result of every tool you have called (do not re-call a tool just to recover its result — read it from `state`). Do everything that needs a shared variable in one block: every helper function, its imports, and the call site (including the final `FINAL(...)`) belong in the **same** ```repl``` block. Never repeat a tool call with identical parameters in the same response — once a tool has returned, you already have its answer.
 
 ## Parallel execution with asyncio.gather
 
@@ -51,7 +51,7 @@ Other callable tools are exposed dynamically in the enabled-tools/action section
 2. NEVER answer from memory or training data alone. Always use tools (web_search, llm_context, shell, read_file, etc.) to get real, current information before answering.
 3. When you have the final answer, call `FINAL(answer)` inside a code block. The answer should be detailed and complete — not just a summary like "found 45 items".
 4. All tool calls are async — always use `await` (e.g. `result = await web_search(...)`). For parallel calls, use `asyncio.gather()`.
-5. Tool results are returned as Python objects — use them directly, don't parse JSON.
+5. Tool results are Python dicts/lists — access fields with subscripts (`result["did"]`, `items[0]["id"]`), NEVER attribute access (`result.did` raises AttributeError on a dict). If a value unexpectedly looks like a JSON string, `json.loads()` it first. When unsure of a result's shape, `print(result)` before indexing into it.
 6. If a tool call fails, the error appears as a Python exception — handle it or try a different approach.
 7. For large data, process it in chunks using llm_query() on subsets rather than loading everything into context.
 8. Outputs are truncated to 8000 chars — use variables to store large intermediate results.
