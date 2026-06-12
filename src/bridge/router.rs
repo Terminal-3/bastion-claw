@@ -6212,11 +6212,37 @@ fn truncate_tool_result_preview(content: &str) -> String {
 /// `result_preview`. Threads with no action events at all (legacy shapes)
 /// fall back to the message-only list.
 fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> {
-    use t3claw_engine::EventKind;
+    let previews = v2_result_previews(thread);
+    let calls = v2_tool_calls_from_events(&thread.events, &previews);
 
-    // call_id → output text, from ActionResult messages. CodeAct call ids
-    // (`code_call_N`) restart per code block, so an id seen twice is
-    // ambiguous and dropped rather than mis-joined; Tier-0 ids are unique.
+    if !calls.is_empty() {
+        return calls;
+    }
+
+    // Legacy fallback: threads whose action events were never persisted.
+    let mut calls = Vec::new();
+    for msg in &thread.internal_messages {
+        if msg.role != t3claw_engine::MessageRole::ActionResult {
+            continue;
+        }
+        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
+        let mut obj = serde_json::json!({
+            "name": action_name,
+            "result_preview": truncate_tool_result_preview(&msg.content),
+        });
+        if let Some(ref call_id) = msg.action_call_id {
+            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+        }
+        calls.push(obj);
+    }
+    calls
+}
+
+/// `call_id` → output text, from the thread's `ActionResult` internal
+/// messages. CodeAct call ids (`code_call_N`) restart per code block, so
+/// an id seen twice is ambiguous and dropped rather than mis-joined;
+/// Tier-0 ids are unique.
+fn v2_result_previews(thread: &t3claw_engine::Thread) -> std::collections::HashMap<&str, &str> {
     let mut previews: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
     let mut ambiguous: std::collections::HashSet<&str> = std::collections::HashSet::new();
     for msg in &thread.internal_messages {
@@ -6233,9 +6259,24 @@ fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> 
     for call_id in &ambiguous {
         previews.remove(call_id);
     }
+    previews
+}
+
+/// Build the `calls` JSON array from action events.
+///
+/// Shared by the turn-end persist path ([`v2_tool_calls_json`], which
+/// reads the completed thread's embedded events) and the mid-turn
+/// in-flight path ([`get_in_flight_tool_calls`], which reads the store's
+/// live event log — the embedded events on a stored `Thread` are stale
+/// while the engine task is still running).
+fn v2_tool_calls_from_events(
+    events: &[t3claw_engine::ThreadEvent],
+    previews: &std::collections::HashMap<&str, &str>,
+) -> Vec<serde_json::Value> {
+    use t3claw_engine::EventKind;
 
     let mut calls = Vec::new();
-    for event in &thread.events {
+    for event in events {
         let obj = match &event.kind {
             EventKind::ActionExecuted {
                 action_name,
@@ -6294,26 +6335,6 @@ fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> 
             }
             _ => continue,
         };
-        calls.push(obj);
-    }
-
-    if !calls.is_empty() {
-        return calls;
-    }
-
-    // Legacy fallback: threads whose action events were never persisted.
-    for msg in &thread.internal_messages {
-        if msg.role != t3claw_engine::MessageRole::ActionResult {
-            continue;
-        }
-        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
-        let mut obj = serde_json::json!({
-            "name": action_name,
-            "result_preview": truncate_tool_result_preview(&msg.content),
-        });
-        if let Some(ref call_id) = msg.action_call_id {
-            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
-        }
         calls.push(obj);
     }
     calls
@@ -7301,10 +7322,22 @@ pub async fn get_engine_thread(
 /// actually in flight. Completed turns read their calls from the
 /// persisted `tool_calls` conversation row instead.
 ///
-/// The thread load hits the store adapter's in-memory cache for live
-/// threads, so calling this on every history poll is cheap. Returns
-/// `None` when no engine state is initialised, no turn is in flight for
-/// the conversation, or the resolved thread is not owned by `user_id`.
+/// Mid-turn freshness: `load_thread` returns the snapshot from the last
+/// `save_thread`, and the running engine task only saves its `Thread` at
+/// turn boundaries — so the loaded thread's embedded `events` are stale
+/// (typically empty) for the whole turn. The store's per-thread *event
+/// log* is the live source: the orchestrator appends each host call's
+/// event delta via `Store::append_events` as the turn progresses (see
+/// `persist_event_delta` in `t3claw_engine::executor::orchestrator`), so
+/// this reads `load_events` and builds the call list from those. The
+/// loaded thread still provides the ownership check and the
+/// `ActionResult` preview join (stale previews are fine — live events
+/// carry their own `result_preview`).
+///
+/// Both reads hit the store adapter's in-memory caches for live threads,
+/// so calling this on every history poll is cheap. Returns `None` when
+/// no engine state is initialised, no turn is in flight for the
+/// conversation, or the resolved thread is not owned by `user_id`.
 pub async fn get_in_flight_tool_calls(
     user_id: &str,
     conversation_id: &str,
@@ -7327,7 +7360,16 @@ pub async fn get_in_flight_tool_calls(
         return None;
     }
 
-    Some(v2_tool_calls_json(&thread))
+    // Prefer whichever event source is more complete. The live event log
+    // is the fresh one mid-turn; the embedded list covers threads whose
+    // events were saved on the thread but never appended to the log
+    // (legacy shapes, resumed checkpoints).
+    let live_events = state.store.load_events(thread_id).await.ok()?;
+    if live_events.len() <= thread.events.len() {
+        return Some(v2_tool_calls_json(&thread));
+    }
+    let previews = v2_result_previews(&thread);
+    Some(v2_tool_calls_from_events(&live_events, &previews))
 }
 
 /// List steps for a thread.
@@ -8002,12 +8044,14 @@ pub(crate) mod test_support {
     /// which touch `load_thread` and `list_threads`.
     pub(crate) struct ThreadTestStore {
         threads: TokioRwLock<HashMap<ThreadId, Thread>>,
+        events: TokioRwLock<HashMap<ThreadId, Vec<ThreadEvent>>>,
     }
 
     impl ThreadTestStore {
         pub(crate) fn new() -> Self {
             Self {
                 threads: TokioRwLock::new(HashMap::new()),
+                events: TokioRwLock::new(HashMap::new()),
             }
         }
     }
@@ -8048,11 +8092,28 @@ pub(crate) mod test_support {
         async fn load_steps(&self, _: ThreadId) -> Result<Vec<Step>, EngineError> {
             Ok(vec![])
         }
-        async fn append_events(&self, _: &[ThreadEvent]) -> Result<(), EngineError> {
+        async fn append_events(&self, events: &[ThreadEvent]) -> Result<(), EngineError> {
+            // Real event log with dedupe-by-id, mirroring the production
+            // `HybridStore`: `get_in_flight_tool_calls` reads the live
+            // event log mid-turn, so caller-level tests must be able to
+            // reproduce the engine's append-only persistence sequence.
+            let mut stored = self.events.write().await;
+            for event in events {
+                let log = stored.entry(event.thread_id).or_default();
+                if !log.iter().any(|existing| existing.id == event.id) {
+                    log.push(event.clone());
+                }
+            }
             Ok(())
         }
-        async fn load_events(&self, _: ThreadId) -> Result<Vec<ThreadEvent>, EngineError> {
-            Ok(vec![])
+        async fn load_events(&self, thread_id: ThreadId) -> Result<Vec<ThreadEvent>, EngineError> {
+            Ok(self
+                .events
+                .read()
+                .await
+                .get(&thread_id)
+                .cloned()
+                .unwrap_or_default())
         }
         async fn save_project(&self, _: &Project) -> Result<(), EngineError> {
             Ok(())
@@ -8256,6 +8317,32 @@ pub(crate) mod test_support {
     ///
     /// Callers must already hold `ENGINE_STATE_TEST_LOCK` and have
     /// installed an engine state.
+    /// Append events to the installed engine state's store event log,
+    /// mirroring the engine's mid-turn incremental persistence
+    /// (`persist_event_delta` in the orchestrator): events land in the
+    /// event log only — the saved thread snapshot is NOT updated, exactly
+    /// as in production while a turn is running.
+    ///
+    /// Callers must already hold `ENGINE_STATE_TEST_LOCK` and have
+    /// installed an engine state.
+    pub(crate) async fn append_engine_events(
+        thread_id: ThreadId,
+        kinds: Vec<t3claw_engine::EventKind>,
+    ) {
+        let lock = ENGINE_STATE.get().expect("engine state installed");
+        let guard = lock.read().await;
+        let state = guard.as_ref().expect("engine state installed");
+        let events: Vec<ThreadEvent> = kinds
+            .into_iter()
+            .map(|kind| ThreadEvent::new(thread_id, kind))
+            .collect();
+        state
+            .store
+            .append_events(&events)
+            .await
+            .expect("append events"); // safety: cfg(test) fixture
+    }
+
     pub(crate) async fn register_execution_context_for_scope(
         user_id: &str,
         thread_id: ThreadId,
@@ -13608,36 +13695,59 @@ mod tests {
     /// per-execution registry, return its action events as calls, and
     /// scope strictly by user: another user (or an unknown scope, or a
     /// turn whose context was cleared) gets `None`.
+    ///
+    /// Regression: this fixture reproduces the engine's *live*
+    /// persistence sequence. A running turn saves its `Thread` only at
+    /// turn boundaries — mid-turn the stored thread snapshot has NO
+    /// action events; the events exist solely in the store's event log,
+    /// appended incrementally via `Store::append_events` (the
+    /// orchestrator's `persist_event_delta`). The helper must read the
+    /// live event log, not the stale embedded `thread.events` — an
+    /// earlier version of this test pre-embedded the events in the saved
+    /// thread and therefore passed against an implementation that showed
+    /// `tool_calls: []` for the whole turn in production.
     #[tokio::test]
     async fn get_in_flight_tool_calls_resolves_scope_and_enforces_user_scoping() {
         let _lock = test_support::ENGINE_STATE_TEST_LOCK.lock().await;
 
-        let mut thread = t3claw_engine::Thread::new(
+        // Saved at creation, before any action runs — no embedded events.
+        let thread = t3claw_engine::Thread::new(
             "goal",
             t3claw_engine::ThreadType::Foreground,
             t3claw_engine::ProjectId::new(),
             "alice",
             t3claw_engine::ThreadConfig::default(),
         );
-        let step_id = t3claw_engine::StepId::new();
-        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
-            step_id,
-            action_name: "web_fetch".into(),
-            call_id: "call_1".into(),
-            duration_ms: 42,
-            params_summary: Some("https://example.com".into()),
-            result_preview: Some("fetched body".into()),
-        });
-        thread.add_event(t3claw_engine::EventKind::ActionFailed {
-            step_id,
-            action_name: "shell".into(),
-            call_id: "call_2".into(),
-            error: "exit status 1".into(),
-            duration_ms: 7,
-            params_summary: None,
-        });
         let thread_id = thread.id;
         test_support::install_engine_state_with_threads(vec![thread]).await;
+
+        // Mid-turn the engine appends each host call's event delta to the
+        // store's event log; the saved thread snapshot is never updated.
+        let step_id = t3claw_engine::StepId::new();
+        test_support::append_engine_events(
+            thread_id,
+            vec![t3claw_engine::EventKind::ActionExecuted {
+                step_id,
+                action_name: "web_fetch".into(),
+                call_id: "call_1".into(),
+                duration_ms: 42,
+                params_summary: Some("https://example.com".into()),
+                result_preview: Some("fetched body".into()),
+            }],
+        )
+        .await;
+        test_support::append_engine_events(
+            thread_id,
+            vec![t3claw_engine::EventKind::ActionFailed {
+                step_id,
+                action_name: "shell".into(),
+                call_id: "call_2".into(),
+                error: "exit status 1".into(),
+                duration_ms: 7,
+                params_summary: None,
+            }],
+        )
+        .await;
 
         let scope = uuid::Uuid::new_v4().to_string();
         test_support::register_execution_context_for_scope("alice", thread_id, &scope).await;
@@ -13674,6 +13784,46 @@ mod tests {
                 .await;
         }
         assert!(get_in_flight_tool_calls("alice", &scope).await.is_none());
+
+        test_support::clear_engine_state().await;
+    }
+
+    /// Threads whose action events live only on the saved `Thread` (no
+    /// store event-log rows — legacy shapes, resumed checkpoints) must
+    /// still produce their calls: when the live event log is no longer
+    /// than the embedded list, the helper falls back to the embedded
+    /// events (and ultimately the message-derived list).
+    #[tokio::test]
+    async fn get_in_flight_tool_calls_falls_back_to_embedded_events() {
+        let _lock = test_support::ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id: t3claw_engine::StepId::new(),
+            action_name: "memory_search".into(),
+            call_id: "call_9".into(),
+            duration_ms: 5,
+            params_summary: None,
+            result_preview: Some("found 3 docs".into()),
+        });
+        let thread_id = thread.id;
+        test_support::install_engine_state_with_threads(vec![thread]).await;
+
+        let scope = uuid::Uuid::new_v4().to_string();
+        test_support::register_execution_context_for_scope("alice", thread_id, &scope).await;
+
+        let calls = get_in_flight_tool_calls("alice", &scope)
+            .await
+            .expect("calls from embedded events");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "memory_search");
+        assert_eq!(calls[0]["result_preview"], "found 3 docs");
 
         test_support::clear_engine_state().await;
     }

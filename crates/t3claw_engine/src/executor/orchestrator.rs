@@ -450,6 +450,12 @@ pub async fn execute_orchestrator(
 ) -> Result<OrchestratorResult, EngineError> {
     let mut total_tokens = TokenUsage::default();
 
+    // Events already on the thread were persisted by the caller
+    // (`ExecutionLoop::persist_runtime_state` runs immediately before this
+    // function); track from here so each mid-turn flush appends only the
+    // delta this run produced.
+    let mut persisted_event_count = thread.events.len();
+
     // Build context variables for the orchestrator
     let (input_names, input_values) = build_orchestrator_inputs(thread, persisted_state);
 
@@ -646,6 +652,17 @@ pub async fn execute_orchestrator(
                     other => ExtFunctionResult::NotFound(other.to_string()),
                 };
 
+                // Persist any events this host call pushed onto the thread
+                // so store-backed readers (the chat history's in-flight
+                // tool-call projection, the engine events API) see mid-turn
+                // progress. Without this the orchestrator path persisted
+                // events only after the whole turn, so `Store::load_events`
+                // stayed empty for the turn's full duration. Appending early
+                // is retention-aligned (LLM data is never deleted), and
+                // `append_events` deduplicates by event id, so the caller's
+                // final full persist cannot double these rows.
+                persist_event_delta(store, thread, &mut persisted_event_count).await;
+
                 // Resume the orchestrator VM
                 match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     call.resume(ext_result, PrintWriter::CollectString(&mut stdout))
@@ -709,6 +726,39 @@ pub async fn execute_orchestrator(
                 });
             }
         }
+    }
+}
+
+/// Append the events pushed since the last flush to the store's event log.
+///
+/// Called once per orchestrator host-function call, so a multi-minute turn
+/// surfaces its `ActionExecuted`/`ActionFailed` events to store-backed
+/// readers as it progresses instead of all at once at turn end. Appends
+/// only `thread.events[*persisted_event_count..]` — cheap when nothing new
+/// was pushed. Failures are logged and the counter left untouched so the
+/// delta is retried on the next host call (and ultimately covered by the
+/// caller's final persist).
+async fn persist_event_delta(
+    store: Option<&Arc<dyn Store>>,
+    thread: &Thread,
+    persisted_event_count: &mut usize,
+) {
+    let Some(store) = store else {
+        return;
+    };
+    let total = thread.events.len();
+    if *persisted_event_count >= total {
+        return;
+    }
+    match store
+        .append_events(&thread.events[*persisted_event_count..])
+        .await
+    {
+        Ok(()) => *persisted_event_count = total,
+        Err(e) => debug!(
+            thread_id = %thread.id,
+            "failed to append mid-turn event delta: {e}"
+        ),
     }
 }
 
@@ -5505,6 +5555,99 @@ FINAL(batch_error_count)
         assert!(
             action_failed,
             "expected ActionFailed event alongside CodeExecutionFailed"
+        );
+    }
+
+    /// Regression: the orchestrator must persist event deltas to the
+    /// store's event log *as the turn progresses*, not only at turn end.
+    ///
+    /// Before `persist_event_delta`, the only `append_events` calls were
+    /// the caller's (`ExecutionLoop::persist_runtime_state` before/after
+    /// `execute_orchestrator`, and `ThreadManager`'s final persist), so a
+    /// multi-minute turn showed an empty event log to every store-backed
+    /// reader — the chat history's in-flight `tool_calls` projection sat
+    /// at `[]` until the turn completed.
+    ///
+    /// The script emits an `ActionExecuted` event and then dies with a
+    /// runtime error, so `execute_orchestrator` returns `Err` and never
+    /// reaches any end-of-turn persist. The event must already be in the
+    /// store: only the per-host-call delta append can have put it there.
+    #[tokio::test]
+    async fn orchestrator_appends_event_deltas_to_store_mid_turn() {
+        let llm: Arc<dyn LlmBackend> = Arc::new(ModelCapturingLlm {
+            captured: tokio::sync::Mutex::new(Vec::new()),
+        });
+        let effects: Arc<dyn EffectExecutor> = Arc::new(NoopEffects);
+        let leases = Arc::new(LeaseManager::new());
+        let policy = Arc::new(PolicyEngine::new());
+        let store: Arc<dyn Store> = Arc::new(crate::tests::InMemoryStore::new());
+
+        let mut thread = Thread::new(
+            "goal",
+            crate::types::thread::ThreadType::Foreground,
+            ProjectId::new(),
+            "test-user",
+            crate::types::thread::ThreadConfig::default(),
+        );
+        thread.transition_to(ThreadState::Running, None).unwrap();
+        let thread_id = thread.id;
+
+        let code = r#"
+__emit_event__("action_executed", action_name="web_fetch", call_id="call_1")
+x = 1 / 0
+"#;
+
+        let (_signal_tx, mut signal_rx) = crate::runtime::messaging::signal_channel(8);
+        let gate: Arc<dyn crate::gate::GateController> =
+            crate::gate::CancellingGateController::arc();
+
+        let result = execute_orchestrator(
+            code,
+            &mut thread,
+            &llm,
+            &effects,
+            &leases,
+            &policy,
+            &mut signal_rx,
+            None,
+            None,
+            Some(&store),
+            None,
+            &gate,
+            &serde_json::json!({}),
+        )
+        .await;
+        assert!(
+            result.is_err(),
+            "script must die mid-turn so no end-of-turn persist runs"
+        );
+
+        let persisted = store.load_events(thread_id).await.unwrap();
+        assert!(
+            persisted.iter().any(|e| matches!(
+                &e.kind,
+                EventKind::ActionExecuted { action_name, call_id, .. }
+                    if action_name == "web_fetch" && call_id == "call_1"
+            )),
+            "mid-turn event must be in the store's event log before turn end; got {} events",
+            persisted.len()
+        );
+
+        // Re-appending the full event list (what `ThreadManager`'s final
+        // persist does for completed threads) must not duplicate rows —
+        // `append_events` dedupes by event id.
+        store.append_events(&thread.events).await.unwrap();
+        let after_final = store.load_events(thread_id).await.unwrap();
+        let unique_ids: std::collections::HashSet<_> = after_final.iter().map(|e| e.id.0).collect();
+        assert_eq!(
+            unique_ids.len(),
+            after_final.len(),
+            "final full persist must not double event rows"
+        );
+        assert_eq!(
+            after_final.len(),
+            thread.events.len(),
+            "event log and thread events must agree after the final persist"
         );
     }
 }

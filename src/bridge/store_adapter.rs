@@ -2338,6 +2338,64 @@ mod tests {
         );
     }
 
+    // ── Event log append/dedupe contract ────────────────────────
+
+    /// Regression for the mid-turn event persistence flow: the engine
+    /// appends event deltas incrementally during a turn (per orchestrator
+    /// host call) and then re-appends overlapping ranges at turn end
+    /// (`ExecutionLoop::persist_runtime_state` re-appends from its own
+    /// counter; `ThreadManager`'s final persist appends the full
+    /// `thread.events` list). `append_events` must dedupe by event id so
+    /// `load_events` never shows duplicate rows for a completed thread.
+    #[tokio::test]
+    async fn append_events_dedupes_incremental_then_full_persist() {
+        use t3claw_engine::{EventKind, StepId, Store, ThreadEvent, ThreadId};
+
+        let store = HybridStore::new(None);
+        let thread_id = ThreadId::new();
+
+        let make_event = |name: &str, call_id: &str| {
+            ThreadEvent::new(
+                thread_id,
+                EventKind::ActionExecuted {
+                    step_id: StepId::new(),
+                    action_name: name.into(),
+                    call_id: call_id.into(),
+                    duration_ms: 1,
+                    params_summary: None,
+                    result_preview: None,
+                },
+            )
+        };
+        let first = make_event("tool_a", "call_1");
+        let second = make_event("tool_b", "call_2");
+
+        // Mid-turn: two incremental delta appends.
+        store
+            .append_events(std::slice::from_ref(&first))
+            .await
+            .unwrap();
+        store
+            .append_events(std::slice::from_ref(&second))
+            .await
+            .unwrap();
+
+        // Turn end: the full event list is re-appended.
+        store
+            .append_events(&[first.clone(), second.clone()])
+            .await
+            .unwrap();
+
+        let events = store.load_events(thread_id).await.unwrap();
+        assert_eq!(
+            events.len(),
+            2,
+            "re-appending already-persisted events must not duplicate rows"
+        );
+        assert!(events.iter().any(|e| e.id == first.id));
+        assert!(events.iter().any(|e| e.id == second.id));
+    }
+
     // ── save_memory_doc gate (forgeable metadata regression) ───
 
     #[tokio::test]

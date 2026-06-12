@@ -2526,33 +2526,43 @@ mod tests {
 
         // The in-flight engine thread: two completed action events so
         // far (one success with preview, one failure), no final
-        // response yet.
-        let mut engine_thread = t3claw_engine::Thread::new(
+        // response yet. Mirrors the live persistence sequence — the
+        // thread is saved at creation with NO events (a running turn
+        // only saves its Thread at turn boundaries) and the action
+        // events exist solely in the store's event log, appended
+        // incrementally by the orchestrator's `persist_event_delta`.
+        let engine_thread = t3claw_engine::Thread::new(
             "run payroll",
             t3claw_engine::ThreadType::Foreground,
             t3claw_engine::ProjectId::new(),
             "test-user",
             t3claw_engine::ThreadConfig::default(),
         );
-        let step_id = t3claw_engine::StepId::new();
-        engine_thread.add_event(t3claw_engine::EventKind::ActionExecuted {
-            step_id,
-            action_name: "t3n_mcp_getStatus".into(),
-            call_id: "code_call_1".into(),
-            duration_ms: 120,
-            params_summary: Some("cycle-42".into()),
-            result_preview: Some(r#"{"status":"open"}"#.into()),
-        });
-        engine_thread.add_event(t3claw_engine::EventKind::ActionFailed {
-            step_id,
-            action_name: "t3n_mcp_submitBatch".into(),
-            call_id: "code_call_2".into(),
-            error: "batch rejected".into(),
-            duration_ms: 30,
-            params_summary: None,
-        });
         let engine_thread_id = engine_thread.id;
         crate::bridge::test_support::install_engine_state_with_threads(vec![engine_thread]).await;
+        let step_id = t3claw_engine::StepId::new();
+        crate::bridge::test_support::append_engine_events(
+            engine_thread_id,
+            vec![
+                t3claw_engine::EventKind::ActionExecuted {
+                    step_id,
+                    action_name: "t3n_mcp_getStatus".into(),
+                    call_id: "code_call_1".into(),
+                    duration_ms: 120,
+                    params_summary: Some("cycle-42".into()),
+                    result_preview: Some(r#"{"status":"open"}"#.into()),
+                },
+                t3claw_engine::EventKind::ActionFailed {
+                    step_id,
+                    action_name: "t3n_mcp_submitBatch".into(),
+                    call_id: "code_call_2".into(),
+                    error: "batch rejected".into(),
+                    duration_ms: 30,
+                    params_summary: None,
+                },
+            ],
+        )
+        .await;
         crate::bridge::test_support::register_execution_context_for_scope(
             "test-user",
             engine_thread_id,
@@ -2658,23 +2668,29 @@ mod tests {
         .await
         .expect("set engine v2 live_state");
 
-        let mut engine_thread = t3claw_engine::Thread::new(
+        // Live persistence sequence: thread saved without events; the
+        // action event exists only in the store's event log.
+        let engine_thread = t3claw_engine::Thread::new(
             "run payroll",
             t3claw_engine::ThreadType::Foreground,
             t3claw_engine::ProjectId::new(),
             "test-user",
             t3claw_engine::ThreadConfig::default(),
         );
-        engine_thread.add_event(t3claw_engine::EventKind::ActionExecuted {
-            step_id: t3claw_engine::StepId::new(),
-            action_name: "memory_search".into(),
-            call_id: "call_1".into(),
-            duration_ms: 9,
-            params_summary: None,
-            result_preview: Some("3 hits".into()),
-        });
         let engine_thread_id = engine_thread.id;
         crate::bridge::test_support::install_engine_state_with_threads(vec![engine_thread]).await;
+        crate::bridge::test_support::append_engine_events(
+            engine_thread_id,
+            vec![t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_search".into(),
+                call_id: "call_1".into(),
+                duration_ms: 9,
+                params_summary: None,
+                result_preview: Some("3 hits".into()),
+            }],
+        )
+        .await;
         crate::bridge::test_support::register_execution_context_for_scope(
             "test-user",
             engine_thread_id,
