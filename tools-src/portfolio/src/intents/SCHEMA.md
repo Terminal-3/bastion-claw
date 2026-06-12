@@ -61,7 +61,7 @@ Fields:
 | `id` | string | Unique within the bundle. |
 | `kind` | string | One of: `"withdraw"`, `"bridge"`, `"swap"`, `"deposit"`, `"repay"`, `"rebalance-lp"`. |
 | `chain` | string | Destination chain for this leg. |
-| `near_intent_payload` | object | Solver-shaped. Opaque to IronClaw; passed through as-is to the wallet. |
+| `near_intent_payload` | object | Solver-shaped. Opaque to T3Claw; passed through as-is to the wallet. |
 | `depends_on` | optional string | Another leg's `id`. Must appear in the same bundle. No cycles. |
 | `min_out` | `TokenAmount` | Minimum expected output. Bounded checks refuse if below `(expected_out * (1 - slippage))`. |
 | `quoted_by` | string | Solver identifier. For audit. |

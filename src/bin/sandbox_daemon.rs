@@ -15,7 +15,7 @@
 //! - `shell`
 //!
 //! Each filesystem tool is constructed with `base_dir = /project/` (override
-//! via `IRONCLAW_SANDBOX_BASE_DIR` for local testing). The shell tool runs
+//! via `T3CLAW_SANDBOX_BASE_DIR` for local testing). The shell tool runs
 //! commands with `working_dir = /project/`.
 //!
 //! # Wire protocol
@@ -197,12 +197,12 @@ async fn main() -> std::io::Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("IRONCLAW_SANDBOX_LOG")
+            tracing_subscriber::EnvFilter::try_from_env("T3CLAW_SANDBOX_LOG")
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
         )
         .init();
 
-    let base_dir = std::env::var("IRONCLAW_SANDBOX_BASE_DIR")
+    let base_dir = std::env::var("T3CLAW_SANDBOX_BASE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(DEFAULT_BASE_DIR));
     tracing::info!(base_dir = %base_dir.display(), "sandbox_daemon starting");

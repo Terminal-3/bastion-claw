@@ -223,7 +223,7 @@ Threads do not own containers. They use the project's container if it exists, la
 - **Project folder doesn't exist on first call**: `lifecycle::ensure_project_dir(project_id)` creates `~/.t3claw/projects/<user_id>/<project_id>/` with mode 0700 before `docker create`. Idempotent.
 - **Cold-start latency**: First sandboxed tool call to a stopped container pays ~500ms (start) + ~50ms (exec daemon). First call to a never-created project pays ~1–2s (create + start + image pull on first ever run). Acceptable; not in the hot path of conversational chat.
 - **Container crash distinction**: `ContainerHandle::dispatch` returns `EngineError::ToolError` with `code=sandbox_error` for IPC failures. The orchestrator can distinguish these from `code=tool_error`.
-- **Image management**: `t3claw/sandbox:latest` built from `crates/Dockerfile.sandbox`. For local dev, `docker build -f crates/Dockerfile.sandbox -t t3claw/sandbox:dev .` and use `IRONCLAW_SANDBOX_IMAGE=t3claw/sandbox:dev`. v1 documents the manual command; CI publishing is future polish.
+- **Image management**: `t3claw/sandbox:latest` built from `crates/Dockerfile.sandbox`. For local dev, `docker build -f crates/Dockerfile.sandbox -t t3claw/sandbox:dev .` and use `T3CLAW_SANDBOX_IMAGE=t3claw/sandbox:dev`. v1 documents the manual command; CI publishing is future polish.
 - **Stale containers from deleted projects**: Out of scope for v1. Future `t3claw doctor` subcommand.
 - **No project folder configured / sandbox disabled**: When `SANDBOX_ENABLED=false`, the `/project/` mount uses `FilesystemBackend(~/.t3claw/projects/<id>/)` (or whatever the user configured). Tools still go through the mount table — same code path, different backend.
 - **Resource limits**: Inherit defaults from `src/sandbox/config.rs::ResourceLimits` (memory, CPU shares). Configurable via `SandboxConfig::for_project(project_id)`.
@@ -312,7 +312,7 @@ cargo test --features integration sandbox_
 
 # End-to-end manual test
 ENGINE_V2=true SANDBOX_ENABLED=true \
-  IRONCLAW_SANDBOX_IMAGE=t3claw/sandbox:dev \
+  T3CLAW_SANDBOX_IMAGE=t3claw/sandbox:dev \
   RUST_LOG=t3claw::bridge::sandbox=debug \
   cargo run
 
@@ -320,8 +320,8 @@ ENGINE_V2=true SANDBOX_ENABLED=true \
 #   "create a file foo.txt in /project with content hello"
 #   "what's in /project/foo.txt"
 #   "install ripgrep with cargo, then grep for hello in /project/foo.txt"
-#   stop ironclaw
-#   start ironclaw
+#   stop t3claw
+#   start t3claw
 #   "is ripgrep still installed? grep for hello again"
 
 # Verify on the host:

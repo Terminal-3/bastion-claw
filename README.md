@@ -26,6 +26,7 @@
 </p>
 
 <p align="center">
+  <a href="#t3claw-reborn-quick-start">Reborn Quick Start</a> •
   <a href="#philosophy">Philosophy</a> •
   <a href="#features">Features</a> •
   <a href="#installation">Installation</a> •
@@ -36,18 +37,348 @@
 
 ---
 
+## T3Claw Reborn Quick Start
+
+T3Claw Reborn is the standalone runtime on the `reborn-integration` branch.
+It uses the separate `t3claw-reborn` binary from the
+`t3claw_reborn_cli` package and a separate Reborn state root. It does not use
+the legacy `t3claw` state directory as its config root.
+
+For the older `t3claw` binary, see [Installation](#installation) and
+[Legacy T3Claw Usage](#legacy-t3claw-usage).
+
+### Build or run the binary
+
+From the repo root:
+
+```bash
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- --help
+```
+
+Or build it first:
+
+```bash
+cargo build -p t3claw_reborn_cli --bin t3claw-reborn
+./target/debug/t3claw-reborn --help
+```
+
+The default Reborn home is `$HOME/.t3claw/reborn`. Override it with an
+absolute path when you want isolated state:
+
+```bash
+export T3CLAW_REBORN_HOME="$PWD/.reborn-home"
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- config path
+```
+
+`config path` and `doctor` are safe diagnostics; they report the resolved home,
+profile, `config.toml`, `providers.json`, and `v1_state: not-used`.
+They do not create Reborn state or seed config files.
+
+### Configure the model route
+
+The CLI-native way to configure Reborn's default model route is:
+
+```bash
+export T3CLAW_REBORN_HOME="$PWD/.reborn-home"
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models set-provider openai --model gpt-5-mini
+```
+
+That writes `$T3CLAW_REBORN_HOME/config.toml` with `[llm.default]` and the
+provider's credential env-var name. Check it with:
+
+```bash
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models status
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- models list openai
+```
+
+For OpenAI, set the secret value in the environment before starting:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run --message "hello"
+```
+
+Omit `--message` or use `repl` for an interactive stdin session:
+
+```bash
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- repl
+```
+
+### `config.toml` shape
+
+`config init` creates editable starter files:
+
+```bash
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- config init
+```
+
+It writes:
+
+- `$T3CLAW_REBORN_HOME/config.toml`
+- `$T3CLAW_REBORN_HOME/providers.json`
+
+A minimal configured model route looks like:
+
+```toml
+[llm.default]
+provider_id = "openai"
+model = "gpt-5-mini"
+api_key_env = "OPENAI_API_KEY"
+```
+
+`config.toml` may also include optional sections such as `[boot]`,
+`[identity]`, `[runner]`, and `[skills]`; `config init` writes commented
+guidance for the supported fields.
+
+If `config.toml` is missing, the first stateful runtime start through `run`,
+`repl`, or `serve` seeds a sparse file with `api_version` and the safe
+`local-dev` boot profile. Read-only commands and `run --dry-run` stay
+side-effect-free. One-off environment selections such as
+`T3CLAW_REBORN_PROFILE=local-dev-yolo` are not persisted into the seeded
+file.
+
+Important: `api_key_env` is the name of an environment variable, not the secret
+itself. Reborn rejects inline secret-shaped values in `config.toml` and
+`providers.json`.
+
+Production storage uses the same env-only pattern. A production Reborn config
+may name the PostgreSQL URL variable, but must not contain the raw URL:
+
+```toml
+[storage]
+backend = "postgres"
+url_env = "T3CLAW_REBORN_POSTGRES_URL"
+secret_master_key_env = "T3CLAW_REBORN_SECRET_MASTER_KEY"
+# Optional; defaults to 16. Keep below the PostgreSQL server's max_connections
+# after reserving capacity for migrations and operator sessions.
+pool_max_size = 16
+
+[policy]
+deployment_mode = "hosted_multi_tenant"
+default_profile = "secure_default"
+```
+
+Set `T3CLAW_REBORN_POSTGRES_URL` in the process environment, and set
+`T3CLAW_REBORN_SECRET_MASTER_KEY` to independent cryptographic key material.
+Managed remote PostgreSQL providers must use TLS, for example by appending
+`sslmode=require`.
+Production `run` also requires an explicit `[policy]` section. The first
+production launch slice supports runtime policies that do not require a
+tenant-sandbox process binding.
+
+Once `[llm.default]` exists, that config selects the provider. `LLM_BACKEND` is
+only an env fallback when no default LLM slot is configured. To switch providers
+after writing config, use `models set-provider <provider>` or edit
+`[llm.default].provider_id`.
+
+### Env-only model selection
+
+If `$T3CLAW_REBORN_HOME/config.toml` is absent or has no `[llm.default]`,
+Reborn can resolve the LLM from environment variables. A sparse first-run
+seeded config does not include `[llm.default]`, so env-only model selection
+continues to work:
+
+```bash
+export T3CLAW_REBORN_HOME="$PWD/.reborn-env-only"
+export LLM_BACKEND=openai
+export OPENAI_API_KEY="sk-..."
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- run --message "hello"
+```
+
+Common provider env vars:
+
+| Provider | Selector | Required env |
+| --- | --- | --- |
+| OpenAI | `LLM_BACKEND=openai` | `OPENAI_API_KEY`; optional `OPENAI_MODEL`, `OPENAI_BASE_URL` |
+| Anthropic | `LLM_BACKEND=anthropic` | `ANTHROPIC_API_KEY`; optional `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL` |
+| OpenAI-compatible | `LLM_BACKEND=openai_compatible` | `LLM_BASE_URL`; optional `LLM_API_KEY`, `LLM_MODEL` |
+| OpenRouter | `LLM_BACKEND=openrouter` | `OPENROUTER_API_KEY`; optional `OPENROUTER_MODEL` |
+| Ollama | `LLM_BACKEND=ollama` | no key; optional `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
+| Codex auth | `LLM_BACKEND=openai_codex` | `LLM_USE_CODEX_AUTH=true` or `CODEX_AUTH_PATH`; optional `OPENAI_CODEX_MODEL` |
+
+Use `models list <provider>` to see the exact provider metadata compiled into
+the current branch.
+
+### Startup variables
+
+| Variable | Purpose |
+| --- | --- |
+| `T3CLAW_REBORN_HOME` | Absolute Reborn state root. Defaults to `$HOME/.t3claw/reborn`. The resolver rejects unsafe paths and v1 state-root aliases such as `$HOME/.t3claw`. |
+| `T3CLAW_REBORN_PROFILE` | Boot profile selector. Supported values: `local-dev`, `local-dev-yolo`, `production`, `migration-dry-run`. |
+| `T3CLAW_REBORN_POSTGRES_URL` | Production PostgreSQL storage URL when `[storage].backend = "postgres"` and `[storage].url_env` names this variable. Keep it out of `config.toml`; remote providers must use TLS. |
+| `T3CLAW_REBORN_SECRET_MASTER_KEY` | Production Reborn secret master key when `[storage].secret_master_key_env` names this variable. Keep it independent from the database URL and out of `config.toml`. |
+| `T3CLAW_REBORN_LOG` | Tracing filter for the Reborn binary, for example `debug,t3claw_reborn=trace`. |
+
+`run` and `repl` currently support `local-dev` and `local-dev-yolo` runtime
+composition. `local-dev-yolo` grants trusted-laptop host access and must be
+confirmed explicitly:
+
+```bash
+export T3CLAW_REBORN_PROFILE=local-dev-yolo
+cargo run -q -p t3claw_reborn_cli --bin t3claw-reborn -- repl --confirm-host-access
+```
+
+### WebUI service
+
+The Reborn WebUI is compiled behind the `webui-v2-beta` Cargo feature. Build or
+run the binary with that feature to enable the `serve` command:
+
+```bash
+cargo run -q -p t3claw_reborn_cli --features webui-v2-beta --bin t3claw-reborn -- serve --help
+cargo build -p t3claw_reborn_cli --features webui-v2-beta --bin t3claw-reborn
+```
+
+The WebUI listener defaults to `127.0.0.1:3000`. The service requires an
+env-bearer token and a user id at startup. It also needs the model route from
+the earlier section, including that provider's credential env var:
+
+```bash
+export T3CLAW_REBORN_HOME="$PWD/.reborn-home"
+export OPENAI_API_KEY="sk-..." # or the required env var for your configured provider
+export T3CLAW_REBORN_WEBUI_TOKEN="$(openssl rand -hex 32)"
+export T3CLAW_REBORN_WEBUI_USER_ID="reborn-cli"
+
+cargo run -q -p t3claw_reborn_cli --features webui-v2-beta --bin t3claw-reborn -- serve
+```
+
+Equivalent `config.toml` listener configuration:
+
+```toml
+[webui]
+listen_host = "127.0.0.1"
+listen_port = 3000
+env_token_var = "T3CLAW_REBORN_WEBUI_TOKEN"
+env_user_id_var = "T3CLAW_REBORN_WEBUI_USER_ID"
+allowed_origins = ["http://127.0.0.1:3000", "http://localhost:3000"]
+canonical_host = "127.0.0.1:3000"
+```
+
+`env_token_var` and `env_user_id_var` are env-var names. Keep the actual token
+and user id in the environment.
+
+Required WebUI env vars:
+
+| Variable | Purpose |
+| --- | --- |
+| `T3CLAW_REBORN_WEBUI_TOKEN` | Bearer token for WebUI requests. If SSO is enabled, this also signs sessions and must be at least 32 bytes. |
+| `T3CLAW_REBORN_WEBUI_USER_ID` | Reborn owner/user id for env-bearer requests. If `[identity].default_owner` is configured, it must match this value. |
+
+Optional WebUI SSO env vars:
+
+| Variable | Purpose |
+| --- | --- |
+| `T3CLAW_REBORN_WEBUI_GOOGLE_CLIENT_ID` | Enables Google SSO when set. |
+| `T3CLAW_REBORN_WEBUI_GOOGLE_CLIENT_SECRET` | Required when Google SSO is enabled. |
+| `T3CLAW_REBORN_WEBUI_GOOGLE_ALLOWED_HD` | Optional Google hosted-domain restriction. |
+| `T3CLAW_REBORN_WEBUI_GITHUB_CLIENT_ID` | Enables GitHub SSO when set. |
+| `T3CLAW_REBORN_WEBUI_GITHUB_CLIENT_SECRET` | Required when GitHub SSO is enabled. |
+| `T3CLAW_REBORN_WEBUI_ALLOWED_EMAIL_DOMAINS` | Required when any SSO provider is enabled. Comma-separated verified email domains. |
+| `T3CLAW_REBORN_WEBUI_BASE_URL` | Public base URL used for OAuth callbacks. Non-loopback deployments must use `https://`. |
+| `T3CLAW_REBORN_WEBUI_OAUTH_HTTP_TIMEOUT_SECS` | Optional OAuth HTTP timeout override. |
+
+For Google SSO, create a Google OAuth web client and register the Reborn WebUI
+redirect URI as:
+
+```text
+{T3CLAW_REBORN_WEBUI_BASE_URL}/auth/callback/google
+```
+
+For example, with `T3CLAW_REBORN_WEBUI_BASE_URL=https://t3claw.example.com`,
+the authorized redirect URI in Google Cloud is:
+
+```text
+https://t3claw.example.com/auth/callback/google
+```
+
+Do not include a trailing slash in `T3CLAW_REBORN_WEBUI_BASE_URL`; Reborn
+trims it before building callback URLs. If the base URL is omitted, Reborn uses
+the actual listener address, such as `http://127.0.0.1:3000`, which is suitable
+only for loopback/local OAuth testing. Public or non-loopback SSO deployments
+must set an `https://` base URL.
+
+Complete Google SSO startup env:
+
+```bash
+export T3CLAW_REBORN_HOME="/var/lib/t3claw-reborn"
+export T3CLAW_REBORN_PROFILE=local-dev
+export OPENAI_API_KEY="sk-..." # or the required env var for your configured provider
+export T3CLAW_REBORN_WEBUI_TOKEN="$(openssl rand -hex 32)"
+export T3CLAW_REBORN_WEBUI_USER_ID="reborn-cli"
+export T3CLAW_REBORN_WEBUI_BASE_URL="https://t3claw.example.com"
+export T3CLAW_REBORN_WEBUI_ALLOWED_EMAIL_DOMAINS="example.com,team.example.com"
+export T3CLAW_REBORN_WEBUI_GOOGLE_CLIENT_ID="..."
+export T3CLAW_REBORN_WEBUI_GOOGLE_CLIENT_SECRET="..."
+
+cargo run -q -p t3claw_reborn_cli --features webui-v2-beta --bin t3claw-reborn -- serve --host 0.0.0.0 --port 3000
+```
+
+`T3CLAW_REBORN_WEBUI_ALLOWED_EMAIL_DOMAINS` is the actual admission
+allowlist. Google `hd` is only an optional provider-side hosted-domain hint; do
+not rely on it instead of the Reborn allowed-domain list. `T3CLAW_REBORN_HOME`
+selects the state/config root for this service. `T3CLAW_REBORN_PROFILE`
+defaults to `local-dev`; `local-dev-yolo` grants trusted-laptop host access and
+cannot be served on a non-loopback host.
+
+Use `serve --host <ip> --port <port>` to override the listener from the CLI.
+Binding to a non-loopback host is production-sensitive. `local-dev-yolo` serve
+mode also requires `--confirm-host-access` and refuses non-loopback hosts.
+
+### Slack service
+
+Slack support is compiled behind the `slack-v2-host-beta` Cargo feature. That
+feature includes `webui-v2-beta`, so Slack runs on the same `serve` command:
+
+```bash
+export T3CLAW_REBORN_HOME="$PWD/.reborn-home"
+export OPENAI_API_KEY="sk-..." # or the required env var for your configured provider
+export T3CLAW_REBORN_WEBUI_TOKEN="$(openssl rand -hex 32)"
+export T3CLAW_REBORN_WEBUI_USER_ID="reborn-cli"
+export T3CLAW_REBORN_SLACK_SIGNING_SECRET="..."
+export T3CLAW_REBORN_SLACK_BOT_TOKEN="xoxb-..."
+
+cargo run -q -p t3claw_reborn_cli --features slack-v2-host-beta --bin t3claw-reborn -- serve
+```
+
+Slack env vars alone do not enable Slack. Add a `[slack]` section to
+`config.toml`:
+
+```toml
+[slack]
+enabled = true
+installation_id = "install-alpha"
+team_id = "T123"
+api_app_id = "A123"
+# slack_user_id = "U123" # optional legacy static user mapping
+# user_id = "reborn-cli" # defaults to the WebUI authenticated user
+signing_secret_env = "T3CLAW_REBORN_SLACK_SIGNING_SECRET"
+bot_token_env = "T3CLAW_REBORN_SLACK_BOT_TOKEN"
+```
+
+Required Slack settings and env vars:
+
+| Name | Purpose |
+| --- | --- |
+| `[slack].enabled = true` | Mounts the Slack route during `serve`. |
+| `[slack].installation_id` | Stable local installation id. |
+| `[slack].team_id` | Slack workspace/team id. |
+| `[slack].api_app_id` | Slack app id. |
+| `T3CLAW_REBORN_SLACK_SIGNING_SECRET` | Slack request signing secret, or the env var named by `[slack].signing_secret_env`. |
+| `T3CLAW_REBORN_SLACK_BOT_TOKEN` | Slack bot token, or the env var named by `[slack].bot_token_env`. |
+
+More detailed command notes live in [`docs/reborn-binary.md`](docs/reborn-binary.md).
+
 ## Philosophy
 
-IronClaw is built on a simple principle: **your AI assistant should work for you, not against you**.
+T3Claw is built on a simple principle: **your AI assistant should work for you, not against you**.
 
-In a world where AI systems are increasingly opaque about data handling and aligned with corporate interests, IronClaw takes a different approach:
+In a world where AI systems are increasingly opaque about data handling and aligned with corporate interests, T3Claw takes a different approach:
 
 - **Your data stays yours** - All information is stored locally, encrypted, and never leaves your control
 - **Transparency by design** - Open source, auditable, no hidden telemetry or data harvesting
 - **Self-expanding capabilities** - Build new tools on the fly without waiting for vendor updates
 - **Defense in depth** - Multiple security layers protect against prompt injection and data exfiltration
 
-IronClaw is the AI assistant you can actually trust with your personal and professional life.
+T3Claw is the AI assistant you can actually trust with your personal and professional life.
 
 ## Features
 
@@ -70,7 +401,7 @@ IronClaw is the AI assistant you can actually trust with your personal and profe
 
 ### Self-Expanding
 
-- **Dynamic Tool Building** - Describe what you need, and IronClaw builds it as a WASM tool
+- **Dynamic Tool Building** - Describe what you need, and T3Claw builds it as a WASM tool
 - **MCP Protocol** - Connect to Model Context Protocol servers for additional capabilities
 - **Plugin Architecture** - Drop in new WASM tools and channels without restarting
 
@@ -84,9 +415,10 @@ IronClaw is the AI assistant you can actually trust with your personal and profe
 
 ### Prerequisites
 
-- Rust 1.85+
+- Rust 1.92+
 - PostgreSQL 15+ with [pgvector](https://github.com/pgvector/pgvector) extension
 - NEAR AI account (authentication handled via setup wizard)
+- `libclang` and a working C toolchain if you build the WeChat voice/SILK path from source
 
 ## Download or Build
 
@@ -144,6 +476,14 @@ cargo test
 
 For **full release** (after modifying channel sources), run `./scripts/build-all.sh` to rebuild channels first.
 
+> **Optional:** WeChat voice notes (`audio/silk`) require the standalone
+> `t3claw-silk-decoder` helper to be transcribable. It's excluded from the
+> default workspace build because `silk-codec` pulls in `bindgen`/`libclang`.
+> Build it separately with `./crates/t3claw_silk_decoder/build.sh` (needs
+> libclang + a C toolchain) and put the resulting binary on `$PATH`, beside
+> the `t3claw` binary, or pointed at by `T3CLAW_SILK_DECODER`. Without
+> it, voice messages are still delivered — just as raw `audio/silk` blobs.
+
 </details>
 
 ### Database Setup
@@ -158,7 +498,7 @@ psql t3claw -c "CREATE EXTENSION IF NOT EXISTS vector;"
 
 ## Configuration
 
-Run the setup wizard to configure IronClaw:
+Run the setup wizard to configure T3Claw:
 
 ```bash
 t3claw onboard
@@ -171,7 +511,7 @@ written to `~/.t3claw/.env` so they are available before the database connects.
 
 ### Alternative LLM Providers
 
-IronClaw defaults to NEAR AI but supports many LLM providers out of the box.
+T3Claw defaults to NEAR AI but supports many LLM providers out of the box.
 Built-in providers include **Anthropic**, **OpenAI**, **GitHub Copilot**, **Google Gemini**, **MiniMax**,
 **Mistral**, and **Ollama** (local). OpenAI-compatible services like **OpenRouter**
 (300+ models), **Together AI**, **Fireworks AI**, and self-hosted servers (**vLLM**,
@@ -195,7 +535,7 @@ See [docs/capabilities/llm-providers.md](docs/capabilities/llm-providers.md) for
 
 ## Security
 
-IronClaw implements defense in depth to protect your data and prevent misuse.
+T3Claw implements defense in depth to protect your data and prevent misuse.
 
 ### WASM Sandbox
 
@@ -284,9 +624,9 @@ External content passes through multiple security layers:
 | **Workspace** | Persistent memory with hybrid search |
 | **Safety Layer** | Prompt injection defense and content sanitization |
 
-## Usage
+## Legacy T3Claw Usage
 
-Engine v2 is opt-in right now. If you want to run the new engine instead of the legacy agent loop, start IronClaw with `ENGINE_V2=true`. See [Engine v2 architecture](docs/internal/engine-v2-architecture.md#enabling-engine-v2) for more details.
+Engine v2 is opt-in right now. If you want to run the new engine instead of the legacy agent loop, start T3Claw with `ENGINE_V2=true`. See [Engine v2 architecture](docs/internal/engine-v2-architecture.md#enabling-engine-v2) for more details.
 
 ```bash
 # First-time setup (configures database, auth, etc.)
@@ -324,7 +664,7 @@ cargo test test_name
 
 ## OpenClaw Heritage
 
-IronClaw is a Rust reimplementation inspired by [OpenClaw](https://github.com/openclaw/openclaw). See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the complete tracking matrix.
+T3Claw is a Rust reimplementation inspired by [OpenClaw](https://github.com/openclaw/openclaw). See [FEATURE_PARITY.md](FEATURE_PARITY.md) for the complete tracking matrix.
 
 Key differences:
 

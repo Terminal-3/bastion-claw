@@ -8,7 +8,7 @@
 //!
 //! Handlers depend on this module directly. The older
 //! `crate::channels::web::server::*` path — and its back-compat shim in
-//! `src/channels/web/server.rs` — was removed in ironclaw#ironclaw#2599 stage 6.
+//! `src/channels/web/server.rs` — was removed in t3claw#2599 stage 6.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -198,8 +198,8 @@ impl PerUserRateLimiter {
 /// avoiding a separate `PerUserWorkspaceResolver` with duplicated logic.
 pub struct WorkspacePool {
     db: Arc<dyn Database>,
-    embeddings: Option<Arc<dyn crate::workspace::EmbeddingProvider>>,
-    embedding_cache_config: crate::workspace::EmbeddingCacheConfig,
+    embeddings: Option<Arc<dyn t3claw_embeddings::EmbeddingProvider>>,
+    embedding_cache_config: t3claw_embeddings::EmbeddingCacheConfig,
     search_config: crate::config::WorkspaceSearchConfig,
     workspace_config: crate::config::WorkspaceConfig,
     cache: tokio::sync::RwLock<std::collections::HashMap<String, Arc<Workspace>>>,
@@ -211,8 +211,8 @@ pub struct WorkspacePool {
 impl WorkspacePool {
     pub fn new(
         db: Arc<dyn Database>,
-        embeddings: Option<Arc<dyn crate::workspace::EmbeddingProvider>>,
-        embedding_cache_config: crate::workspace::EmbeddingCacheConfig,
+        embeddings: Option<Arc<dyn t3claw_embeddings::EmbeddingProvider>>,
+        embedding_cache_config: t3claw_embeddings::EmbeddingCacheConfig,
         search_config: crate::config::WorkspaceSearchConfig,
         workspace_config: crate::config::WorkspaceConfig,
     ) -> Self {
@@ -250,7 +250,13 @@ impl WorkspacePool {
             ws = ws.with_additional_read_scopes(self.workspace_config.read_scopes.clone());
         }
 
-        ws = ws.with_memory_layers(self.workspace_config.memory_layers.clone());
+        let mut memory_layers = self.workspace_config.memory_layers.clone();
+        for layer in &mut memory_layers {
+            if layer.sensitivity == crate::workspace::layer::LayerSensitivity::Private {
+                layer.scope = user_id.to_string();
+            }
+        }
+        ws = ws.with_memory_layers(memory_layers);
         ws
     }
 
@@ -383,15 +389,15 @@ pub struct GatewayState {
     /// WebSocket connection tracker.
     pub ws_tracker: Option<Arc<crate::channels::web::ws::WsConnectionTracker>>,
     /// LLM provider for OpenAI-compatible API proxy.
-    pub llm_provider: Option<Arc<dyn crate::llm::LlmProvider>>,
+    pub llm_provider: Option<Arc<dyn t3claw_llm::LlmProvider>>,
     /// Hot-reload controller for the LLM provider chain. Populated at
     /// startup when the chain is built from config (not in test harnesses
     /// that inject a provider directly).
-    pub llm_reload: Option<Arc<crate::llm::LlmReloadHandle>>,
+    pub llm_reload: Option<Arc<t3claw_llm::LlmReloadHandle>>,
     /// LLM session manager handed through to `LlmReloadHandle::reload` so
     /// the rebuilt chain keeps using the same (potentially authenticated)
     /// NEAR AI / OAuth session without forcing a re-login.
-    pub llm_session_manager: Option<Arc<crate::llm::SessionManager>>,
+    pub llm_session_manager: Option<Arc<t3claw_llm::SessionManager>>,
     /// Optional TOML config path that produced the current `LlmConfig`.
     /// Needed so a hot-reload reads the same precedence layers
     /// (TOML → DB overlay) as startup.
@@ -401,7 +407,7 @@ pub struct GatewayState {
     /// Skill catalog for searching the ClawHub registry.
     pub skill_catalog: Option<Arc<t3claw_skills::catalog::SkillCatalog>>,
     /// Shared auth manager for gateway auth submission and readiness checks.
-    pub auth_manager: Option<Arc<crate::bridge::auth_manager::AuthManager>>,
+    pub auth_manager: Option<Arc<crate::auth::extension::AuthManager>>,
     /// Scheduler for sending follow-up messages to running agent jobs.
     pub scheduler: Option<crate::tools::builtin::SchedulerSlot>,
     /// Per-user rate limiter for chat endpoints (30 messages per 60 seconds per user).
@@ -505,7 +511,7 @@ mod tests {
         let pool = WorkspacePool::new(
             db,
             None,
-            crate::workspace::EmbeddingCacheConfig::default(),
+            t3claw_embeddings::EmbeddingCacheConfig::default(),
             crate::config::WorkspaceSearchConfig::default(),
             crate::config::WorkspaceConfig::default(),
         );

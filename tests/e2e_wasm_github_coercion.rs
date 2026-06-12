@@ -25,7 +25,7 @@ mod tests {
 
     use serde_json::json;
 
-    use t3claw::llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
+    use t3claw_llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::{
@@ -280,7 +280,7 @@ mod tests {
     #[tokio::test]
     #[ignore] // requires pre-compiled WASM binary
     async fn wasm_github_search_code_coerces_string_pagination() {
-        let expected_url = "https://api.github.com/search/code?q=repo%3Anearai%2Ft3claw%20path%3Asrc%20Tool&per_page=10&page=2&sort=indexed&order=desc";
+        let expected_url = "https://api.github.com/search/code?q=repo%3Anearai%2Fironclaw%20path%3Asrc%20Tool&per_page=10&page=2&sort=indexed&order=desc";
 
         let trace = LlmTrace {
             model_name: "test-wasm-coercion-search-code".to_string(),

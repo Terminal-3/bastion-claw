@@ -12,8 +12,8 @@ use crate::db::ConversationStore;
 use crate::hooks::hook::{
     Hook, HookContext, HookError, HookEvent, HookFailureMode, HookOutcome, HookPoint,
 };
-use crate::llm::{ChatMessage, CompletionRequest, LlmProvider};
 use crate::tools::builtin::memory::WorkspaceResolver;
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider};
 
 /// Maximum number of concurrent LLM summarization calls.
 /// Prevents thundering herd when many sessions expire at once (e.g. restart after idle).
@@ -208,12 +208,12 @@ mod tests {
     use super::*;
     use crate::db::ConversationStore;
     use crate::history::{ConversationMessage, ConversationSummary};
-    use crate::llm::{
-        CompletionResponse, FinishReason, LlmError, ToolCompletionRequest, ToolCompletionResponse,
-    };
     use crate::workspace::Workspace;
     use chrono::Utc;
     use rust_decimal::Decimal;
+    use t3claw_llm::{
+        CompletionResponse, FinishReason, LlmError, ToolCompletionRequest, ToolCompletionResponse,
+    };
     use uuid::Uuid;
 
     // ── Mock ConversationStore ──────────────────────────────────────
@@ -398,6 +398,7 @@ mod tests {
                 input_tokens: 0,
                 output_tokens: 0,
                 finish_reason: FinishReason::Stop,
+                reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
             })

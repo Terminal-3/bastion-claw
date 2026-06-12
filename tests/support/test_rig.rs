@@ -15,15 +15,15 @@ use t3claw::channels::web::log_layer::LogBroadcaster;
 use t3claw::channels::{OutgoingResponse, StatusUpdate};
 use t3claw::config::Config;
 use t3claw::db::Database;
-use t3claw::llm::{LlmProvider, SessionConfig, SessionManager};
 use t3claw::tools::Tool;
+use t3claw_llm::{LlmProvider, SessionConfig, SessionManager};
 
 use crate::support::instrumented_llm::InstrumentedLlm;
 use crate::support::metrics::{ToolInvocation, TraceMetrics};
 use crate::support::test_channel::{CapturedEvent, TestChannel, TestChannelHandle};
 use crate::support::trace_llm::{LlmTrace, TraceLlm};
 
-use t3claw::llm::recording::{HttpExchange, HttpInterceptor, ReplayingHttpInterceptor};
+use t3claw_llm::recording::{HttpExchange, HttpInterceptor, ReplayingHttpInterceptor};
 
 // ---------------------------------------------------------------------------
 // TestRig
@@ -89,7 +89,7 @@ async fn seed_secrets_into(
     );
 
     // Open the source via a separate libSQL connection. We never write to
-    // it. The source process (the developer's running ironclaw) can keep
+    // it. The source process (the developer's running t3claw) can keep
     // running concurrently — libSQL's WAL mode permits a reader from
     // another connection.
     let src_db = libsql::Builder::new_local(&config.source_path)
@@ -222,6 +222,15 @@ pub struct TestRig {
     /// per-user secret rows.
     #[cfg(feature = "libsql")]
     owner_id: String,
+    /// User identity the agent sees as the effective channel user when
+    /// tools dispatch from a trace turn. Differs from `owner_id` in the
+    /// historical default-rig case (channel user = `"test-user"`, owner
+    /// = config `owner_id`). Caller-tier security tests that assert
+    /// non-persistence must query under this identity, not `owner_id`,
+    /// to avoid false negatives where a regression persists rows under
+    /// the channel user that the owner-keyed lookup never sees.
+    #[cfg(feature = "libsql")]
+    channel_user_id: String,
     /// Temp directory guard -- keeps the libSQL database file alive.
     #[cfg(feature = "libsql")]
     _temp_dir: tempfile::TempDir,
@@ -243,10 +252,102 @@ impl TestRig {
         self.channel.send_incoming(msg).await;
     }
 
+    /// Resolve a pending auth gate by submitting a typed
+    /// `Submission::GateAuthResolution`.
+    ///
+    /// The `request_id` must be a `Uuid` matching the `request_id` field on
+    /// a previously-emitted `StatusUpdate::AuthRequired`. Use
+    /// `wait_for_auth_required` to observe it before calling this.
+    pub async fn send_gate_auth_resolution(
+        &self,
+        request_id: uuid::Uuid,
+        resolution: t3claw::agent::submission::AuthGateResolution,
+    ) {
+        let submission = t3claw::agent::submission::Submission::GateAuthResolution {
+            request_id,
+            resolution,
+        };
+        let msg = t3claw::channels::IncomingMessage::new(
+            self.channel.channel_name(),
+            self.channel.user_id(),
+            "",
+        )
+        .with_structured_submission(submission);
+        self.channel.send_incoming(msg).await;
+    }
+
+    /// Cloneable handle to the underlying `TestChannel`. Used by tests that
+    /// need to spawn background helpers (e.g. an approval auto-responder)
+    /// without taking a reference to `TestRig` itself, which is not cloneable
+    /// (it owns the agent `JoinHandle` and a temp-dir guard).
+    pub fn channel_handle(&self) -> std::sync::Arc<crate::support::test_channel::TestChannel> {
+        self.channel.clone()
+    }
+
+    /// Resolve a tool-execution approval gate by submitting a typed
+    /// `Submission::ExecApproval`.
+    ///
+    /// The `request_id` must be a `Uuid` matching the `request_id` field on
+    /// a previously-emitted `StatusUpdate::ApprovalNeeded`. Tests usually
+    /// pull it from `captured_status_events()` after waiting for the gate.
+    pub async fn send_exec_approval(&self, request_id: uuid::Uuid, approved: bool, always: bool) {
+        let submission = t3claw::agent::submission::Submission::ExecApproval {
+            request_id,
+            approved,
+            always,
+        };
+        let msg = t3claw::channels::IncomingMessage::new(
+            self.channel.channel_name(),
+            self.channel.user_id(),
+            "",
+        )
+        .with_structured_submission(submission);
+        self.channel.send_incoming(msg).await;
+    }
+
+    /// Resolve an OAuth-style gate by submitting a typed
+    /// `Submission::ExternalCallback`.
+    pub async fn send_external_callback(&self, request_id: uuid::Uuid) {
+        let submission = t3claw::agent::submission::Submission::ExternalCallback {
+            request_id,
+            payload: None,
+        };
+        let msg = t3claw::channels::IncomingMessage::new(
+            self.channel.channel_name(),
+            self.channel.user_id(),
+            "",
+        )
+        .with_structured_submission(submission);
+        self.channel.send_incoming(msg).await;
+    }
+
+    /// Resolve a caller-tool external gate (Responses API path) with a
+    /// JSON resolution payload. The payload becomes
+    /// `GateResolution::ExternalCallback { payload }` after submission;
+    /// the engine then has to materialise it back into an `ActionResult`
+    /// the LLM can see.
+    pub async fn send_external_callback_with_payload(
+        &self,
+        request_id: uuid::Uuid,
+        payload: serde_json::Value,
+    ) {
+        let submission = t3claw::agent::submission::Submission::ExternalCallback {
+            request_id,
+            payload: Some(payload),
+        };
+        let msg = t3claw::channels::IncomingMessage::new(
+            self.channel.channel_name(),
+            self.channel.user_id(),
+            "",
+        )
+        .with_structured_submission(submission);
+        self.channel.send_incoming(msg).await;
+    }
+
     /// Return all message lists that were sent to the LLM provider.
     ///
     /// Only available when the rig was built with a `TraceLlm` (i.e., via `.with_trace()`).
-    pub fn captured_llm_requests(&self) -> Vec<Vec<t3claw::llm::ChatMessage>> {
+    pub fn captured_llm_requests(&self) -> Vec<Vec<t3claw_llm::ChatMessage>> {
         self.trace_llm
             .as_ref()
             .map(|t| t.captured_requests())
@@ -304,6 +405,17 @@ impl TestRig {
     #[cfg(feature = "libsql")]
     pub fn owner_id(&self) -> &str {
         &self.owner_id
+    }
+
+    /// The effective channel user identity — the `user_id` the agent sees
+    /// when tools dispatch from a trace turn. May differ from
+    /// [`Self::owner_id`] (see the `channel_user_id` field doc). Caller-tier
+    /// security tests that check workspace persistence MUST query under
+    /// this identity, not `owner_id`, to catch regressions that persist
+    /// rows scoped to the channel user.
+    #[cfg(feature = "libsql")]
+    pub fn channel_user_id(&self) -> &str {
+        &self.channel_user_id
     }
 
     /// Wait until at least `n` non-bootstrap responses have been captured, or
@@ -670,6 +782,7 @@ pub struct TestRigBuilder {
     http_exchanges: Vec<HttpExchange>,
     http_interceptor_override: Option<Arc<dyn HttpInterceptor>>,
     extra_tools: Vec<Arc<dyn Tool>>,
+    test_tool_overrides: Vec<Arc<dyn Tool>>,
     wasm_tools: Vec<WasmToolSpec>,
     keep_bootstrap: bool,
     engine_v2: bool,
@@ -680,6 +793,17 @@ pub struct TestRigBuilder {
     /// (so the kernel pre-flight auth gate stays out of the way) but
     /// don't actually call the credentialed API.
     pre_seed_secrets: Vec<(String, String)>,
+    /// Pre-resolved `EffectiveRuntimePolicy` to install in
+    /// `AgentDeps.runtime_policy`.
+    ///
+    /// `None` (default) preserves the historical "no runtime-policy filter"
+    /// path used by every existing test. `Some(p)` is always a value
+    /// produced by `t3claw_runtime_policy::resolve(...)` — per the
+    /// `t3claw_runtime_policy` CLAUDE.md guardrail, the resolver is the
+    /// only sanctioned producer of `EffectiveRuntimePolicy`. Builders that
+    /// take `(deployment, profile, disclosure)` route through
+    /// `with_runtime_overrides` rather than constructing one inline.
+    runtime_policy: Option<t3claw_host_api::runtime_policy::EffectiveRuntimePolicy>,
 }
 
 impl TestRigBuilder {
@@ -698,12 +822,14 @@ impl TestRigBuilder {
             http_exchanges: Vec::new(),
             http_interceptor_override: None,
             extra_tools: Vec::new(),
+            test_tool_overrides: Vec::new(),
             wasm_tools: Vec::new(),
             keep_bootstrap: false,
             engine_v2: false,
             channel_name_override: None,
             seeded_secrets: None,
             pre_seed_secrets: Vec::new(),
+            runtime_policy: None,
         }
     }
 
@@ -721,6 +847,47 @@ impl TestRigBuilder {
     /// which is the standard rig setup).
     pub fn with_secret(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.pre_seed_secrets.push((name.into(), value.into()));
+        self
+    }
+
+    /// Install a pre-resolved runtime policy into `AgentDeps.runtime_policy`.
+    ///
+    /// Use this when the test owns resolution and needs to inspect the
+    /// resolved policy (e.g. asserting `was_reduced()` or org-policy ceiling
+    /// effects). Tests that just want to drive a `(deployment, profile,
+    /// disclosure)` triple should prefer `with_runtime_overrides`.
+    pub fn with_runtime_policy(
+        mut self,
+        policy: t3claw_host_api::runtime_policy::EffectiveRuntimePolicy,
+    ) -> Self {
+        self.runtime_policy = Some(policy);
+        self
+    }
+
+    /// Convenience wrapper that resolves `(deployment, profile,
+    /// yolo_disclosure)` through `t3claw_runtime_policy::resolve` and
+    /// installs the result. `OrgPolicyConstraints::default()` is used; tests
+    /// needing org ceilings or admin-approved enterprise yolo should
+    /// construct the policy via `resolve(...)` directly and pass it through
+    /// `with_runtime_policy`.
+    ///
+    /// Panics on unresolvable combinations — appropriate for tests; the
+    /// production resolver returns a typed error.
+    pub fn with_runtime_overrides(
+        mut self,
+        deployment: t3claw_host_api::runtime_policy::DeploymentMode,
+        profile: t3claw_host_api::runtime_policy::RuntimeProfile,
+        yolo_disclosure: bool,
+    ) -> Self {
+        let req = t3claw_runtime_policy::ResolveRequest {
+            deployment,
+            requested_profile: profile,
+            org_policy: t3claw_runtime_policy::OrgPolicyConstraints::default(),
+            yolo_disclosure_acknowledged: yolo_disclosure,
+        };
+        let policy = t3claw_runtime_policy::resolve(req)
+            .expect("with_runtime_overrides: resolver rejected combination");
+        self.runtime_policy = Some(policy);
         self
     }
 
@@ -822,6 +989,18 @@ impl TestRigBuilder {
         self
     }
 
+    /// Replace a built-in or test tool by name after the normal registry
+    /// setup pass has completed.
+    ///
+    /// Unlike `with_extra_tools`, these overrides are applied at the end of
+    /// `build()` via `ToolRegistry::register_sync`, so a probe stub can
+    /// intentionally replace an earlier built-in registration (e.g.
+    /// `tool_install`, `tool_auth`) for gate testing.
+    pub fn with_test_tool_override(mut self, tool: Arc<dyn Tool>) -> Self {
+        self.test_tool_overrides.push(tool);
+        self
+    }
+
     /// Enable prompt injection detection in the safety layer.
     ///
     /// When enabled, tool outputs are scanned for injection patterns
@@ -918,12 +1097,14 @@ impl TestRigBuilder {
             http_exchanges: explicit_http_exchanges,
             http_interceptor_override,
             extra_tools,
+            test_tool_overrides,
             wasm_tools,
             keep_bootstrap,
             engine_v2,
             channel_name_override,
             seeded_secrets,
             pre_seed_secrets,
+            runtime_policy,
         } = self;
 
         // 1. Create temp dir + fresh libSQL database + run migrations.
@@ -1155,6 +1336,7 @@ impl TestRigBuilder {
                     components.tools.clone(),
                     components.safety.clone(),
                     t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+                    None,
                 ));
                 components
                     .tools
@@ -1190,6 +1372,14 @@ impl TestRigBuilder {
             // Register any extra test-specific tools.
             for tool in extra_tools {
                 components.tools.register(tool).await;
+            }
+
+            // Apply test-only tool replacements. Runs after the normal
+            // registration pass (including AppBuilder's built-in
+            // registrations) so these stubs take precedence over any
+            // protected tool registered earlier.
+            for tool in test_tool_overrides {
+                components.tools.register_sync(tool);
             }
 
             // Register WASM tools with the shared HTTP interceptor.
@@ -1327,6 +1517,7 @@ impl TestRigBuilder {
             builder: None,
             llm_backend: "nearai".to_string(),
             tenant_rates: std::sync::Arc::new(t3claw::tenant::TenantRateRegistry::new(4, 3)),
+            runtime_policy,
         };
 
         // 7. Create TestChannel and ChannelManager.
@@ -1352,6 +1543,12 @@ impl TestRigBuilder {
         } else {
             "test-user".to_string()
         };
+        // Keep a copy for the rig accessor — `TestChannel::with_user_id`
+        // takes the string by value, so without this clone the test rig
+        // would lose the identity it constructed the channel with and
+        // tests asserting against `rig.channel_user_id()` would have to
+        // re-derive it from rig state.
+        let channel_user_id_for_rig = channel_user_id.clone();
         let test_channel = if let Some(ref name) = channel_name_override {
             Arc::new(TestChannel::with_user_id(channel_user_id).with_name(name.clone()))
         } else if keep_bootstrap {
@@ -1423,6 +1620,7 @@ impl TestRigBuilder {
             session_manager: session_manager_ref,
             secrets_store: secrets_store_ref,
             owner_id: owner_id_ref,
+            channel_user_id: channel_user_id_for_rig,
             _temp_dir: temp_dir,
             bootstrap_greetings_to_keep: if keep_bootstrap { 1 } else { 0 },
         }

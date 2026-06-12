@@ -15,7 +15,7 @@
 # Run (host):
 #
 #   ENGINE_V2=true SANDBOX_ENABLED=true \
-#     IRONCLAW_SANDBOX_IMAGE=t3claw/sandbox:dev \
+#     T3CLAW_SANDBOX_IMAGE=t3claw/sandbox:dev \
 #     cargo run
 #
 # The host's `ProjectSandboxManager` (Phase 5) handles `docker create` /

@@ -33,6 +33,7 @@ pub mod oauth;
 pub mod profile;
 pub mod relay;
 mod routines;
+pub mod runtime;
 mod safety;
 mod sandbox;
 mod search;
@@ -54,10 +55,9 @@ pub use self::agent::AgentConfig;
 pub use self::builder::BuilderModeConfig;
 pub use self::channels::{
     ChannelsConfig, CliConfig, DEFAULT_GATEWAY_PORT, GatewayConfig, GatewayOidcConfig, HttpConfig,
-    SignalConfig, TuiChannelConfig,
+    SignalConfig, TuiChannelConfig, validate_telegram_v1_v2_exclusivity,
 };
 pub use self::database::{DatabaseBackend, DatabaseConfig, SslMode, default_libsql_path};
-pub use self::embeddings::{DEFAULT_EMBEDDING_CACHE_SIZE, EmbeddingsConfig};
 pub use self::heartbeat::HeartbeatConfig;
 pub use self::hygiene::HygieneConfig;
 pub use self::llm::default_session_path;
@@ -65,6 +65,7 @@ pub use self::missions::MissionsConfig;
 pub use self::oauth::OAuthConfig;
 pub use self::relay::RelayConfig;
 pub use self::routines::RoutineConfig;
+pub use self::runtime::{RuntimeConfig, RuntimeConfigOverrides};
 pub use self::safety::SafetyConfig;
 use self::safety::resolve_safety_config;
 pub use self::sandbox::{AcpModeConfig, ClaudeCodeConfig, SandboxModeConfig};
@@ -75,11 +76,15 @@ pub use self::transcription::TranscriptionConfig;
 pub use self::tunnel::TunnelConfig;
 pub use self::wasm::WasmConfig;
 pub use self::workspace::WorkspaceConfig;
-pub use crate::llm::config::{
+pub use t3claw_embeddings::{DEFAULT_EMBEDDING_CACHE_SIZE, EmbeddingsConfig};
+// LLM config / session types live in `t3claw_llm`. Re-exported here so
+// existing `crate::config::*Config` callers (notably `LlmConfig::resolve`
+// in `src/config/llm.rs`, plus the wizard / doctor) keep compiling without
+// being touched in this PR.
+pub use t3claw_llm::{
     BedrockConfig, CacheRetention, GeminiOauthConfig, LlmConfig, NearAiConfig, OAUTH_PLACEHOLDER,
-    OpenAiCodexConfig, RegistryProviderConfig,
+    OpenAiCodexConfig, RegistryProviderConfig, SessionConfig,
 };
-pub use crate::llm::session::SessionConfig;
 
 // Thread-safe env var override helpers (replaces unsafe `std::env::set_var`
 // for mid-process env mutations in multi-threaded contexts).
@@ -115,6 +120,11 @@ pub struct Config {
     pub heartbeat: HeartbeatConfig,
     pub hygiene: HygieneConfig,
     pub routines: RoutineConfig,
+    /// Resolved runtime profile / deployment-mode policy. Source of truth for
+    /// PR 5+ planner integration (which backends to expose, what approval
+    /// posture to apply). Today this is wired through but not yet consumed
+    /// by the existing backend selection sites.
+    pub runtime: RuntimeConfig,
     pub sandbox: SandboxModeConfig,
     pub claude_code: ClaudeCodeConfig,
     pub acp: AcpModeConfig,
@@ -187,7 +197,7 @@ impl Config {
                 libsql_url: None,
                 libsql_auth_token: None,
             },
-            llm: LlmConfig::for_testing(),
+            llm: crate::config::llm::for_testing(),
             embeddings: EmbeddingsConfig::default(),
             tunnel: TunnelConfig::default(),
             channels: ChannelsConfig {
@@ -200,6 +210,8 @@ impl Config {
                 wasm_channels_enabled: false,
                 configured_wasm_channels: Vec::new(),
                 wasm_channel_owner_ids: HashMap::new(),
+                reborn_telegram_v2_enabled: false,
+                wasm_channel_runtime_overrides: HashMap::new(),
             },
             agent: AgentConfig::for_testing(),
             safety: SafetyConfig {
@@ -239,6 +251,7 @@ impl Config {
                 enabled: false,
                 ..RoutineConfig::default()
             },
+            runtime: RuntimeConfig::safe_default(),
             sandbox: SandboxModeConfig {
                 enabled: false,
                 ..SandboxModeConfig::default()
@@ -310,6 +323,31 @@ impl Config {
     /// (lower priority) via dotenvy, which never overwrites existing vars.
     pub async fn from_env() -> Result<Self, ConfigError> {
         Self::from_env_with_toml(None).await
+    }
+
+    /// Re-resolve [`RuntimeConfig`] with CLI overrides layered on top of the
+    /// env-based resolution `Self::build` already performed. CLI flags take
+    /// precedence over env vars per PR 3 of #3045.
+    ///
+    /// Returns the resolver's typed error if the new `(deployment, profile)`
+    /// pair is rejected — e.g. `--deployment-mode hosted_multi_tenant
+    /// --runtime-profile local_dev` fails closed.
+    pub fn with_runtime_overrides(
+        mut self,
+        overrides: &RuntimeConfigOverrides,
+    ) -> Result<Self, ConfigError> {
+        if overrides.deployment.is_none()
+            && overrides.profile.is_none()
+            && overrides.yolo_disclosure_acknowledged.is_none()
+        {
+            return Ok(self);
+        }
+        // The resolver re-reads env vars for any field the CLI didn't set,
+        // so `RuntimeConfig::resolve_from` correctly returns
+        //   CLI > env > default
+        // even when only one of the three was overridden.
+        self.runtime = RuntimeConfig::resolve_from(overrides)?;
+        Ok(self)
     }
 
     /// Load from env with an optional TOML config file overlay.
@@ -477,13 +515,36 @@ impl Config {
             hydrate_llm_keys_from_secrets(&mut settings, secrets, user_id).await;
         }
 
-        LlmConfig::resolve(&settings)
+        // Startup path (non-strict): fall back to NearAI if the user-configured
+        // backend is unusable. This prevents the #2514 crash-loop and keeps the
+        // instance runnable while the user fixes their provider configuration.
+        //
+        // The fallback is in-memory only — the user's DB-persisted
+        // `llm_backend` and `selected_model` are deliberately left untouched
+        // so a transient hydration failure (DB read race, secrets decryption
+        // hiccup) does not destroy their configured provider on next restart
+        // (#3229). The previous behavior of syncing the fallback into the DB
+        // turned a one-off fallback into a permanent reversion.
+        //
+        // Hot-reload path (strict): use pure `resolve` so a bad save fails the
+        // whole call and lets the caller roll back the triggering settings
+        // write. Silently falling back here would be worse UX — the user
+        // saved "openrouter", runtime would switch to NearAI, the UI would
+        // show NearAI, and the user would wonder where their selection went.
+        if strict_db_reads {
+            return crate::config::llm::resolve(&settings);
+        }
+
+        crate::config::llm::resolve_with_fallback(&settings)
     }
 
     /// Resolve only the LLM configuration from the current source stack.
     ///
     /// This is used by hot reload paths that need the exact owner/admin merge
     /// semantics from startup without rebuilding unrelated config sections.
+    /// Non-strict mode: applies `resolve_with_fallback`, so an unusable user
+    /// backend downgrades to NearAI at startup instead of crash-looping
+    /// (#2514). Use [`resolve_llm_with_secrets_strict`] for hot-reload paths.
     pub(crate) async fn resolve_llm_with_secrets(
         store: Option<&(dyn crate::db::SettingsStore + Sync)>,
         user_id: &str,
@@ -497,6 +558,9 @@ impl Config {
 
     /// Resolve LLM configuration for hot reload paths that must fail closed on
     /// DB read errors so the caller can roll back the triggering settings write.
+    /// Strict mode also disables the NearAI fallback: a broken save produces
+    /// `Err` rather than a silent demotion, which is the signal the caller
+    /// needs to trigger rollback and preserve the user's explicit selection.
     pub(crate) async fn resolve_llm_with_secrets_strict(
         store: Option<&(dyn crate::db::SettingsStore + Sync)>,
         user_id: &str,
@@ -521,11 +585,15 @@ impl Config {
         // handled separately by WorkspacePool.
         let workspace = WorkspaceConfig::resolve(&owner_id)?;
 
+        let llm = crate::config::llm::resolve(settings)?;
+        let embeddings =
+            self::embeddings::resolve_embeddings_config(settings, &llm.nearai.base_url)?;
+
         Ok(Self {
             owner_id: owner_id.clone(),
             database: DatabaseConfig::resolve()?,
-            llm: LlmConfig::resolve(settings)?,
-            embeddings: EmbeddingsConfig::resolve(settings)?,
+            llm,
+            embeddings,
             tunnel,
             channels,
             agent: AgentConfig::resolve(settings)?,
@@ -536,6 +604,12 @@ impl Config {
             heartbeat: HeartbeatConfig::resolve(settings)?,
             hygiene: HygieneConfig::resolve(settings)?,
             routines: RoutineConfig::resolve(settings)?,
+            // PR 3 of #3045: read runtime profile / deployment mode from
+            // env vars only for now. CLI overrides arrive via
+            // `Config::with_runtime_overrides` after `from_env*` returns,
+            // so the binary entry point applies them in one place rather
+            // than threading them through every internal `build` caller.
+            runtime: RuntimeConfig::resolve_from(&RuntimeConfigOverrides::default())?,
             sandbox: SandboxModeConfig::resolve(settings)?,
             claude_code: ClaudeCodeConfig::resolve(settings)?,
             acp: AcpModeConfig::resolve(settings)?,
@@ -594,7 +668,7 @@ pub(crate) fn resolve_owner_id(settings: &Settings) -> Result<String, ConfigErro
 /// Load API keys from the encrypted secrets store into a thread-safe overlay.
 ///
 /// This bridges the gap between secrets stored during onboarding and the
-/// env-var-first resolution in `LlmConfig::resolve()`. Keys in the overlay
+/// env-var-first resolution in `crate::config::llm::resolve()`. Keys in the overlay
 /// are read by `optional_env()` before falling back to `std::env::var()`,
 /// so explicit env vars always win.
 ///
@@ -614,7 +688,7 @@ pub async fn inject_llm_keys_from_secrets(
 
     // Dynamically discover secret->env mappings from the provider registry.
     // Uses selectable() which deduplicates user overrides correctly.
-    let registry = crate::llm::ProviderRegistry::load();
+    let registry = t3claw_llm::ProviderRegistry::load();
     let dynamic_mappings: Vec<(String, String)> = registry
         .selectable()
         .iter()
@@ -674,6 +748,7 @@ fn merge_injected_vars(new_entries: HashMap<String, String>) {
     if new_entries.is_empty() {
         return;
     }
+    register_injected_vars_fallback();
     match INJECTED_VARS.lock() {
         Ok(mut map) => map.extend(new_entries),
         Err(poisoned) => poisoned.into_inner().extend(new_entries),
@@ -685,6 +760,7 @@ fn merge_injected_vars(new_entries: HashMap<String, String>) {
 /// Used by the setup wizard to make credentials available to `optional_env()`
 /// without calling `unsafe { std::env::set_var }`.
 pub fn inject_single_var(key: &str, value: &str) {
+    register_injected_vars_fallback();
     match INJECTED_VARS.lock() {
         Ok(mut map) => {
             map.insert(key.to_string(), value.to_string());
@@ -695,6 +771,23 @@ pub fn inject_single_var(key: &str, value: &str) {
                 .insert(key.to_string(), value.to_string());
         }
     }
+}
+
+/// Register a one-time secondary env-lookup fallback with `t3claw_common`
+/// so the workspace-wide `env_or_override` (used from `t3claw_llm`) can
+/// see values populated via `inject_single_var` / the secrets injection
+/// pipeline. Idempotent thanks to the underlying `OnceLock`.
+fn register_injected_vars_fallback() {
+    static REGISTERED: std::sync::Once = std::sync::Once::new();
+    REGISTERED.call_once(|| {
+        t3claw_common::env_helpers::register_secondary_fallback(|key| {
+            INJECTED_VARS
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(key)
+                .cloned()
+        });
+    });
 }
 
 /// Remove a single key from the injected-vars overlay.
@@ -729,7 +822,7 @@ fn inject_os_credential_store_tokens(injected: &mut HashMap<String, String>) {
 
 /// Hydrate LLM API keys from the secrets store into the settings struct.
 ///
-/// Called after loading settings from DB but before `LlmConfig::resolve()`.
+/// Called after loading settings from DB but before `crate::config::llm::resolve()`.
 /// Populates `api_key` fields that were stripped from settings during the
 /// write path and stored encrypted in the secrets store instead.
 pub async fn hydrate_llm_keys_from_secrets(
@@ -925,6 +1018,7 @@ mod tests {
                         api_key: None, // stripped during write
                         model: Some("gpt-4o".to_string()),
                         base_url: None,
+                        extras: Default::default(),
                     },
                 );
                 m
@@ -1358,6 +1452,7 @@ mod tests {
                         api_key: Some("sk-existing".to_string()),
                         model: None,
                         base_url: None,
+                        extras: Default::default(),
                     },
                 );
                 m
@@ -1371,6 +1466,92 @@ mod tests {
             settings.llm_builtin_overrides["openai"].api_key.as_deref(),
             Some("sk-existing"),
             "existing key should not be overwritten"
+        );
+    }
+
+    // Regression for #3229: a startup-path fallback to NearAI must NOT
+    // overwrite the user's DB-persisted llm_backend / selected_model.
+    // Before the fix, a transient hydration failure (DB read race, secrets
+    // decryption hiccup) would cause the fallback to be persisted, turning
+    // a one-off into a permanent reversion of the user's configured provider.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn startup_fallback_must_not_overwrite_persisted_user_backend() {
+        use crate::db::SettingsStore;
+
+        let _env_guard = crate::config::helpers::lock_env();
+        // SAFETY: Under ENV_MUTEX. Strip env-var inputs so we are testing the
+        // DB-driven path, not values that happen to be set in the test runner.
+        unsafe {
+            std::env::remove_var("LLM_BACKEND");
+            std::env::remove_var("LLM_API_KEY");
+            std::env::remove_var("LLM_BASE_URL");
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("OPENROUTER_API_KEY");
+            std::env::remove_var("ANTHROPIC_API_KEY");
+            std::env::remove_var("ANTHROPIC_OAUTH_TOKEN");
+        }
+
+        // Seed the user's DB row with a properly-configured registry backend
+        // selection but without a hydratable API key, mirroring the #3229
+        // reproduction (Gemini configured in onboarding, key not yet
+        // injected from the encrypted secrets store).
+        let store = FakeSettingsStore::new();
+        store
+            .seed(
+                "owner-user",
+                "llm_backend",
+                serde_json::Value::String("openrouter".to_string()),
+            )
+            .await;
+        store
+            .seed(
+                "owner-user",
+                "selected_model",
+                serde_json::Value::String("openai/gpt-4o-mini".to_string()),
+            )
+            .await;
+
+        let toml = empty_toml_path();
+        let cfg = Config::resolve_llm_with_secrets(
+            Some(&store as &(dyn crate::db::SettingsStore + Sync)),
+            "owner-user",
+            Some(toml.path()),
+            None, // no secrets store: forces the unusable-config fallback path
+            true,
+        )
+        .await
+        .expect("startup-path resolve should succeed via in-memory NearAI fallback");
+
+        // In-memory: the runtime is NearAI so the instance is usable
+        // (#2514 crash-loop prevention still works).
+        assert_eq!(
+            cfg.backend, "nearai",
+            "missing API key must trigger the in-memory NearAI fallback"
+        );
+
+        // Critical invariant: the user's DB row is untouched. On the next
+        // restart, with secrets hydration succeeding, the user's original
+        // openrouter+model selection takes effect again. The pre-fix code
+        // overwrote llm_backend to "nearai" and deleted selected_model,
+        // permanently destroying the user's intent.
+        let backend = store
+            .get_setting("owner-user", "llm_backend")
+            .await
+            .expect("DB read");
+        assert_eq!(
+            backend,
+            Some(serde_json::Value::String("openrouter".to_string())),
+            "startup fallback must preserve the user's persisted llm_backend (#3229)"
+        );
+        let model = store
+            .get_setting("owner-user", "selected_model")
+            .await
+            .expect("DB read");
+        assert_eq!(
+            model,
+            Some(serde_json::Value::String("openai/gpt-4o-mini".to_string())),
+            "startup fallback must preserve the user's persisted selected_model (#3229)"
         );
     }
 }

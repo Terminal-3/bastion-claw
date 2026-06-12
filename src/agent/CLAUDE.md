@@ -44,7 +44,7 @@ Session (per user)
 - Turns are append-only. Undo rolls back by restoring a prior checkpoint (message list, not a full thread snapshot).
 - `UndoManager` is per-thread, stored in `SessionManager`, not on `Session` itself. Max 20 checkpoints (oldest dropped when exceeded).
 - Group chat detection: if `metadata.chat_type` is `group`/`channel`/`supergroup`, `MEMORY.md` is excluded from the system prompt to prevent leaking personal context.
-- **Auth mode**: if a thread has `pending_auth` set (e.g. from `tool_auth` returning `awaiting_token`), the next user message is intercepted before any turn creation, logging, or safety validation and sent directly to the credential store. Any control submission (undo, interrupt, etc.) cancels auth mode.
+- **Auth mode**: if a thread has `pending_auth` set (for example, from an extension auth flow pausing while it awaits a token or auth-card submission), the next user message is intercepted before any turn creation, logging, or safety validation and sent directly to the credential store. Any control submission (undo, interrupt, etc.) cancels auth mode.
 - `ThreadState` values: `Idle`, `Processing`, `AwaitingApproval`, `Completed`, `Interrupted`.
 - `SessionManager` maps `(user_id, channel, external_thread_id)` → internal UUID. Prunes idle sessions every 10 minutes (warns at 1000 sessions).
 
@@ -129,6 +129,7 @@ Repair results: `Success`, `Retry`, `Failed`, `ManualRequired`. `Retry` does NOT
 - `cheap_llm` in `AgentDeps` is used for heartbeat and other lightweight tasks. Falls back to main `llm` if `None`. Use `agent.cheap_llm()` accessor, not `deps.cheap_llm` directly.
 - `CostGuard.check_allowed()` must be called **before** LLM calls; `record_llm_call()` must be called **after**. Both calls are separate — the guard does not auto-record.
 - `BeforeInbound` and `BeforeOutbound` hooks run for every user message and agent response respectively. Hooks can modify content or reject. Hook errors are logged but **fail-open** (processing continues).
+- Autonomous Trace Commons capture, queue flushing, and credit-notice delivery route through `crate::trace_client::TraceClientHost`. Keep local redaction/queue/status mechanics behind that host facade when changing runtime trace behavior.
 
 ## Complete Submission Command Reference
 

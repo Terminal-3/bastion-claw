@@ -22,12 +22,12 @@ use t3claw::channels::web::ws::WsConnectionTracker;
 use t3claw::config::{Config, RegistryProviderConfig, RoutineConfig};
 use t3claw::db::Database;
 use t3claw::db::libsql::LibSqlBackend;
-use t3claw::llm::registry::ProviderProtocol;
-use t3claw::llm::{
-    SessionConfig as LlmSessionConfig, SessionManager as LlmSessionManager, create_llm_provider,
-};
 use t3claw::secrets::SecretsStore;
 use t3claw::tools::{Tool, ToolError, ToolOutput};
+use t3claw_llm::registry::ProviderProtocol;
+use t3claw_llm::{
+    SessionConfig as LlmSessionConfig, SessionManager as LlmSessionManager, create_llm_provider,
+};
 
 use crate::support::test_channel::{TestChannel, TestChannelHandle};
 
@@ -289,6 +289,7 @@ impl GatewayWorkflowHarness {
                 builder: None,
                 llm_backend: "nearai".to_string(),
                 tenant_rates: std::sync::Arc::new(t3claw::tenant::TenantRateRegistry::new(4, 3)),
+                runtime_policy: None,
             },
             channels,
             None,

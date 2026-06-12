@@ -1,5 +1,5 @@
 {
-  "name": "t3claw-architecture-video",
+  "name": "ironclaw-architecture-video",
   "version": "1.0.0",
   "description": "My Remotion video",
   "repository": {},
@@ -30,5 +30,8 @@
   },
   "sideEffects": [
     "*.css"
-  ]
+  ],
+  "overrides": {
+    "fast-uri": "^3.1.1"
+  }
 }

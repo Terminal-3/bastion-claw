@@ -13,7 +13,7 @@ function _addWidgetTab(def) {
     || document.getElementById('app');
   if (!tabBar || !tabContent) {
     // DOM not ready yet — queue for later
-    IronClaw._widgetInitQueue.push(def);
+    T3Claw._widgetInitQueue.push(def);
     return;
   }
 
@@ -46,9 +46,9 @@ function _addWidgetTab(def) {
 
   // Initialize the widget
   try {
-    def.init(panel, IronClaw.api);
+    def.init(panel, T3Claw.api);
   } catch (e) {
-    console.error('[IronClaw] Widget "' + def.id + '" init failed:', e);
+    console.error('[T3Claw] Widget "' + def.id + '" init failed:', e);
     // Escape both the widget id and the thrown message before injecting
     // them into the error banner. CSP blocks the script vector here, but
     // every other branch in this file routes user-controlled strings
@@ -63,9 +63,9 @@ function _addWidgetTab(def) {
 }
 
 // Apply layout config if injected by the server
-if (window.__IRONCLAW_LAYOUT__) {
+if (window.__T3CLAW_LAYOUT__) {
   (function() {
-    var layout = window.__IRONCLAW_LAYOUT__;
+    var layout = window.__T3CLAW_LAYOUT__;
 
     // Apply branding title
     if (layout.branding && layout.branding.title) {
@@ -155,11 +155,11 @@ if (window.__IRONCLAW_LAYOUT__) {
 
 // Drain any widgets that were registered before the DOM was ready.
 // _addWidgetTab queues them in _widgetInitQueue when tab-bar doesn't exist yet.
-if (IronClaw._widgetInitQueue && IronClaw._widgetInitQueue.length > 0) {
-  IronClaw._widgetInitQueue.forEach(function(def) {
+if (T3Claw._widgetInitQueue && T3Claw._widgetInitQueue.length > 0) {
+  T3Claw._widgetInitQueue.forEach(function(def) {
     _addWidgetTab(def);
   });
-  IronClaw._widgetInitQueue = [];
+  T3Claw._widgetInitQueue = [];
 }
 
 // Apply `default_tab` after the widget queue has drained.
@@ -173,9 +173,9 @@ if (IronClaw._widgetInitQueue && IronClaw._widgetInitQueue.length > 0) {
 //
 // Hash navigation still wins (so `#chat` deep-links survive a
 // customized default_tab) and we only switch if a layout was injected.
-if (window.__IRONCLAW_LAYOUT__
-    && window.__IRONCLAW_LAYOUT__.tabs
-    && window.__IRONCLAW_LAYOUT__.tabs.default_tab
+if (window.__T3CLAW_LAYOUT__
+    && window.__T3CLAW_LAYOUT__.tabs
+    && window.__T3CLAW_LAYOUT__.tabs.default_tab
     && !window.location.hash) {
-  switchTab(window.__IRONCLAW_LAYOUT__.tabs.default_tab);
+  switchTab(window.__T3CLAW_LAYOUT__.tabs.default_tab);
 }

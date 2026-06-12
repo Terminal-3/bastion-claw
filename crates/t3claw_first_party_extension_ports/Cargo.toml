@@ -1,0 +1,25 @@
+[package]
+name = "t3claw_first_party_extension_ports"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Loop-facing ports for first-party T3Claw extensions"
+authors = ["NEAR AI <support@near.ai>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/Terminal-3/t3-claw"
+repository = "https://github.com/Terminal-3/t3-claw"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_loop_support = { path = "../t3claw_loop_support" }
+t3claw_skills = { path = "../t3claw_skills" }
+t3claw_turns = { path = "../t3claw_turns" }
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }

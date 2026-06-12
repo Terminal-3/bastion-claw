@@ -1,6 +1,6 @@
 """Fake Slack Web API server for E2E tests.
 
-Serves minimal Slack API endpoints so the IronClaw Slack WASM channel can be
+Serves minimal Slack API endpoints so the T3Claw Slack WASM channel can be
 set up and exercised without a real Slack connection.
 
 Control endpoints (/__mock/*) let tests inspect sent messages, configure

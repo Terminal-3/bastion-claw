@@ -621,7 +621,8 @@ fn t3n_mcp_server_from_env() -> Option<McpServerConfig> {
 /// was written, `Ok(false)` if the env var is absent or an entry already exists.
 ///
 /// The entry is never overwritten — once the user (or a prior boot) has a
-/// `t3n-mcp` config, later changes are preserved.
+/// `t3n-mcp` config, later changes (toggles, local-auth confirmation, etc.)
+/// are preserved.
 pub async fn bootstrap_t3n_mcp_server(
     db: Option<&dyn crate::db::Database>,
     user_id: &str,
@@ -1702,7 +1703,7 @@ mod tests {
         );
     }
 
-    /// Regression for PR nearai/ironclaw#ironclaw#2681 review comment 3110617080.
+    /// Regression for PR nearai/ironclaw#2681 review comment 3110617080.
     ///
     /// Before the `McpServerName` newtype landed, `McpServerConfig::validate()`
     /// had no length cap. Delegating validation to `McpServerName::new` added

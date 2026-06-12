@@ -37,7 +37,7 @@ function sanitizeRenderedHtml(html) {
 //
 // Detects JSON objects and key-value data in assistant messages and
 // renders them as styled cards instead of raw text. Also supports
-// extensible chat renderers via IronClaw.registerChatRenderer().
+// extensible chat renderers via T3Claw.registerChatRenderer().
 
 /**
  * Post-process a .message-content element to upgrade structured data into cards.
@@ -59,7 +59,7 @@ function upgradeStructuredData(contentEl) {
   //
   // CSP already blocks `<script>` execution either way; this guards the
   // form/iframe/object/clickjack-overlay vector that doesn't trip CSP.
-  var renderers = (window.IronClaw && IronClaw._chatRenderers) || [];
+  var renderers = (window.T3Claw && T3Claw._chatRenderers) || [];
   for (var i = 0; i < renderers.length; i++) {
     try {
       if (renderers[i].match(contentEl.textContent, contentEl)) {
@@ -71,7 +71,7 @@ function upgradeStructuredData(contentEl) {
         return; // First matching renderer wins
       }
     } catch (e) {
-      console.error('[IronClaw] Chat renderer "' + renderers[i].id + '" failed:', e);
+      console.error('[T3Claw] Chat renderer "' + renderers[i].id + '" failed:', e);
     }
   }
 
@@ -83,7 +83,7 @@ function upgradeStructuredData(contentEl) {
   // explanation into a styled card. Operators that pipe structured data
   // through chat opt in via `chat.upgrade_inline_json` in
   // `.system/gateway/layout.json`.
-  var layoutCfg = window.__IRONCLAW_LAYOUT__;
+  var layoutCfg = window.__T3CLAW_LAYOUT__;
   if (layoutCfg && layoutCfg.chat && layoutCfg.chat.upgrade_inline_json === true) {
     upgradeInlineJson(contentEl);
   }

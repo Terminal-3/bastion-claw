@@ -36,10 +36,10 @@ mod advanced {
                 .get_or_init(|| Mutex::new(()))
                 .lock()
                 .expect("env mutex poisoned");
-            let original = std::env::var("IRONCLAW_OAUTH_CALLBACK_URL").ok();
+            let original = std::env::var("T3CLAW_OAUTH_CALLBACK_URL").ok();
             // SAFETY: Under ENV_MUTEX, no concurrent env access.
             unsafe {
-                std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
             }
             Self {
                 original,
@@ -53,9 +53,9 @@ mod advanced {
             // SAFETY: Under ENV_MUTEX (still held by _mutex), no concurrent env access.
             unsafe {
                 if let Some(ref val) = self.original {
-                    std::env::set_var("IRONCLAW_OAUTH_CALLBACK_URL", val);
+                    std::env::set_var("T3CLAW_OAUTH_CALLBACK_URL", val);
                 } else {
-                    std::env::remove_var("IRONCLAW_OAUTH_CALLBACK_URL");
+                    std::env::remove_var("T3CLAW_OAUTH_CALLBACK_URL");
                 }
             }
         }
@@ -338,7 +338,7 @@ mod advanced {
 
     #[tokio::test]
     async fn routine_news_digest() {
-        use t3claw::llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
+        use t3claw_llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
 
         let trace = LlmTrace::from_file(format!("{FIXTURES}/routine_news_digest.json")).unwrap();
 
@@ -686,6 +686,7 @@ mod advanced {
                 fallback_source: None,
                 auth_hint: AuthHint::Dcr,
                 version: None,
+                hidden: false,
             })
             .await;
 

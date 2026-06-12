@@ -6,7 +6,8 @@
 
 use std::sync::Arc;
 
-use t3claw::workspace::{MockEmbeddings, SearchConfig, Workspace, paths};
+use t3claw::workspace::{SearchConfig, Workspace, paths};
+use t3claw_embeddings::MockEmbeddings;
 
 fn get_pool() -> deadpool_postgres::Pool {
     let database_url = std::env::var("DATABASE_URL")

@@ -44,6 +44,15 @@ pub struct ThreadManager {
     completed: Arc<RwLock<HashMap<ThreadId, ThreadOutcome>>>,
     /// Broadcast channel for thread events (for live status updates).
     event_tx: tokio::sync::broadcast::Sender<crate::types::event::ThreadEvent>,
+    /// Host-supplied callback that turns `Approval` gates into inline
+    /// awaits instead of unwinding the call stack. The engine attaches
+    /// it to every `ThreadExecutionContext` so both Tier 0 and Tier 1
+    /// executors can pause a live VM in place.
+    ///
+    /// Defaults to [`crate::gate::CancellingGateController`] — every
+    /// gate cancels with a typed denial. Hosts that want real inline
+    /// await call [`Self::set_gate_controller`] during bootstrap.
+    gate_controller: tokio::sync::RwLock<Arc<dyn crate::gate::GateController>>,
 }
 
 impl ThreadManager {
@@ -68,7 +77,22 @@ impl ThreadManager {
             running: Arc::new(RwLock::new(HashMap::new())),
             completed: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
+            gate_controller: tokio::sync::RwLock::new(crate::gate::CancellingGateController::arc()),
         }
+    }
+
+    /// Install (or replace) the host-supplied gate controller.
+    ///
+    /// Called once during bridge bootstrap. Subsequent thread spawns
+    /// pick up the controller and propagate it into every
+    /// `ThreadExecutionContext` they construct.
+    pub async fn set_gate_controller(&self, controller: Arc<dyn crate::gate::GateController>) {
+        *self.gate_controller.write().await = controller;
+    }
+
+    /// Snapshot the current gate controller.
+    pub async fn gate_controller(&self) -> Arc<dyn crate::gate::GateController> {
+        self.gate_controller.read().await.clone()
     }
 
     /// Subscribe to thread events for live status updates.
@@ -96,6 +120,37 @@ impl ThreadManager {
     ) -> Result<ThreadId, EngineError> {
         self.spawn_thread_with_history(
             goal,
+            None,
+            thread_type,
+            project_id,
+            config,
+            parent_id,
+            user_id,
+            Vec::new(),
+            serde_json::Map::new(),
+        )
+        .await
+    }
+
+    /// Spawn a new thread with an explicit sidebar title.
+    ///
+    /// Callers with a semantic short label (e.g. mission name) should
+    /// use this; everything else can rely on `spawn_thread` + the
+    /// read-side fallback that derives a short title from `goal`.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn spawn_thread_with_title(
+        &self,
+        goal: impl Into<String>,
+        title: Option<String>,
+        thread_type: ThreadType,
+        project_id: ProjectId,
+        config: ThreadConfig,
+        parent_id: Option<ThreadId>,
+        user_id: impl Into<String>,
+    ) -> Result<ThreadId, EngineError> {
+        self.spawn_thread_with_history(
+            goal,
+            title,
             thread_type,
             project_id,
             config,
@@ -122,6 +177,7 @@ impl ThreadManager {
     pub async fn spawn_thread_with_history(
         &self,
         goal: impl Into<String>,
+        title: Option<String>,
         thread_type: ThreadType,
         project_id: ProjectId,
         config: ThreadConfig,
@@ -135,6 +191,9 @@ impl ThreadManager {
         if let Some(pid) = parent_id {
             thread = thread.with_parent(pid);
         }
+        // Set the title before save_thread + start_thread so the
+        // executor's in-memory thread observes it atomically.
+        thread.title = title;
         let thread_id = thread.id;
 
         // Apply initial metadata before save_thread + start_thread so the
@@ -300,11 +359,21 @@ impl ThreadManager {
         let store_for_retrieval = Arc::clone(&self.store);
         let retrieval = crate::memory::RetrievalEngine::new(store_for_retrieval);
 
-        let exec_loop = ExecutionLoop::new(thread, llm, effects, leases, policy, rx, user_id)
-            .with_capabilities(Arc::clone(&self.capabilities))
-            .with_event_tx(self.event_tx.clone())
-            .with_retrieval(retrieval)
-            .with_store(Arc::clone(&self.store));
+        let gate_controller = self.gate_controller.read().await.clone();
+        let exec_loop = ExecutionLoop::new(
+            thread,
+            llm,
+            effects,
+            leases,
+            policy,
+            rx,
+            user_id,
+            gate_controller,
+        )
+        .with_capabilities(Arc::clone(&self.capabilities))
+        .with_event_tx(self.event_tx.clone())
+        .with_retrieval(retrieval)
+        .with_store(Arc::clone(&self.store));
 
         // Spawn background task
         let store_for_task = Arc::clone(&self.store);
@@ -352,9 +421,13 @@ impl ThreadManager {
 
             let outcome = match result {
                 Ok(outcome) => outcome,
-                Err(error) => ThreadOutcome::Failed {
-                    error: error.to_string(),
-                },
+                Err(error) => {
+                    let debug_detail = error.debug_detail().map(|s| s.to_string());
+                    ThreadOutcome::Failed {
+                        error: error.to_string(),
+                        debug_detail,
+                    }
+                }
             };
             completed.write().await.insert(thread_id, outcome.clone());
             running.write().await.remove(&thread_id);
@@ -377,6 +450,14 @@ impl ThreadManager {
     }
 
     /// Send a stop signal to a running thread.
+    ///
+    /// Wakes any [`crate::gate::GateController::pause`] futures that
+    /// are currently parked on this thread BEFORE sending
+    /// `ThreadSignal::Stop` so the engine task can observe the stop
+    /// promptly. Without the explicit cancel, a thread parked inside
+    /// `pause()` (inline approval await) is not polling the signal
+    /// channel and would continue waiting until the user resolves the
+    /// prompt or the gate expires.
     pub async fn stop_thread(&self, thread_id: ThreadId, user_id: &str) -> Result<(), EngineError> {
         // Validate ownership before allowing stop.
         if let Some(thread) = self.store.load_thread(thread_id).await?
@@ -387,6 +468,14 @@ impl ThreadManager {
                 entity: format!("thread {thread_id}"),
             });
         }
+
+        // Wake any inline gate await blocked on this thread first. The
+        // controller is shared across spawned engine tasks; a parked
+        // `pause()` future polled inside an executor doesn't see
+        // `ThreadSignal::Stop` directly.
+        let controller = self.gate_controller.read().await.clone();
+        controller.cancel_thread(thread_id).await;
+
         let running = self.running.read().await;
         if let Some(rt) = running.get(&thread_id) {
             let _ = rt.signal_tx.send(ThreadSignal::Stop).await;
@@ -488,6 +577,7 @@ impl ThreadManager {
                         error!(thread_id = %thread_id, "thread task panicked: {e}");
                         Ok(ThreadOutcome::Failed {
                             error: format!("thread task panicked: {e}"),
+                            debug_detail: None,
                         })
                     }
                 };
@@ -558,13 +648,14 @@ impl ThreadManager {
     /// Reconcile persisted non-terminal threads after process startup.
     ///
     /// The current engine does not support mid-thread replay/resume, so any
-    /// thread left in a non-terminal state is marked failed-safe.
+    /// thread left in a non-terminal state is marked failed-safe. Threads
+    /// transitioned to `Failed` here carry the
+    /// [`ENGINE_RESTART_RECOVERY_METADATA_KEY`] flag so callers can
+    /// distinguish them from real, user-actionable failures.
     pub async fn recover_project_threads(
         &self,
         project_id: ProjectId,
     ) -> Result<Vec<ThreadId>, EngineError> {
-        const PENDING_APPROVAL_METADATA_KEY: &str = "pending_approval";
-        const RUNTIME_CHECKPOINT_METADATA_KEY: &str = "runtime_checkpoint";
         // System operation: recover all non-terminal threads regardless of user.
         let threads = self.store.list_all_threads(project_id).await?;
         let mut recovered = Vec::new();
@@ -598,6 +689,16 @@ impl ThreadManager {
                 continue;
             }
 
+            // Tag the thread before transitioning so downstream consumers
+            // (projects "needs attention" feed, health rollup) can skip
+            // restart-recovery noise and only surface real failures.
+            if let Some(obj) = thread.metadata.as_object_mut() {
+                obj.insert(
+                    ENGINE_RESTART_RECOVERY_METADATA_KEY.to_string(),
+                    serde_json::Value::Bool(true),
+                );
+            }
+
             if thread
                 .transition_to(
                     ThreadState::Failed,
@@ -614,6 +715,24 @@ impl ThreadManager {
         Ok(recovered)
     }
 }
+
+/// Metadata key set on a thread that has an in-flight pending-approval
+/// gate. Persisted threads carrying this key skip restart-recovery so the
+/// gate survives a process restart.
+pub const PENDING_APPROVAL_METADATA_KEY: &str = "pending_approval";
+
+/// Metadata key set on a thread that has a serialized runtime checkpoint
+/// (CodeAct VM state, nudge counters, compaction count). Threads carrying
+/// this key are suspended on restart instead of failed.
+pub const RUNTIME_CHECKPOINT_METADATA_KEY: &str = "runtime_checkpoint";
+
+/// Metadata key set on threads that were forced into `Failed` by
+/// [`ThreadManager::recover_project_threads`] because the process
+/// restarted before they could complete. The thread did not fail for
+/// user-visible reasons; the projects "needs attention" surface filters
+/// these out so an upgrade does not cascade into a wall of phantom
+/// failure warnings.
+pub const ENGINE_RESTART_RECOVERY_METADATA_KEY: &str = "engine_restart_recovery";
 
 fn is_resolved_call_message(message: &ThreadMessage, call_id: &str) -> bool {
     if message.role == MessageRole::ActionResult
@@ -637,7 +756,9 @@ fn is_resolved_action_result_message(message: &ThreadMessage, call_id: &str) -> 
 mod tests {
     use super::*;
     use crate::traits::llm::{LlmCallConfig, LlmOutput};
-    use crate::types::capability::{ActionDef, Capability, CapabilityLease, EffectType};
+    use crate::types::capability::{
+        ActionDef, Capability, CapabilityLease, EffectType, ModelToolSurface,
+    };
     use crate::types::event::ThreadEvent;
     use crate::types::memory::{DocId, MemoryDoc};
     use crate::types::project::Project;
@@ -738,7 +859,24 @@ mod tests {
         async fn available_actions(
             &self,
             _: &[CapabilityLease],
+            _: &crate::traits::effect::ThreadExecutionContext,
         ) -> Result<Vec<ActionDef>, EngineError> {
+            Ok(vec![ActionDef {
+                name: "test_tool".into(),
+                description: "Test".into(),
+                parameters_schema: serde_json::json!({}),
+                effects: vec![EffectType::ReadLocal],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
+            }])
+        }
+
+        async fn available_capabilities(
+            &self,
+            _: &[CapabilityLease],
+            _: &crate::traits::effect::ThreadExecutionContext,
+        ) -> Result<Vec<crate::types::capability::CapabilitySummary>, EngineError> {
             Ok(vec![])
         }
     }
@@ -770,8 +908,17 @@ mod tests {
         async fn available_actions(
             &self,
             _: &[CapabilityLease],
+            _: &crate::traits::effect::ThreadExecutionContext,
         ) -> Result<Vec<ActionDef>, EngineError> {
             Ok(self.actions.read().await.clone())
+        }
+
+        async fn available_capabilities(
+            &self,
+            _: &[CapabilityLease],
+            _: &crate::traits::effect::ThreadExecutionContext,
+        ) -> Result<Vec<crate::types::capability::CapabilitySummary>, EngineError> {
+            Ok(vec![])
         }
     }
 
@@ -947,6 +1094,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::ReadLocal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
             }],
             knowledge: vec![],
             policies: vec![],
@@ -973,6 +1122,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::ReadLocal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
             }],
             knowledge: vec![],
             policies: vec![],
@@ -1003,6 +1154,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::WriteLocal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
             }],
             knowledge: vec![],
             policies: vec![],
@@ -1042,6 +1195,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn spawn_thread_defaults_title_to_none() {
+        // Regression: without explicit title, the persisted thread has
+        // title = None — so the gateway falls back to deriving from goal
+        // rather than showing stale data.
+        let mgr = make_manager(MockLlm::text("done"));
+        let tid = mgr
+            .spawn_thread(
+                "some long goal",
+                ThreadType::Foreground,
+                ProjectId::new(),
+                ThreadConfig::default(),
+                None,
+                "user",
+            )
+            .await
+            .unwrap();
+        let _ = mgr.join_thread(tid).await.unwrap();
+        let loaded = mgr.store.load_thread(tid).await.unwrap().unwrap();
+        assert_eq!(loaded.title, None);
+    }
+
+    #[tokio::test]
+    async fn spawn_thread_with_title_persists_title() {
+        // Regression: mission-spawned threads pass `Some(mission.name)` so
+        // the sidebar shows the short label instead of the multi-paragraph
+        // meta-prompt that lives in `goal`.
+        let mgr = make_manager(MockLlm::text("done"));
+        let long_goal = "a".repeat(2000);
+        let tid = mgr
+            .spawn_thread_with_title(
+                &long_goal,
+                Some("Daily summary".to_string()),
+                ThreadType::Mission,
+                ProjectId::new(),
+                ThreadConfig::default(),
+                None,
+                "user",
+            )
+            .await
+            .unwrap();
+        let _ = mgr.join_thread(tid).await.unwrap();
+        let loaded = mgr.store.load_thread(tid).await.unwrap().unwrap();
+        assert_eq!(loaded.title.as_deref(), Some("Daily summary"));
+        assert_eq!(loaded.goal.len(), 2000);
+    }
+
+    #[tokio::test]
+    async fn spawn_thread_with_history_persists_derived_title() {
+        // Regression: foreground gateway threads pass a derived short
+        // title; without this, the sidebar would show the full first
+        // user message.
+        let mgr = make_manager(MockLlm::text("done"));
+        let long_message =
+            "first line of a user message\nsecond line that should be ignored".to_string();
+        let derived = Thread::derive_title_from_message(&long_message);
+        assert_eq!(derived.as_deref(), Some("first line of a user message"));
+
+        let tid = mgr
+            .spawn_thread_with_history(
+                long_message,
+                derived.clone(),
+                ThreadType::Foreground,
+                ProjectId::new(),
+                ThreadConfig::default(),
+                None,
+                "user",
+                Vec::new(),
+                serde_json::Map::new(),
+            )
+            .await
+            .unwrap();
+        let _ = mgr.join_thread(tid).await.unwrap();
+        let loaded = mgr.store.load_thread(tid).await.unwrap().unwrap();
+        assert_eq!(loaded.title, derived);
+    }
+
+    #[tokio::test]
     async fn resume_reconciles_tool_lease_with_newly_available_actions() {
         let store = Arc::new(MockStore::new());
         let effects = DynamicEffects::new(vec![ActionDef {
@@ -1050,6 +1280,8 @@ mod tests {
             parameters_schema: serde_json::json!({}),
             effects: vec![EffectType::WriteLocal],
             requires_approval: false,
+            model_tool_surface: ModelToolSurface::FullSchema,
+            discovery: None,
         }]);
         let mgr = make_manager_with_effects(MockLlm::text("done"), store, effects.clone());
 
@@ -1086,6 +1318,8 @@ mod tests {
                     parameters_schema: serde_json::json!({}),
                     effects: vec![EffectType::WriteLocal],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
                 },
                 ActionDef {
                     name: "notion_search".into(),
@@ -1093,6 +1327,8 @@ mod tests {
                     parameters_schema: serde_json::json!({}),
                     effects: vec![EffectType::ReadExternal],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::CompactToolInfo,
+                    discovery: None,
                 },
             ])
             .await;
@@ -1122,6 +1358,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::WriteLocal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
             },
             ActionDef {
                 name: "notion_search".into(),
@@ -1129,6 +1367,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::ReadExternal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::CompactToolInfo,
+                discovery: None,
             },
         ]);
         let mgr = make_manager_with_effects(MockLlm::text("done"), store, effects);
@@ -1161,6 +1401,8 @@ mod tests {
             parameters_schema: serde_json::json!({}),
             effects: vec![EffectType::WriteLocal],
             requires_approval: false,
+            model_tool_surface: ModelToolSurface::FullSchema,
+            discovery: None,
         }];
         let revealed_actions = vec![
             ActionDef {
@@ -1169,6 +1411,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::WriteLocal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
             },
             ActionDef {
                 name: "notion_search".into(),
@@ -1176,6 +1420,8 @@ mod tests {
                 parameters_schema: serde_json::json!({}),
                 effects: vec![EffectType::ReadExternal],
                 requires_approval: false,
+                model_tool_surface: ModelToolSurface::CompactToolInfo,
+                discovery: None,
             },
         ];
         let effects = DynamicEffects::new(initial_actions);
@@ -1269,15 +1515,25 @@ mod tests {
             .await
             .unwrap();
 
-        // Give it a moment to start, then stop
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        let _ = mgr.stop_thread(tid, "test-user").await;
+        mgr.stop_thread(tid, "user").await.unwrap();
 
         let outcome = mgr.join_thread(tid).await.unwrap();
-        assert!(matches!(
-            outcome,
-            ThreadOutcome::Stopped | ThreadOutcome::Completed { .. } | ThreadOutcome::MaxIterations
-        ));
+        // The test's primary assertion is that `join_thread` returns —
+        // `stop_thread` must not deadlock. Any terminal outcome
+        // satisfies that. Failed is included because the executor's
+        // consecutive-error guard (#2325) will trip on the
+        // unregistered `test_tool` calls if it lands before the stop
+        // signal does, which is timing-dependent.
+        assert!(
+            matches!(
+                outcome,
+                ThreadOutcome::Stopped
+                    | ThreadOutcome::Completed { .. }
+                    | ThreadOutcome::MaxIterations
+                    | ThreadOutcome::Failed { .. }
+            ),
+            "join_thread returned a non-terminal outcome: {outcome:?}"
+        );
     }
 
     #[tokio::test]
@@ -1348,6 +1604,28 @@ mod tests {
         assert_eq!(saved.state, ThreadState::Failed);
         let events = store.load_events(running.id).await.unwrap();
         assert!(!events.is_empty());
+
+        // Restart-recovery flag must be set so the projects "needs
+        // attention" feed can filter these out (#3274).
+        assert_eq!(
+            saved
+                .metadata
+                .get(ENGINE_RESTART_RECOVERY_METADATA_KEY)
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "recovered thread should carry the engine_restart_recovery flag"
+        );
+
+        // Threads that were already terminal before recovery must NOT
+        // gain the flag — they failed for real reasons.
+        let saved_completed = store.load_thread(completed.id).await.unwrap().unwrap();
+        assert!(
+            saved_completed
+                .metadata
+                .get(ENGINE_RESTART_RECOVERY_METADATA_KEY)
+                .is_none(),
+            "pre-existing failed thread must not be flagged as restart-recovery"
+        );
     }
 
     #[tokio::test]

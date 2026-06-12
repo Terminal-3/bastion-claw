@@ -53,7 +53,7 @@ export const ExecutionLoopScene: React.FC = () => {
           fontFamily: FONTS.mono,
         }}
       >
-        crates/t3claw_engine/src/executor/loop_engine.rs:188
+        crates/ironclaw_engine/src/executor/loop_engine.rs:188
       </div>
 
       <div

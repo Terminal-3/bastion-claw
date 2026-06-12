@@ -1,0 +1,19 @@
+[package]
+name = "t3claw_scripts"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+t3claw_extensions = { path = "../t3claw_extensions" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_resources = { path = "../t3claw_resources" }
+futures-util = "0.3"
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+async-trait = "0.1"
+rust_decimal_macros = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }

@@ -4,15 +4,19 @@ use std::sync::Arc;
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+#[cfg(test)]
+use t3claw_engine::ModelToolSurface;
 use t3claw_engine::{
     ActionDef, EngineError, LlmBackend, LlmCallConfig, LlmOutput, LlmResponse, ThreadMessage,
     TokenUsage,
 };
 
-use crate::llm::{
+use t3claw_llm::{
     ChatMessage, LlmProvider, Role, ToolCall, ToolCompletionRequest, ToolDefinition,
-    sanitize_tool_messages,
+    clean_response, recover_tool_calls_from_content, sanitize_tool_messages,
 };
+
+const EMPTY_CLEANED_RESPONSE_FALLBACK: &str = "I'm not sure how to respond to that.";
 
 /// Compute the USD cost of a single completion response, honoring the
 /// provider's prompt-caching pricing. Mirrors the formula in
@@ -106,10 +110,26 @@ impl LlmBackend for LlmBridgeAdapter {
         sanitize_tool_messages(&mut chat_messages);
 
         // Convert actions to tool definitions
+        //
+        // In disabled-CodeAct mode the model has no Python escape hatch, so
+        // every callable action MUST be reachable via the provider's
+        // structured `tool_calls` interface. Filtering down to
+        // `emits_full_schema_tool()` in that mode would leave compact-info
+        // actions (e.g. `mission_create`, `gmail_send`, `notion_search`)
+        // visible in the prompt as "available" but absent from the provider
+        // tool list — i.e. unreachable. The prompt builder mirrors this by
+        // omitting the "Enabled Tools" section when CodeAct is disabled
+        // (see `prompt::build_codeact_system_prompt_inner`). PR #3665 review.
         let tools: Vec<ToolDefinition> = if config.force_text {
             vec![] // No tools when forcing text
-        } else {
+        } else if t3claw_engine::executor::prompt::codeact_disabled() {
             actions.iter().map(action_def_to_tool_def).collect()
+        } else {
+            actions
+                .iter()
+                .filter(|action| action.emits_full_schema_tool())
+                .map(action_def_to_tool_def)
+                .collect()
         };
 
         // Build request — match the existing Reasoning.respond_with_tools() defaults
@@ -118,7 +138,7 @@ impl LlmBackend for LlmBridgeAdapter {
 
         if tools.is_empty() {
             // No tools: use plain completion (matches existing no-tools path)
-            let mut request = crate::llm::CompletionRequest::new(chat_messages)
+            let mut request = t3claw_llm::CompletionRequest::new(chat_messages)
                 .with_max_tokens(max_tokens)
                 .with_temperature(temperature);
             request.metadata = config.metadata.clone();
@@ -133,14 +153,11 @@ impl LlmBackend for LlmBridgeAdapter {
                     reason: e.to_string(),
                 })?;
 
+            let cleaned_text = clean_response(&response.content);
+
             // Check for code blocks in the response (CodeAct/RLM pattern)
-            let llm_response = match extract_code_block(&response.content) {
-                Some(code) => LlmResponse::Code {
-                    code,
-                    content: Some(response.content),
-                },
-                None => LlmResponse::Text(response.content),
-            };
+            // after stripping provider-flattened internal markers from visible text.
+            let llm_response = text_response_from_cleaned_text(cleaned_text);
 
             return Ok(LlmOutput {
                 response: llm_response,
@@ -161,7 +178,7 @@ impl LlmBackend for LlmBridgeAdapter {
         }
 
         // With tools: use tool completion (matches existing tools path)
-        let mut request = ToolCompletionRequest::new(chat_messages, tools)
+        let mut request = ToolCompletionRequest::new(chat_messages, tools.clone())
             .with_max_tokens(max_tokens)
             .with_temperature(temperature)
             .with_tool_choice("auto");
@@ -211,14 +228,29 @@ impl LlmBackend for LlmBridgeAdapter {
                 content: response.content.clone(),
             }
         } else {
-            let text = response.content.unwrap_or_default();
-            // Detect ```repl or ```python fenced code blocks
-            match extract_code_block(&text) {
-                Some(code) => LlmResponse::Code {
-                    code,
-                    content: Some(text),
-                },
-                None => LlmResponse::Text(text),
+            let raw_text = response.content.unwrap_or_default();
+            let cleaned_text = clean_response(&raw_text);
+            let recovered_calls = recover_tool_calls_from_content(&raw_text, &tools);
+
+            if !recovered_calls.is_empty() {
+                let calls: Vec<t3claw_engine::ActionCall> = recovered_calls
+                    .iter()
+                    .map(|tc| t3claw_engine::ActionCall {
+                        id: tc.id.clone(),
+                        action_name: tc.name.clone(),
+                        parameters: tc.arguments.clone(),
+                    })
+                    .collect();
+                let content = if cleaned_text.trim().is_empty() {
+                    None
+                } else {
+                    Some(cleaned_text)
+                };
+                LlmResponse::ActionCalls { calls, content }
+            } else {
+                // Detect ```repl or ```python fenced code blocks after stripping
+                // provider-flattened tool markers from visible text.
+                text_response_from_cleaned_text(cleaned_text)
             }
         };
 
@@ -383,6 +415,7 @@ fn thread_msg_to_chat(msg: &ThreadMessage) -> ChatMessage {
         tool_call_id: msg.action_call_id.clone(),
         name: msg.action_name.clone(),
         tool_calls: None,
+        reasoning: None,
     };
 
     // Convert action calls if present (assistant message with tool calls)
@@ -395,6 +428,8 @@ fn thread_msg_to_chat(msg: &ThreadMessage) -> ChatMessage {
                     name: c.action_name.clone(),
                     arguments: c.parameters.clone(),
                     reasoning: None,
+                    signature: None,
+                    arguments_parse_error: None,
                 })
                 .collect(),
         );
@@ -404,9 +439,21 @@ fn thread_msg_to_chat(msg: &ThreadMessage) -> ChatMessage {
 }
 
 fn action_def_to_tool_def(action: &ActionDef) -> ToolDefinition {
+    let has_discovery_hint = action.discovery_summary().is_some()
+        || action.discovery_schema() != &action.parameters_schema;
+    let description = if has_discovery_hint {
+        format!(
+            "{} (call tool_info(name=\"{}\", detail=\"summary\") for rules/examples or detail=\"schema\" for the full discovery schema)",
+            action.description,
+            action.discovery_name()
+        )
+    } else {
+        action.description.clone()
+    };
+
     ToolDefinition {
         name: action.name.clone(),
-        description: action.description.clone(),
+        description,
         parameters: action.parameters_schema.clone(),
     }
 }
@@ -478,6 +525,25 @@ fn extract_code_block(text: &str) -> Option<String> {
     }
 
     Some(all_code.join("\n\n"))
+}
+
+fn text_response_from_cleaned_text(cleaned_text: String) -> LlmResponse {
+    if t3claw_engine::executor::prompt::codeact_disabled() {
+        if cleaned_text.trim().is_empty() {
+            return LlmResponse::Text(EMPTY_CLEANED_RESPONSE_FALLBACK.to_string());
+        }
+        return LlmResponse::Text(cleaned_text);
+    }
+    match extract_code_block(&cleaned_text) {
+        Some(code) => LlmResponse::Code {
+            code,
+            content: Some(cleaned_text),
+        },
+        None if cleaned_text.trim().is_empty() => {
+            LlmResponse::Text(EMPTY_CLEANED_RESPONSE_FALLBACK.to_string())
+        }
+        None => LlmResponse::Text(cleaned_text),
+    }
 }
 
 /// Heuristic check that a bare ``` block contains Python rather than
@@ -575,12 +641,13 @@ mod tests {
     use t3claw_engine::{ActionCall, ActionDef, EffectType, LlmResponse, ThreadMessage};
 
     use crate::error::LlmError;
-    use crate::llm::ToolCompletionResponse;
+    use t3claw_llm::ToolCompletionResponse;
 
     #[derive(Default)]
     struct CapturingProviderState {
         completion_requests: tokio::sync::Mutex<Vec<Vec<ChatMessage>>>,
         tool_requests: tokio::sync::Mutex<Vec<Vec<ChatMessage>>>,
+        tool_definitions: tokio::sync::Mutex<Vec<Vec<ToolDefinition>>>,
         models: tokio::sync::Mutex<Vec<Option<String>>>,
     }
 
@@ -600,8 +667,8 @@ mod tests {
 
         async fn complete(
             &self,
-            req: crate::llm::CompletionRequest,
-        ) -> Result<crate::llm::CompletionResponse, LlmError> {
+            req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
             self.state.models.lock().await.push(req.model.clone());
             self.state
                 .completion_requests
@@ -609,11 +676,12 @@ mod tests {
                 .await
                 .push(req.messages);
 
-            Ok(crate::llm::CompletionResponse {
+            Ok(t3claw_llm::CompletionResponse {
                 content: "ok".to_string(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: crate::llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
+                reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
             })
@@ -624,6 +692,11 @@ mod tests {
             req: ToolCompletionRequest,
         ) -> Result<ToolCompletionResponse, LlmError> {
             self.state.models.lock().await.push(req.model.clone());
+            self.state
+                .tool_definitions
+                .lock()
+                .await
+                .push(req.tools.clone());
             self.state.tool_requests.lock().await.push(req.messages);
 
             Ok(ToolCompletionResponse {
@@ -631,9 +704,10 @@ mod tests {
                 tool_calls: Vec::new(),
                 input_tokens: 1,
                 output_tokens: 1,
-                finish_reason: crate::llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
+                reasoning: None,
             })
         }
     }
@@ -648,6 +722,8 @@ mod tests {
             }),
             effects: vec![EffectType::ReadExternal],
             requires_approval: false,
+            model_tool_surface: ModelToolSurface::FullSchema,
+            discovery: None,
         }
     }
 
@@ -765,6 +841,248 @@ mod tests {
         assert_eq!(sent[2].name.as_deref(), Some("search"));
     }
 
+    struct FlattenedToolCallProvider {
+        content: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for FlattenedToolCallProvider {
+        fn model_name(&self) -> &str {
+            "flattened-tool-call-provider"
+        }
+
+        fn cost_per_token(&self) -> (Decimal, Decimal) {
+            (Decimal::ZERO, Decimal::ZERO)
+        }
+
+        async fn complete(
+            &self,
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+            unreachable!("test only uses complete_with_tools")
+        }
+
+        async fn complete_with_tools(
+            &self,
+            _req: ToolCompletionRequest,
+        ) -> Result<ToolCompletionResponse, LlmError> {
+            Ok(ToolCompletionResponse {
+                content: Some(self.content.clone()),
+                tool_calls: Vec::new(),
+                input_tokens: 1,
+                output_tokens: 1,
+                finish_reason: t3claw_llm::FinishReason::Stop,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+                reasoning: None,
+            })
+        }
+    }
+
+    #[test]
+    fn action_def_to_tool_def_preserves_tool_info_hint_for_discovery_metadata() {
+        let action = ActionDef {
+            name: "gmail_send".to_string(),
+            description: "Send email".to_string(),
+            parameters_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string" }
+                },
+                "required": ["to"]
+            }),
+            effects: vec![EffectType::WriteExternal],
+            requires_approval: false,
+            model_tool_surface: ModelToolSurface::FullSchema,
+            discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
+                name: "gmail_send".to_string(),
+                summary: Some(t3claw_engine::ActionDiscoverySummary {
+                    notes: vec!["Subject/body rules".to_string()],
+                    ..t3claw_engine::ActionDiscoverySummary::default()
+                }),
+                schema_override: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "to": { "type": "string" },
+                        "subject": { "type": "string" }
+                    },
+                    "required": ["to", "subject"]
+                })),
+            }),
+        };
+
+        let tool_def = action_def_to_tool_def(&action);
+        assert!(
+            tool_def
+                .description
+                .contains("tool_info(name=\"gmail_send\", detail=\"summary\")")
+        );
+        assert!(tool_def.parameters["properties"].get("subject").is_none());
+    }
+
+    #[tokio::test]
+    async fn complete_with_tools_recovers_flattened_bracket_tool_calls() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(FlattenedToolCallProvider {
+            content: "Now let me list your installed extensions and start Pi:\n\n[Called tool `shell` with arguments: {\"command\":\"pi list 2>&1\",\"timeout\":10,\"workdir\":\".\"}]".to_string(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let output = adapter
+            .complete(
+                &[ThreadMessage::user("do it")],
+                &[test_action("shell")],
+                &LlmCallConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        match output.response {
+            LlmResponse::ActionCalls { calls, content } => {
+                assert_eq!(calls.len(), 1);
+                assert_eq!(calls[0].action_name, "shell");
+                assert_eq!(calls[0].parameters["command"], "pi list 2>&1");
+                assert_eq!(
+                    content.as_deref(),
+                    Some("Now let me list your installed extensions and start Pi:")
+                );
+            }
+            other => panic!("expected recovered action call, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_with_tools_strips_flattened_bracket_markers_from_text() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(FlattenedToolCallProvider {
+            content: "Let me check.\n[Called tool `unknown_tool` with arguments: {}]".to_string(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let output = adapter
+            .complete(
+                &[ThreadMessage::user("do it")],
+                &[test_action("shell")],
+                &LlmCallConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        match output.response {
+            LlmResponse::Text(text) => {
+                assert_eq!(text, "Let me check.");
+            }
+            other => panic!("expected sanitized text response, got {other:?}"),
+        }
+    }
+
+    struct FlattenedPlainTextProvider {
+        content: String,
+    }
+
+    #[async_trait]
+    impl LlmProvider for FlattenedPlainTextProvider {
+        fn model_name(&self) -> &str {
+            "flattened-plain-text-provider"
+        }
+
+        fn cost_per_token(&self) -> (Decimal, Decimal) {
+            (Decimal::ZERO, Decimal::ZERO)
+        }
+
+        async fn complete(
+            &self,
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+            Ok(t3claw_llm::CompletionResponse {
+                content: self.content.clone(),
+                input_tokens: 1,
+                output_tokens: 1,
+                finish_reason: t3claw_llm::FinishReason::Stop,
+                reasoning: None,
+                cache_read_input_tokens: 0,
+                cache_creation_input_tokens: 0,
+            })
+        }
+
+        async fn complete_with_tools(
+            &self,
+            _req: ToolCompletionRequest,
+        ) -> Result<ToolCompletionResponse, LlmError> {
+            unreachable!("test only uses plain completion")
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_without_tools_strips_flattened_bracket_markers_from_text() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(FlattenedPlainTextProvider {
+            content: "Let me check.\n[Called tool `shell` with arguments: {}]".to_string(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let output = adapter
+            .complete(
+                &[ThreadMessage::user("do it")],
+                &[],
+                &LlmCallConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        match output.response {
+            LlmResponse::Text(text) => {
+                assert_eq!(text, "Let me check.");
+            }
+            other => panic!("expected sanitized text response, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_with_tools_falls_back_when_cleaned_text_is_empty() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(FlattenedToolCallProvider {
+            content: "[Called tool `unknown_tool` with arguments: {}]".to_string(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let output = adapter
+            .complete(
+                &[ThreadMessage::user("do it")],
+                &[test_action("shell")],
+                &LlmCallConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        match output.response {
+            LlmResponse::Text(text) => {
+                assert_eq!(text, EMPTY_CLEANED_RESPONSE_FALLBACK);
+            }
+            other => panic!("expected fallback text response, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn complete_without_tools_falls_back_when_cleaned_text_is_empty() {
+        let provider: Arc<dyn LlmProvider> = Arc::new(FlattenedPlainTextProvider {
+            content: "[Called tool `shell` with arguments: {}]".to_string(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let output = adapter
+            .complete(
+                &[ThreadMessage::user("do it")],
+                &[],
+                &LlmCallConfig::default(),
+            )
+            .await
+            .unwrap();
+
+        match output.response {
+            LlmResponse::Text(text) => {
+                assert_eq!(text, EMPTY_CLEANED_RESPONSE_FALLBACK);
+            }
+            other => panic!("expected fallback text response, got {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn config_model_forwards_to_completion_request() {
         let state = Arc::new(CapturingProviderState::default());
@@ -794,6 +1112,8 @@ mod tests {
                     parameters_schema: serde_json::json!({"type": "object"}),
                     effects: vec![EffectType::ReadLocal],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
                 }],
                 &config,
             )
@@ -826,6 +1146,146 @@ mod tests {
         let models = state.models.lock().await;
         assert_eq!(models.len(), 1);
         assert_eq!(models[0], None);
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn complete_with_tools_only_emits_full_schema_provider_tools() {
+        // Both this test and `complete_emits_compact_actions_when_codeact_disabled`
+        // read the process-global `T3CLAW_DISABLE_CODEACT` env var. Serialize
+        // via lock_env() and pin the value here so the other test setting
+        // `=true` can't leak across when `cargo test` runs them in parallel.
+        let _guard = crate::config::helpers::lock_env();
+        let original = std::env::var_os("T3CLAW_DISABLE_CODEACT");
+        // SAFETY: serialized via lock_env().
+        unsafe {
+            std::env::remove_var("T3CLAW_DISABLE_CODEACT");
+        }
+
+        let state = Arc::new(CapturingProviderState::default());
+        let provider: Arc<dyn LlmProvider> = Arc::new(CapturingProvider {
+            state: state.clone(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let result = adapter
+            .complete(
+                &[ThreadMessage::user("hi")],
+                &[
+                    ActionDef {
+                        name: "http".into(),
+                        description: "fetch".into(),
+                        parameters_schema: serde_json::json!({"type": "object"}),
+                        effects: vec![EffectType::ReadExternal],
+                        requires_approval: false,
+                        model_tool_surface: ModelToolSurface::FullSchema,
+                        discovery: None,
+                    },
+                    ActionDef {
+                        name: "mission_create".into(),
+                        description: "create mission".into(),
+                        parameters_schema: serde_json::json!({"type": "object"}),
+                        effects: vec![EffectType::WriteLocal],
+                        requires_approval: false,
+                        model_tool_surface: ModelToolSurface::CompactToolInfo,
+                        discovery: None,
+                    },
+                ],
+                &LlmCallConfig::default(),
+            )
+            .await;
+
+        // SAFETY: serialized via lock_env().
+        unsafe {
+            if let Some(value) = original {
+                std::env::set_var("T3CLAW_DISABLE_CODEACT", value);
+            } else {
+                std::env::remove_var("T3CLAW_DISABLE_CODEACT");
+            }
+        }
+
+        result.unwrap();
+
+        let tool_definitions = state.tool_definitions.lock().await;
+        let emitted = tool_definitions.last().expect("tool completion request");
+        let names = emitted
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, vec!["http"]);
+    }
+
+    /// PR #3665 review (serrrfirat). Disabled-CodeAct mode strips the Python
+    /// escape hatch, so any callable action MUST be reachable via the
+    /// provider's structured `tool_calls`. Filtering down to FullSchema in
+    /// that mode left compact actions (`mission_create`, `gmail_send`, ...)
+    /// visible in the prompt but absent from the provider tool list — i.e.
+    /// unreachable. This test pins the relaxed filter.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn complete_emits_compact_actions_when_codeact_disabled() {
+        let _guard = crate::config::helpers::lock_env();
+        let original = std::env::var_os("T3CLAW_DISABLE_CODEACT");
+        // SAFETY: serialized via lock_env().
+        unsafe {
+            std::env::set_var("T3CLAW_DISABLE_CODEACT", "true");
+        }
+
+        let state = Arc::new(CapturingProviderState::default());
+        let provider: Arc<dyn LlmProvider> = Arc::new(CapturingProvider {
+            state: state.clone(),
+        });
+        let adapter = LlmBridgeAdapter::new(provider, None);
+
+        let result = adapter
+            .complete(
+                &[ThreadMessage::user("hi")],
+                &[
+                    ActionDef {
+                        name: "http".into(),
+                        description: "fetch".into(),
+                        parameters_schema: serde_json::json!({"type": "object"}),
+                        effects: vec![EffectType::ReadExternal],
+                        requires_approval: false,
+                        model_tool_surface: ModelToolSurface::FullSchema,
+                        discovery: None,
+                    },
+                    ActionDef {
+                        name: "mission_create".into(),
+                        description: "create mission".into(),
+                        parameters_schema: serde_json::json!({"type": "object"}),
+                        effects: vec![EffectType::WriteLocal],
+                        requires_approval: false,
+                        model_tool_surface: ModelToolSurface::CompactToolInfo,
+                        discovery: None,
+                    },
+                ],
+                &LlmCallConfig::default(),
+            )
+            .await;
+
+        // SAFETY: serialized via lock_env().
+        unsafe {
+            if let Some(value) = original {
+                std::env::set_var("T3CLAW_DISABLE_CODEACT", value);
+            } else {
+                std::env::remove_var("T3CLAW_DISABLE_CODEACT");
+            }
+        }
+
+        result.expect("adapter.complete should succeed");
+
+        let tool_definitions = state.tool_definitions.lock().await;
+        let emitted = tool_definitions.last().expect("tool completion request");
+        let mut names: Vec<&str> = emitted.iter().map(|t| t.name.as_str()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["http", "mission_create"],
+            "disabled-CodeAct must emit BOTH FullSchema and CompactToolInfo actions \
+             — otherwise compact actions are unreachable"
+        );
     }
 
     // ── extract_code_block tests ────────────────────────────
@@ -1214,8 +1674,8 @@ And also check the token price:\n\
         }
         async fn complete(
             &self,
-            _req: crate::llm::CompletionRequest,
-        ) -> Result<crate::llm::CompletionResponse, LlmError> {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
             unreachable!("should use complete_with_tools")
         }
         async fn complete_with_tools(
@@ -1226,7 +1686,7 @@ And also check the token price:\n\
             // a prior tool result's project_id via template ref.
             Ok(ToolCompletionResponse {
                 content: Some("Creating mission in the new project".to_string()),
-                tool_calls: vec![crate::llm::ToolCall {
+                tool_calls: vec![t3claw_llm::ToolCall {
                     id: "call-2".to_string(),
                     name: "mission_create".to_string(),
                     arguments: serde_json::json!({
@@ -1235,12 +1695,15 @@ And also check the token price:\n\
                         "project_id": "{{call-1.project_id}}"
                     }),
                     reasoning: None,
+                    signature: None,
+                    arguments_parse_error: None,
                 }],
                 input_tokens: 10,
                 output_tokens: 10,
-                finish_reason: crate::llm::FinishReason::ToolUse,
+                finish_reason: t3claw_llm::FinishReason::ToolUse,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
+                reasoning: None,
             })
         }
     }
@@ -1322,13 +1785,14 @@ And also check the token price:\n\
         }
         async fn complete(
             &self,
-            _req: crate::llm::CompletionRequest,
-        ) -> Result<crate::llm::CompletionResponse, LlmError> {
-            Ok(crate::llm::CompletionResponse {
+            _req: t3claw_llm::CompletionRequest,
+        ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+            Ok(t3claw_llm::CompletionResponse {
                 content: "hello".to_string(),
                 input_tokens: 1000,
                 output_tokens: 500,
-                finish_reason: crate::llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
+                reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
             })
@@ -1342,9 +1806,10 @@ And also check the token price:\n\
                 tool_calls: Vec::new(),
                 input_tokens: 1000,
                 output_tokens: 500,
-                finish_reason: crate::llm::FinishReason::Stop,
+                finish_reason: t3claw_llm::FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
+                reasoning: None,
             })
         }
     }
@@ -1411,13 +1876,14 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: crate::llm::CompletionRequest,
-            ) -> Result<crate::llm::CompletionResponse, LlmError> {
-                Ok(crate::llm::CompletionResponse {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 1000,
                     output_tokens: 500,
-                    finish_reason: crate::llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
+                    reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                 })
@@ -1470,13 +1936,14 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: crate::llm::CompletionRequest,
-            ) -> Result<crate::llm::CompletionResponse, LlmError> {
-                Ok(crate::llm::CompletionResponse {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 10_000,
                     output_tokens: 5_000,
-                    finish_reason: crate::llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
+                    reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                 })
@@ -1538,15 +2005,16 @@ And also check the token price:\n\
             }
             async fn complete(
                 &self,
-                _req: crate::llm::CompletionRequest,
-            ) -> Result<crate::llm::CompletionResponse, LlmError> {
+                _req: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, LlmError> {
                 // Total input = 10_000; 2_000 cache-read, 1_000 cache-write,
                 // 7_000 uncached. Output = 500.
-                Ok(crate::llm::CompletionResponse {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".into(),
                     input_tokens: 10_000,
                     output_tokens: 500,
-                    finish_reason: crate::llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
+                    reasoning: None,
                     cache_read_input_tokens: 2_000,
                     cache_creation_input_tokens: 1_000,
                 })

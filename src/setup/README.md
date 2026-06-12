@@ -16,7 +16,7 @@ t3claw onboard [--skip-auth] [--channels-only] [--provider-only] [--quick]
 Explicit invocation. Loads `.env` files, runs the wizard, exits.
 
 ```
-ironclaw          (first run, no database configured)
+t3claw          (first run, no database configured)
 ```
 
 Auto-detection via `check_onboard_needed()` in `main.rs`. Skips onboarding
@@ -29,6 +29,20 @@ the wizard). Otherwise triggers when no database is configured:
 Auto-triggered onboarding uses **quick mode** by default.
 
 The `--no-onboard` CLI flag suppresses auto-detection.
+
+### Reborn Standalone Onboarding
+
+```
+t3claw-reborn onboard [--force] [--dry-run] [--import-history]
+```
+
+This command is owned by the standalone Reborn binary, not by `src/setup`.
+It initializes `T3CLAW_REBORN_HOME` / `~/.t3claw/reborn`, creates or
+preserves Reborn `config.toml` and `providers.json`, and writes the Reborn
+`.onboard-completed.json` marker without reading or mutating v1 database,
+channel, settings, or setup state. The detailed Reborn-specific contract lives
+in `docs/reborn/onboarding.md`; changes to `t3claw-reborn onboard` should keep
+that document and this boundary note in sync.
 
 ---
 
@@ -68,13 +82,13 @@ Step 2/2: Model Selection     ← interactive unless defaulted by detected provi
    save_and_summarize()      → includes tip to run `t3claw onboard`
 ```
 
-**Local usage profile:** If `IRONCLAW_PROFILE` is already set, quick mode
+**Local usage profile:** If `T3CLAW_PROFILE` is already set, quick mode
 respects it and does not prompt. On a true first run with no profile and no
 existing DB settings, quick mode asks whether the user wants:
 - `local`: TUI, local libSQL, background tasks enabled, no Docker sandbox
 - `local-sandbox`: TUI, local libSQL, background tasks enabled, Docker sandbox enabled with read-only policy
 
-The selected profile is written to `~/.t3claw/.env` as `IRONCLAW_PROFILE`
+The selected profile is written to `~/.t3claw/.env` as `T3CLAW_PROFILE`
 so subsequent startups apply the same built-in profile before database-backed
 settings are loaded.
 
@@ -122,6 +136,10 @@ with the running assistant (not during the wizard). The `## First-Run Bootstrap`
 `src/workspace/mod.rs` injects onboarding instructions from `BOOTSTRAP.md` into the system
 prompt on first run. Once the agent writes a profile via `memory_write` and deletes
 `BOOTSTRAP.md`, the block stops injecting.
+
+**Web UI onboarding** (`/onboarding` in WebUI v2) presents a curated provider
+picker for first-run browser users. NEAR AI setup offers both API-key entry and
+SSO; SSO choices (NEAR Wallet, GitHub, Google) are kept behind the setup menu.
 
 ---
 
@@ -357,6 +375,11 @@ key first, then falls back to the standard env var.
 - Reads `capabilities.json` for `setup.required_secrets`
 - For each secret: check existing, prompt or auto-generate, validate regex
 - Save each secret via `SecretsContext`
+- For WeCom, additionally prompts for non-secret runtime preferences such as
+  DM admission policy, optional sender allowlist, and inbound media merge
+  window. These values are persisted as
+  `settings.channels.wasm_channel_runtime_overrides.wecom:<key>` entries and
+  merged back into the channel runtime config during activation/reconfiguration.
 - Persist selected channel names in `settings.channels.wasm_channels` as a
   first-run startup fallback. Once the running app writes
   `activated_channels`, that runtime state becomes the authoritative restore
@@ -437,7 +460,7 @@ Contains only the settings needed BEFORE database connection. Written by
 `write_bootstrap_env()` in `wizard.rs` via `upsert_bootstrap_vars()`.
 
 ```env
-IRONCLAW_PROFILE="local"
+T3CLAW_PROFILE="local"
 DATABASE_BACKEND="libsql"
 LIBSQL_PATH="/Users/name/.t3claw/t3claw.db"
 SECRETS_MASTER_KEY="..."   # only if env key source selected
@@ -446,7 +469,7 @@ ONBOARD_COMPLETED="true"
 
 Or for PostgreSQL:
 ```env
-IRONCLAW_PROFILE="local"
+T3CLAW_PROFILE="local"
 DATABASE_BACKEND="postgres"
 DATABASE_URL="postgres://user:pass@localhost/t3claw"
 SECRETS_MASTER_KEY="..."
@@ -454,7 +477,7 @@ ONBOARD_COMPLETED="true"
 ```
 
 **Why separate?** Chicken-and-egg: you need `DATABASE_BACKEND` to know
-which database to connect to, `IRONCLAW_PROFILE` to apply built-in defaults
+which database to connect to, `T3CLAW_PROFILE` to apply built-in defaults
 before DB overlays, and `SECRETS_MASTER_KEY` to decrypt the
 secrets store; none of these can rely on database settings. LLM settings
 (`LLM_BACKEND`, base URLs, model names) are persisted to the DB via
@@ -523,7 +546,7 @@ Final step of the wizard:
 
 Bootstrap vars written to `~/.t3claw/.env` (only true chicken-and-egg vars
 that are needed before the DB is connected):
-- `IRONCLAW_PROFILE` (when quick first-run setup selected a profile)
+- `T3CLAW_PROFILE` (when quick first-run setup selected a profile)
 - `DATABASE_BACKEND` (always)
 - `DATABASE_URL` (if postgres)
 - `LIBSQL_PATH` (if libsql)
@@ -683,11 +706,11 @@ local browser.
    and the encrypted secrets store. Uses the OpenAI-compatible
    ChatCompletions API mode.
 
-2. **Custom callback URL:** Set `IRONCLAW_OAUTH_CALLBACK_URL` to a
+2. **Custom callback URL:** Set `T3CLAW_OAUTH_CALLBACK_URL` to a
    publicly accessible URL (e.g., via SSH tunnel or reverse proxy) that
    forwards to port 9876 on the server:
    ```bash
-   export IRONCLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
+   export T3CLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
    ```
 
 The `callback_url()` function in `src/auth/oauth.rs` checks this env var

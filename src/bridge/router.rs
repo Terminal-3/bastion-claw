@@ -7,18 +7,20 @@ use tokio::sync::RwLock;
 use tracing::debug;
 
 use t3claw_engine::{
-    Capability, CapabilityRegistry, ConversationManager, LeaseManager, MissionManager,
-    PolicyEngine, Project, Store, ThreadConfig, ThreadManager, ThreadOutcome,
+    Capability, CapabilityRegistry, ConversationManager, EffectExecutor, LeaseManager,
+    MissionManager, PolicyEngine, Project, Store, ThreadConfig, ThreadManager, ThreadOutcome,
 };
 
 use t3claw_common::AppEvent;
 use t3claw_engine::types::{is_shared_owner, shared_owner_id};
 
 use crate::agent::Agent;
-use crate::bridge::auth_manager::AuthManager;
+use crate::auth::extension::AuthManager;
 use crate::bridge::effect_adapter::EffectBridgeAdapter;
+use crate::bridge::engine_actions::mission_capability_actions;
 use crate::bridge::llm_adapter::LlmBridgeAdapter;
 use crate::bridge::store_adapter::HybridStore;
+use crate::channels::web::GATEWAY_CHANNEL_NAME;
 use crate::channels::web::sse::SseManager;
 use crate::channels::{IncomingMessage, OutgoingResponse, StatusUpdate};
 use crate::db::Database;
@@ -46,6 +48,18 @@ pub enum BridgeOutcome {
 
 use std::collections::HashSet;
 
+/// Cadence of the external-tool catalog sweep. Backstop only — the
+/// per-thread terminal-state cleanup in `await_thread_outcome` is
+/// the primary cleanup path. Five minutes is short enough to keep
+/// memory bounded without producing visible churn for normal usage.
+const EXTERNAL_TOOL_CATALOG_SWEEP_INTERVAL: std::time::Duration =
+    std::time::Duration::from_secs(5 * 60);
+
+/// Maximum age for a catalog entry before the periodic sweep evicts
+/// it. One hour matches typical pending-gate TTLs and gives callers
+/// plenty of headroom to resume a paused tool call.
+const EXTERNAL_TOOL_CATALOG_TTL: chrono::Duration = chrono::Duration::hours(1);
+
 /// Check if the engine v2 is enabled via `ENGINE_V2=true` environment variable.
 pub fn is_engine_v2_enabled() -> bool {
     std::env::var("ENGINE_V2")
@@ -68,17 +82,54 @@ fn engine_err(context: &str, e: impl std::fmt::Display) -> Error {
 /// in the server-side logs and returns a short, user-facing summary
 /// derived from the error's shape.
 ///
+/// `sse_will_deliver_to_user` signals that the caller already broadcast
+/// an `AppEvent::Error` on a per-user SSE stream that the originating
+/// channel renders to the user (today: the web gateway). In that case
+/// returning `Respond(sanitized)` would double-render the same failed
+/// turn — once as the SSE error card and again as a normal `response`
+/// frame emitted by `GatewayChannel::respond()`. When set we return
+/// `NoResponse`; otherwise we return `Respond(sanitized)` so channels
+/// without an SSE-as-primary-surface (telegram, relay, cli) still
+/// deliver the sanitized failure to the user.
+///
 /// Extracted into a named function so the sanitization flow (log + map to
 /// user-friendly text + wrap in `BridgeOutcome`) can be exercised end-to-end
 /// by unit tests without spinning up the full engine.
-fn bridge_outcome_for_failed_thread(error: &str, user_id: &str, channel: &str) -> BridgeOutcome {
+fn bridge_outcome_for_failed_thread(
+    error: &str,
+    debug_detail: Option<&str>,
+    user_id: &str,
+    channel: &str,
+    sse_will_deliver_to_user: bool,
+) -> BridgeOutcome {
+    // `warn!` carries only the size of `debug_detail`, not its contents —
+    // a full Python traceback or upstream HTTP body can be multi-KB and
+    // would flood higher-severity logs with internal text that's already
+    // available at `debug!` level. Operators who need the full detail
+    // flip `RUST_LOG=t3claw::bridge::router=debug`. The chat reply
+    // stays sanitized per `.claude/rules/error-handling.md`, and
+    // `debug_detail` is deliberately NOT broadcast on the SSE `error`
+    // event — that payload reaches every authenticated consumer.
     tracing::warn!(
         user_id = %user_id,
         channel = %channel,
         error = %error,
+        debug_detail_bytes = debug_detail.map(|d| d.len()),
         "engine v2: thread failed; showing user-friendly summary",
     );
-    BridgeOutcome::Respond(crate::bridge::user_facing_errors::user_facing_thread_failure(error))
+    if let Some(detail) = debug_detail {
+        tracing::debug!(
+            user_id = %user_id,
+            channel = %channel,
+            detail,
+            "engine v2: thread failure debug detail",
+        );
+    }
+    if sse_will_deliver_to_user {
+        BridgeOutcome::NoResponse
+    } else {
+        BridgeOutcome::Respond(crate::bridge::user_facing_errors::user_facing_thread_failure(error))
+    }
 }
 
 const PROJECT_ATTACHMENT_DIR: &str = ".t3claw/attachments";
@@ -315,7 +366,7 @@ async fn save_attachment_index_notes(
     }
 }
 
-fn gate_display_parameters(pending: &PendingGate) -> serde_json::Value {
+pub(super) fn gate_display_parameters(pending: &PendingGate) -> serde_json::Value {
     pending
         .display_parameters
         .clone()
@@ -360,7 +411,7 @@ async fn resolve_extension_for_action(
     // test harness): delegate to the same canonical resolver used by the
     // auth-manager path so the extension-manager branch of the precedence
     // still runs instead of falling through to a stringly credential name.
-    crate::bridge::auth_manager::resolve_auth_flow_extension_name(
+    crate::auth::extension::resolve_auth_flow_extension_name(
         action_name,
         parameters,
         credential_fallback,
@@ -378,7 +429,7 @@ async fn resolve_extension_for_action(
 /// resolver delegates to [`resolve_extension_for_action`]. Non-auth
 /// gate variants (`Approval`, `External`) don't have an extension
 /// identity and return `None`.
-async fn resolve_auth_gate_extension_name(
+pub(super) async fn resolve_auth_gate_extension_name(
     auth_manager: Option<&AuthManager>,
     extension_manager: Option<&crate::extensions::ExtensionManager>,
     tools: &crate::tools::ToolRegistry,
@@ -471,6 +522,38 @@ fn resumed_action_result_message(
 ) -> t3claw_engine::ThreadMessage {
     let rendered = serde_json::to_string_pretty(output).unwrap_or_else(|_| output.to_string());
     t3claw_engine::ThreadMessage::action_result(call_id, action_name, rendered)
+}
+
+/// Extract the tool output for `call_id` from a Responses API
+/// `function_call_output` resolution payload. The handler builds the
+/// payload as `{"outputs": [{"call_id": ..., "output": <string|json>}]}`.
+/// Falls back to:
+/// - the raw payload when no `outputs` array is present (defensive
+///   path for callers that pass a plain JSON value), and
+/// - `Value::Null` when the payload doesn't contain a matching call_id
+///   at all (lets the LLM see "the caller returned nothing for this
+///   call" rather than re-running the tool).
+fn extract_external_tool_output(payload: &serde_json::Value, call_id: &str) -> serde_json::Value {
+    let outputs = payload.get("outputs").and_then(|v| v.as_array());
+    if let Some(arr) = outputs {
+        for entry in arr {
+            let entry_call_id = entry.get("call_id").and_then(|v| v.as_str());
+            if entry_call_id == Some(call_id)
+                && let Some(out) = entry.get("output")
+            {
+                return out.clone();
+            }
+        }
+        // No matching call_id: surface a typed null so the LLM sees
+        // an explicit empty result rather than the (possibly stale)
+        // raw payload.
+        return serde_json::Value::Null;
+    }
+
+    // No `outputs` array at all — treat the whole payload as the
+    // result (matches OAuth callbacks that historically passed a
+    // raw value as the resolution).
+    payload.clone()
 }
 
 /// Resolve the assistant action `call_id` that a pending gate corresponds to.
@@ -644,12 +727,51 @@ async fn notify_pending_gate(
     let extension_name =
         resolve_auth_gate_extension_name(auth_manager, extension_manager, tools, pending).await;
 
+    // External-tool gates (Responses API caller-executed tools) project
+    // to a dedicated `AppEvent::ExternalToolCall` so the Responses API
+    // accumulator can surface them as `function_call` items without
+    // re-rendering them as approval cards. OAuth/pairing callbacks
+    // (which also use `ResumeKind::External` but with a different
+    // callback_id prefix) keep flowing through the standard
+    // `AppEvent::GateRequired` path.
     if let t3claw_engine::ResumeKind::External { callback_id } = &pending.resume_kind {
         tracing::debug!(
             gate = %pending.gate_name,
             callback = %callback_id,
             "GatePaused(External)"
         );
+        if crate::bridge::is_external_tool_callback_id(callback_id) {
+            if let Some(ref sse) = sse {
+                let arguments = serde_json::to_string(&pending.parameters)
+                    .unwrap_or_else(|_| pending.parameters.to_string());
+                let event = AppEvent::ExternalToolCall {
+                    request_id: pending.request_id.to_string(),
+                    call_id: pending.call_id.clone(),
+                    name: pending.action_name.clone(),
+                    arguments,
+                    thread_id: Some(pending.effective_wire_thread_id()),
+                };
+                sse.broadcast_for_user(&message.user_id, event); // projection-exempt: bridge dispatcher, ResumeKind::External(ext_tool) → Responses API function_call surface
+            } else {
+                // Today every external-tool flow runs through the
+                // gateway, which always wires SSE — so this branch
+                // means a future channel grew an external-tool surface
+                // without an SSE-equivalent fan-out, and the caller
+                // would never learn that the thread paused. Log so
+                // we can diagnose instead of silently hanging.
+                tracing::debug!(
+                    user_id = %message.user_id,
+                    callback = %callback_id,
+                    request_id = %pending.request_id,
+                    "external tool gate paused but no broadcaster is wired; \
+                     caller will not be notified"
+                );
+            }
+            // Don't run `send_pending_gate_status` — that path is for
+            // approval-card UX which doesn't apply to caller-executed
+            // tool calls.
+            return Ok(BridgeOutcome::Pending);
+        }
     }
 
     // Send the approval/auth card via the source channel. Each channel
@@ -809,6 +931,19 @@ async fn persist_always_allow(
     state: &EngineState,
     pending: &PendingGate,
 ) -> Option<serde_json::Value> {
+    persist_always_allow_with_store(agent.deps.settings_store.as_deref(), state, pending).await
+}
+
+/// Same as [`persist_always_allow`] but takes the settings store directly
+/// rather than reaching through `&Agent`. Lets the gateway HTTP fast-path
+/// (`try_resolve_inline_approval_gate`) install the AlwaysAllow preference
+/// without an `Agent` reference, since the agent-loop mpsc is the very
+/// thing that path is bypassing.
+async fn persist_always_allow_with_store(
+    settings_store: Option<&(dyn crate::db::SettingsStore + Send + Sync)>,
+    state: &EngineState,
+    pending: &PendingGate,
+) -> Option<serde_json::Value> {
     // Validate tool name before using it as a settings key. Reject names
     // that contain dots or other characters that could collide with the
     // dotted-path settings namespace.
@@ -849,8 +984,8 @@ async fn persist_always_allow(
     // stale data until the 5-minute TTL expires. In production the settings
     // store is always available when the DB is; the fallback was dead code
     // that actively broke cache coherence in tests and edge deployments.
-    let store: &(dyn crate::db::SettingsStore + Send + Sync) = match &agent.deps.settings_store {
-        Some(ss) => ss.as_ref(),
+    let store: &(dyn crate::db::SettingsStore + Send + Sync) = match settings_store {
+        Some(ss) => ss,
         None => return None,
     };
 
@@ -900,8 +1035,19 @@ async fn revert_always_allow(
     pending: &PendingGate,
     prior: Option<serde_json::Value>,
 ) {
-    let store: &(dyn crate::db::SettingsStore + Send + Sync) = match &agent.deps.settings_store {
-        Some(ss) => ss.as_ref(),
+    revert_always_allow_with_store(agent.deps.settings_store.as_deref(), pending, prior).await
+}
+
+/// Same as [`revert_always_allow`] but takes the settings store directly.
+/// Pairs with [`persist_always_allow_with_store`] for the gateway HTTP
+/// fast-path that bypasses the agent-loop mpsc.
+async fn revert_always_allow_with_store(
+    settings_store: Option<&(dyn crate::db::SettingsStore + Send + Sync)>,
+    pending: &PendingGate,
+    prior: Option<serde_json::Value>,
+) {
+    let store: &(dyn crate::db::SettingsStore + Send + Sync) = match settings_store {
+        Some(ss) => ss,
         None => return,
     };
 
@@ -1032,7 +1178,7 @@ async fn execute_pending_gate_action(
             )
         })?;
 
-    let exec_ctx = t3claw_engine::ThreadExecutionContext {
+    let mut exec_ctx = t3claw_engine::ThreadExecutionContext {
         thread_id: pending.thread_id,
         thread_type: thread.thread_type,
         project_id: thread.project_id,
@@ -1046,7 +1192,48 @@ async fn execute_pending_gate_action(
             .and_then(|v| v.as_str())
             .and_then(t3claw_engine::ValidTimezone::parse),
         thread_goal: Some(thread.goal.clone()),
+        available_actions_snapshot: None,
+        available_action_inventory_snapshot: None,
+        conversation_scope: None,
+        // Post-resolution replay: the gate has already been resolved
+        // upstream, so a real controller is unnecessary. The inert
+        // controller surfaces any unexpected re-gate as a typed denial
+        // rather than reproducing the pre-fix unwind bug.
+        gate_controller: t3claw_engine::CancellingGateController::arc(),
+        // The legacy resolved-pending path passes its own
+        // `approval_already_granted` to `execute_resolved_pending_action`
+        // directly, so this field is irrelevant for that path. Reset
+        // here to keep the default obvious.
+        call_approval_granted: false,
+        // Post-resolution replay never triggers a fresh inline gate;
+        // the conversation routing is moot here.
+        conversation_id: None,
     };
+    let active_leases = state
+        .thread_manager
+        .leases
+        .active_for_thread(thread.id)
+        .await;
+    match state
+        .effect_adapter
+        .available_action_inventory(&active_leases, &exec_ctx)
+        .await
+    {
+        Ok(inventory) => {
+            let inventory = Arc::new(inventory);
+            let available_actions: Arc<[t3claw_engine::ActionDef]> =
+                inventory.inline.clone().into();
+            exec_ctx.available_actions_snapshot = Some(available_actions);
+            exec_ctx.available_action_inventory_snapshot = Some(inventory);
+        }
+        Err(error) => {
+            debug!(
+                thread_id = %thread.id,
+                action = %pending.action_name,
+                "failed to load action inventory for pending gate resume: {error}"
+            );
+        }
+    }
 
     state.effect_adapter.reset_call_count();
     match state
@@ -1181,6 +1368,40 @@ async fn resolve_user_project(
     Ok(pid)
 }
 
+/// Returns a clone of the live `ExternalToolCatalog` if the engine
+/// state has been initialized, or `None` if the engine has not started
+/// yet (engine_v2 disabled, or first message hasn't arrived). The
+/// Responses API handler uses this to register caller-supplied tools
+/// before sending the user message into the agent loop.
+pub async fn engine_external_tool_catalog() -> Option<Arc<crate::bridge::ExternalToolCatalog>> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    guard.as_ref().map(|s| Arc::clone(&s.external_tool_catalog))
+}
+
+/// Action names that are dispatchable via the engine v2 capability
+/// registry (`mission_*`, `skill_*`, `memory_*`, etc.). Used by the
+/// Responses API handler to reject caller-supplied tools whose names
+/// would shadow internal engine actions — the `tool_registry` check
+/// alone catches built-in and extension tools but misses capability
+/// actions, which can land in the catalog short-circuit even though
+/// the LLM-visible inventory dedup hides them.
+///
+/// Returns `None` if engine v2 is not initialised; callers treat that
+/// the same as "no engine v2 actions to collide with".
+pub async fn engine_capability_action_names() -> Option<Vec<String>> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    let state = guard.as_ref()?;
+    let names: Vec<String> = state
+        .capability_registry
+        .list()
+        .into_iter()
+        .flat_map(|cap| cap.actions.iter().map(|a| a.name.clone()))
+        .collect();
+    Some(names)
+}
+
 /// Persistent engine state that lives across messages.
 struct EngineState {
     thread_manager: Arc<ThreadManager>,
@@ -1202,6 +1423,28 @@ struct EngineState {
     extension_manager: Option<Arc<crate::extensions::ExtensionManager>>,
     /// Filesystem root for project-local attachment persistence.
     project_root: PathBuf,
+    /// Per-thread catalog of caller-provided external tools (Responses
+    /// API). Shared by `Arc` clone with the effect adapter (which
+    /// reads it during action listing and dispatch) and the Responses
+    /// API handler (which writes to it before sending the request to
+    /// the agent loop).
+    external_tool_catalog: Arc<crate::bridge::ExternalToolCatalog>,
+    /// Engine v2 capability registry. Held here (in addition to the
+    /// `effect_adapter`'s internal handle) so the Responses API
+    /// handler can enumerate internal action names and reject
+    /// caller-supplied tools that would shadow them.
+    capability_registry: Arc<t3claw_engine::CapabilityRegistry>,
+    /// Inline gate-await controller. Lets the engine pause Tier 0 and
+    /// Tier 1 executions in place on `Approval` and `Authentication`
+    /// gates, rather than unwinding back to the orchestrator and
+    /// re-entering on resume (which would re-execute earlier
+    /// non-idempotent tool calls).
+    gate_controller: Arc<crate::bridge::gate_controller::BridgeGateController>,
+    /// Process-wide registry of in-flight gate resolution channels.
+    /// Held alongside `gate_controller` so the OAuth-callback path can
+    /// wake parked Authentication waiters by credential name without
+    /// going through the controller's internals.
+    gate_resolutions: Arc<crate::bridge::gate_controller::GateResolutions>,
 }
 
 /// Global engine state, initialized on first use.
@@ -1221,6 +1464,20 @@ fn parse_engine_thread_id(scope: Option<&str>) -> Option<t3claw_engine::ThreadId
 
 fn parse_scope_uuid(scope: Option<&str>) -> Option<uuid::Uuid> {
     scope.and_then(|s| uuid::Uuid::parse_str(s).ok())
+}
+
+async fn resolve_v1_conversation_for_message(
+    db: &Arc<dyn crate::db::Database>,
+    message: &IncomingMessage,
+) -> Result<uuid::Uuid, crate::error::DatabaseError> {
+    if let Some(scope) = message.conversation_scope() {
+        return db
+            .get_or_create_scoped_conversation(&message.user_id, &message.channel, scope)
+            .await;
+    }
+
+    db.get_or_create_assistant_conversation(&message.user_id, &message.channel)
+        .await
 }
 
 async fn reconcile_pending_gate_state(
@@ -1562,126 +1819,7 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
     capabilities.register(Capability {
         name: "missions".into(),
         description: "Mission and routine lifecycle management".into(),
-        actions: vec![
-            t3claw_engine::ActionDef {
-                name: "mission_create".into(),
-                description: "Create a new mission (routine). Use only when the user explicitly wants to set up a recurring task, scheduled check, automation, monitor, or persistent manual mission. Do not use for immediate one-shot requests like 'do it now', 'right now', or 'immediately'; complete those in the current thread. Results are delivered to the current channel by default.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Short name for the mission/routine"},
-                        "goal": {"type": "string", "description": "What this mission should accomplish each run"},
-                        "cadence": {"type": "string", "description": "Required. How to trigger: 'manual', a cron expression (e.g. '0 9 * * *'), 'event:<channel>:<regex_pattern>' (e.g. 'event:telegram:.*', use 'event:*:<pattern>' for any channel), or 'webhook:<path>'"},
-                        "timezone": {"type": "string", "description": "IANA timezone for cron scheduling (e.g. 'America/New_York'). Defaults to the user's channel timezone."},
-                        "notify_channels": {"type": "array", "items": {"type": "string"}, "description": "Channels to deliver results to (e.g. ['gateway', 'repl']). Defaults to current channel."},
-                        "project_id": {"type": "string", "description": "Project ID to scope this mission to. If omitted, uses the current thread's project."},
-                        "cooldown_secs": {"type": "integer", "minimum": 0, "description": "Minimum seconds between triggers (default: 300 for event/webhook, 0 for cron/manual)"},
-                        "max_concurrent": {"type": "integer", "minimum": 0, "description": "Max simultaneous running threads (default: 1 for event/webhook, unlimited for cron/manual)"},
-                        "dedup_window_secs": {"type": "integer", "minimum": 0, "description": "Suppress duplicate event triggers within this window in seconds (default: 0)"},
-                        "max_threads_per_day": {"type": "integer", "minimum": 0, "description": "Daily thread budget (default: 24 for event/webhook, 10 for cron/manual)"},
-                        "success_criteria": {"type": "string", "description": "Criteria for declaring mission complete"}
-                    },
-                    "required": ["name", "goal", "cadence"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_list".into(),
-                description: "List all missions and routines in the current project.".into(),
-                parameters_schema: serde_json::json!({"type": "object"}),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_get".into(),
-                description: "Get detailed status and results of a specific mission or routine. Returns the mission state, approach history, and recent thread outputs. Use when the user asks about mission results, outcome, or progress.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to retrieve"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_fire".into(),
-                description: "Manually trigger a mission or routine to run immediately.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to trigger"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_pause".into(),
-                description: "Pause a running mission or routine.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to pause"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_resume".into(),
-                description: "Resume a paused mission or routine.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to resume"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_update".into(),
-                description: "Update a mission/routine. Change name, goal, cadence, guardrails, notification channels, daily budget, or success criteria. Only provided fields are changed.".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to update"},
-                        "name": {"type": "string", "description": "New name"},
-                        "goal": {"type": "string", "description": "New goal"},
-                        "cadence": {"type": "string", "description": "New cadence: 'manual', cron expression (e.g. '0 9 * * *'), 'event:<channel>:<regex_pattern>' (e.g. 'event:telegram:.*', use 'event:*:<pattern>' for any channel), or 'webhook:<path>'"},
-                        "timezone": {"type": "string", "description": "IANA timezone for cron scheduling (e.g. 'America/New_York'). Defaults to the user's channel timezone."},
-                        "notify_channels": {"type": "array", "items": {"type": "string"}, "description": "Channels to deliver results to (e.g. ['gateway', 'repl'])"},
-                        "max_threads_per_day": {"type": "integer", "minimum": 0, "description": "Max threads per day (0 = unlimited)"},
-                        "cooldown_secs": {"type": "integer", "minimum": 0, "description": "Minimum seconds between triggers"},
-                        "max_concurrent": {"type": "integer", "minimum": 0, "description": "Max simultaneous running threads"},
-                        "dedup_window_secs": {"type": "integer", "minimum": 0, "description": "Suppress duplicate event triggers within this window in seconds"},
-                        "success_criteria": {"type": "string", "description": "Criteria for declaring mission complete"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-            t3claw_engine::ActionDef {
-                name: "mission_complete".into(),
-                description: "Mark a mission or routine as completed (sets status to completed).".into(),
-                parameters_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string", "description": "Mission/routine ID to mark completed"}
-                    },
-                    "required": ["id"]
-                }),
-                effects: vec![],
-                requires_approval: false,
-            },
-        ],
+        actions: mission_capability_actions(),
         knowledge: vec![],
         policies: vec![],
     });
@@ -1704,7 +1842,7 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
         llm_adapter,
         effect_adapter.clone(),
         store_dyn.clone(),
-        capabilities,
+        Arc::clone(&capabilities),
         leases,
         policy,
     ));
@@ -1812,6 +1950,9 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
         let sse_ref = agent.deps.sse_tx.clone();
         let db_ref = agent.deps.store.clone();
         let conv_mgr_ref = Arc::clone(&conversation_manager);
+        let auth_mgr_ref = agent.deps.auth_manager.clone();
+        let tools_ref = Arc::clone(&agent.deps.tools);
+        let ext_mgr_ref = agent.deps.extension_manager.clone();
         tokio::spawn(async move {
             loop {
                 match notification_rx.recv().await {
@@ -1822,6 +1963,9 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
                             sse_ref.as_ref(),
                             db_ref.as_ref(),
                             Some(conv_mgr_ref.as_ref()),
+                            auth_mgr_ref.as_deref(),
+                            Some(&tools_ref),
+                            ext_mgr_ref.as_deref(),
                         )
                         .await;
                     }
@@ -1950,9 +2094,66 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
     if let Err(e) = pending_gates.restore_from_persistence().await {
         debug!("engine v2: failed to restore pending gates: {e}");
     }
+    // Restart sweep: any in-flight Approval gate from a prior boot has
+    // lost its in-memory await receiver. Falling through to legacy
+    // re-entry would re-run the LLM step and double-execute non-idempotent
+    // earlier tool calls in the same script (the very bug the inline-await
+    // path exists to prevent). Drop them at startup so the user gets a
+    // clean retry path instead.
+    invalidate_stranded_approval_gates(&pending_gates, agent.deps.sse_tx.as_ref()).await;
     if let Err(e) = reconcile_pending_gate_state(&store_dyn, &pending_gates).await {
         debug!("engine v2: pending gate reconciliation failed: {e}");
     }
+
+    // Build the per-thread external tool catalog. Shared by Arc clone
+    // with the effect adapter (consults it on every action call) and
+    // exposed on the engine state so the Responses API handler can
+    // register/clear caller-supplied tools.
+    let external_tool_catalog = Arc::new(crate::bridge::ExternalToolCatalog::new());
+    effect_adapter
+        .set_external_tool_catalog(Arc::clone(&external_tool_catalog))
+        .await;
+
+    // Backstop sweep: in addition to the per-thread terminal-state
+    // cleanup in `await_thread_outcome`, evict catalog entries that
+    // are older than `EXTERNAL_TOOL_CATALOG_TTL` to bound memory
+    // when a caller registers tools and then abandons the
+    // conversation (e.g. drops the connection without resuming a
+    // pending gate). Runs on a fixed cadence so a long-lived
+    // gateway doesn't accumulate stale entries.
+    {
+        let catalog = Arc::clone(&external_tool_catalog);
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(EXTERNAL_TOOL_CATALOG_SWEEP_INTERVAL);
+            // Skip the immediate first tick so we don't sweep
+            // freshly-registered entries on engine boot.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                let evicted = catalog.sweep_older_than(EXTERNAL_TOOL_CATALOG_TTL).await;
+                if !evicted.is_empty() {
+                    debug!(
+                        evicted = evicted.len(),
+                        "engine v2: external tool catalog sweep evicted stale entries"
+                    );
+                }
+            }
+        });
+    }
+
+    let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
+    let gate_controller = Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+        Arc::clone(&pending_gates),
+        agent.deps.sse_tx.clone(),
+        Arc::clone(effect_adapter.tools()),
+        auth_manager.clone(),
+        agent.deps.extension_manager.clone(),
+        Arc::clone(&agent.channels),
+        Arc::clone(&resolutions),
+    ));
+    thread_manager
+        .set_gate_controller(gate_controller.clone() as Arc<dyn t3claw_engine::GateController>)
+        .await;
 
     *guard = Some(EngineState {
         thread_manager,
@@ -1967,9 +2168,43 @@ pub async fn init_engine(agent: &Agent) -> Result<(), Error> {
         auth_manager,
         extension_manager: agent.deps.extension_manager.clone(),
         project_root: resolve_project_root(),
+        external_tool_catalog,
+        capability_registry: Arc::clone(&capabilities),
+        gate_controller,
+        gate_resolutions: resolutions,
     });
 
     Ok(())
+}
+
+/// Boot-time sweep: invalidate `Approval`-kind pending gates carried
+/// over from a prior process. Their inline-await receivers are gone,
+/// and re-entry would re-run earlier non-idempotent tool calls. Auth
+/// and External gates survive — they don't depend on a live VM.
+async fn invalidate_stranded_approval_gates(
+    pending_gates: &crate::gate::store::PendingGateStore,
+    sse: Option<&Arc<SseManager>>,
+) {
+    let restored = pending_gates.list_all().await;
+    for gate in restored {
+        if !matches!(gate.resume_kind, t3claw_engine::ResumeKind::Approval { .. }) {
+            continue;
+        }
+        let _ = pending_gates.discard(&gate.key()).await;
+        if let Some(sse) = sse {
+            sse.broadcast_for_user(
+                &gate.user_id,
+                t3claw_common::AppEvent::GateResolved {
+                    request_id: gate.request_id.to_string(),
+                    gate_name: gate.gate_name.clone(),
+                    tool_name: gate.action_name.clone(),
+                    resolution: "expired".into(),
+                    message: "Approval interrupted by restart. Please retry.".into(),
+                    thread_id: Some(gate.effective_wire_thread_id()),
+                },
+            ); // projection-exempt: bridge dispatcher, restart-time gate cleanup before threads exist
+        }
+    }
 }
 
 async fn resolve_pending_gate_for_user(
@@ -2026,6 +2261,25 @@ pub async fn get_engine_pending_gate(
         )),
         PendingGateResolution::None | PendingGateResolution::Ambiguous => Ok(None),
     }
+}
+
+/// Read-only lookup of a pending gate by `request_id`, scoped to the
+/// requesting user. Used by the chat cancel handler to recover the
+/// owning thread when the client omits `thread_id` in the resolution
+/// payload — without this, a foreground inline-await gate would be
+/// stranded (gate marked cancelled, parked VM never unwound). See PR
+/// #3366 review.
+pub async fn get_pending_gate_by_request_id(
+    user_id: &str,
+    request_id: uuid::Uuid,
+) -> Option<crate::gate::pending::PendingGateView> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    let state = guard.as_ref()?;
+    state
+        .pending_gates
+        .peek_by_request_id(request_id, user_id)
+        .await
 }
 
 /// Check whether the user has *any* pending gate (resolved, ambiguous, or
@@ -2121,6 +2375,195 @@ pub async fn resolve_engine_auth_callback(
         thread_scope: pending.scope_thread_id.map(String::from),
         request_id: pending.request_id,
     })
+}
+
+/// Wake any Tier 0/Tier 1 inline-await waiters that paused on the
+/// credential `(user_id, credential_name)` pair.
+///
+/// Half-2 of #3133, inline-await arm. The Tier 1 (CodeAct) and Tier 0
+/// (structured) paths now keep their VM/batch parked on
+/// `GateController::pause()` for Authentication gates the same way
+/// they do for Approval. When OAuth lands a credential, this helper
+/// delivers `GateResolution::Approved` to every parked waiter for
+/// `user_id` so the suspended action retries inline against the
+/// now-present secret — no thread re-entry, no replay of earlier
+/// side effects in the same step. Other users' parked waiters on the
+/// same credential name are left untouched.
+///
+/// Returns the number of waiters woken (zero is normal — most
+/// credential writes don't unblock any inline VM).
+pub async fn resolve_inline_gates_for_credential(user_id: &str, credential_name: &str) -> usize {
+    let Some(lock) = ENGINE_STATE.get() else {
+        return 0;
+    };
+    let guard = lock.read().await;
+    let Some(state) = guard.as_ref() else {
+        return 0;
+    };
+    let woken = state
+        .gate_resolutions
+        .deliver_for_credential(user_id, credential_name)
+        .await;
+    if woken > 0 {
+        tracing::debug!(
+            user = %user_id,
+            credential = %credential_name,
+            woken,
+            "delivered Approved to parked inline-await waiter(s) on credential write"
+        );
+        // #3533: also drop the matching Authentication pending-gate
+        // rows from the store. The inline-await retry will run with
+        // the credential now present and either succeed or raise its
+        // own follow-up gate; the original Authentication row no
+        // longer represents live state and would otherwise linger
+        // until expiry (and surface in `HistoryResponse.pending_gate`
+        // for users who had no follow-up gate). Without this discard,
+        // the external-callback path (`resolve_engine_auth_callback`)
+        // is the only thing that cleans up — and skipping that path
+        // to avoid the "thread already running" race left the row
+        // orphaned.
+        let matching: Vec<_> = state
+            .pending_gates
+            .list_for_user(user_id)
+            .await
+            .into_iter()
+            .filter(|gate| {
+                matches!(
+                    &gate.resume_kind,
+                    t3claw_engine::ResumeKind::Authentication {
+                        credential_name: gate_credential,
+                        ..
+                    } if gate_credential.as_str() == credential_name
+                )
+            })
+            .collect();
+        for gate in matching {
+            let _ = state.pending_gates.discard(&gate.key()).await;
+        }
+    }
+    woken
+}
+
+/// Auto-resume paused missions whose `paused_gate` was waiting for the
+/// credential named `credential_name`.
+///
+/// Half-2 of #3133, mission arm. Called from the OAuth completion
+/// paths in `channels::web::features::oauth::oauth_callback_handler`
+/// and `extensions::manager`'s WASM OAuth completion. Walks the
+/// engine state to locate the [`MissionManager`] and delegates to
+/// [`MissionManager::resume_paused_for_credential`], which transitions
+/// every matching mission `Paused → Active`, clears its `paused_gate`,
+/// and (for non-Manual cadences) kicks off an immediate fire so the
+/// user sees follow-through after completing OAuth.
+///
+/// Note: this hook is currently OAuth-only. Manual credential writes
+/// (`/api/secrets`, `tool_auth`, gate-resolution `CredentialProvided`)
+/// do NOT call this helper today; missions paused on a non-OAuth
+/// credential write are auto-resumed only when the user resubmits an
+/// OAuth callback against the same secret. Plumbing the manual path
+/// through this helper is tracked as a follow-up.
+///
+/// Returns the count of missions that were resumed (zero is the normal
+/// case — most credential writes are not blocking any paused mission).
+/// Errors are downgraded to logs because a failure to resume a paused
+/// mission must NOT prevent the credential from being persisted —
+/// the mission can be manually resumed later.
+pub async fn resume_paused_missions_for_credential(user_id: &str, credential_name: &str) -> usize {
+    let Some(lock) = ENGINE_STATE.get() else {
+        return 0;
+    };
+    let guard = lock.read().await;
+    let Some(state) = guard.as_ref() else {
+        return 0;
+    };
+    let Some(mission_manager) = state.effect_adapter.mission_manager().await else {
+        return 0;
+    };
+    let cred = match t3claw_common::CredentialName::new(credential_name) {
+        Ok(c) => c,
+        Err(e) => {
+            debug!(
+                error = %e,
+                credential_name = %credential_name,
+                "skipping mission auto-resume — credential name failed validation"
+            );
+            return 0;
+        }
+    };
+    match mission_manager
+        .resume_paused_for_credential(&cred, user_id)
+        .await
+    {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                tracing::debug!(
+                    user_id = %user_id,
+                    credential = %credential_name,
+                    resumed = ids.len(),
+                    "auto-resumed paused mission(s) after credential write"
+                );
+            }
+            ids.len()
+        }
+        Err(e) => {
+            tracing::warn!(
+                user_id = %user_id,
+                credential = %credential_name,
+                error = %e,
+                "failed to auto-resume paused missions after credential write"
+            );
+            0
+        }
+    }
+}
+
+/// Auto-resume the paused mission whose `paused_gate.gate_request_id`
+/// matches `gate_request_id`, given a user-driven gate-resolve outcome.
+///
+/// Half-2 of #3133 for the approval/external path. Called from
+/// `/api/chat/gate/resolve` after the foreground gate has been
+/// resolved. On `Approved` the mission is transitioned `Paused →
+/// Active` and (for non-Manual cadences) immediately fired. On
+/// `Denied`/`Cancelled` the mission is marked `Failed` so the user must
+/// fix the underlying issue and resume manually.
+///
+/// Returns the resumed/failed mission id, or `None` if no paused
+/// mission was waiting on this gate (the foreground gate alone was
+/// resolved).
+pub async fn resume_paused_missions_for_gate_request(
+    user_id: &str,
+    gate_request_id: uuid::Uuid,
+    outcome: t3claw_engine::GateResolutionOutcome,
+) -> Option<t3claw_engine::types::mission::MissionId> {
+    let lock = ENGINE_STATE.get()?;
+    let guard = lock.read().await;
+    let state = guard.as_ref()?;
+    let mission_manager = state.effect_adapter.mission_manager().await?;
+    match mission_manager
+        .resume_paused_for_request_id(gate_request_id, outcome, user_id)
+        .await
+    {
+        Ok(Some(id)) => {
+            tracing::debug!(
+                user_id = %user_id,
+                %gate_request_id,
+                mission_id = %id,
+                outcome = ?outcome,
+                "mission auto-resume after gate resolution"
+            );
+            Some(id)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            tracing::warn!(
+                user_id = %user_id,
+                %gate_request_id,
+                error = %e,
+                "failed to auto-resume paused mission after gate resolution"
+            );
+            None
+        }
+    }
 }
 
 /// Handle an approval response (yes/no/always) for engine v2.
@@ -2245,13 +2688,16 @@ pub async fn handle_external_callback(
     agent: &Agent,
     message: &IncomingMessage,
     request_id: uuid::Uuid,
+    payload: Option<serde_json::Value>,
 ) -> Result<BridgeOutcome, Error> {
     init_engine(agent).await?;
 
     let resolution = t3claw_engine::GateResolution::ExternalCallback {
-        payload: serde_json::Value::Null,
+        payload: payload.unwrap_or(serde_json::Value::Null),
     };
 
+    // Auth-flavored callback (legacy OAuth/pairing): consult the auth
+    // predicates first, including the conversation-scope hint shortcut.
     if let Some(thread_id) = hinted_pending_gate_thread_id(
         &message.user_id,
         message.conversation_scope(),
@@ -2270,13 +2716,23 @@ pub async fn handle_external_callback(
         return resolve_gate(agent, message, thread_id, request_id, resolution).await;
     }
 
+    // Non-auth External callback (e.g. Responses API caller-executed tool
+    // result): the gate's resume_kind is `External` but it is not an
+    // authentication gate, so the auth predicates above don't match it.
+    if let Some(thread_id) =
+        pending_gate_thread_id_for_request(&message.user_id, request_id, gate_resume_is_external)
+            .await?
+    {
+        return resolve_gate(agent, message, thread_id, request_id, resolution).await;
+    }
+
     debug!(
         user_id = %message.user_id,
         request_id = %request_id,
-        "engine v2: no matching pending auth gate for external callback"
+        "engine v2: no matching pending gate for external callback"
     );
     Ok(BridgeOutcome::Respond(
-        "No matching pending authentication gate found.".into(),
+        "No matching pending gate found.".into(),
     ))
 }
 
@@ -2334,6 +2790,14 @@ fn gate_is_authentication(gate: &PendingGate) -> bool {
         gate.resume_kind,
         t3claw_engine::ResumeKind::Authentication { .. }
     )
+}
+
+/// Matches any gate whose resume kind is `External`. Used as a fallback in
+/// `handle_external_callback` to resume non-auth tool-call pauses (e.g.
+/// the Responses API caller-executed tool result path) which never go
+/// through the authentication predicates.
+fn gate_resume_is_external(gate: &PendingGate) -> bool {
+    matches!(gate.resume_kind, t3claw_engine::ResumeKind::External { .. })
 }
 
 fn gate_view_is_approval(gate: &crate::gate::pending::PendingGateView) -> bool {
@@ -2403,6 +2867,268 @@ async fn pending_gate_thread_id_for_request(
     Ok(pending)
 }
 
+/// Outcome of a fast-path inline gate resolution attempt.
+///
+/// See [`try_resolve_inline_approval_gate`].
+#[derive(Debug)]
+#[must_use]
+pub enum InlineGateOutcome {
+    /// The resolution was delivered directly to a parked engine VM. The
+    /// pending gate has been consumed; SSE `GateResolved` was broadcast.
+    Delivered,
+    /// No live VM was waiting for this gate (engine uninitialized, no
+    /// matching parked future, or non-Approval resume kind). The pending
+    /// gate has been left in place — the caller should fall through to
+    /// the legacy mpsc dispatch path so the agent loop's `resolve_gate`
+    /// can resume the thread normally.
+    NoLiveVm,
+}
+
+/// Verification failures from [`try_resolve_inline_approval_gate`] that
+/// must surface as 4xx HTTP responses rather than fall through to the
+/// legacy resume path. Variants map to specific status codes at the HTTP
+/// boundary (see `chat_approval_handler`):
+///
+/// - [`InlineGateError::ChannelMismatch`] → 403 Forbidden
+/// - [`InlineGateError::Stale`] → 409 Conflict (request_id already
+///   resolved or doesn't match the latest pending row)
+/// - [`InlineGateError::Expired`] → 409 Conflict (the pending gate's
+///   `expires_at` has passed)
+/// - [`InlineGateError::Other`] → 500 Internal Server Error
+///
+/// Typed at the API boundary (rather than relying on
+/// `error.to_string().contains("authorization")`) so a future change to
+/// the error format string can't silently flip a 403 into a 500.
+#[derive(Debug, thiserror::Error)]
+pub enum InlineGateError {
+    /// The resolving channel does not match the channel that originated
+    /// the gate (and is not in the trusted-channel allowlist).
+    #[error("Channel '{actual}' cannot resolve gates from channel '{expected}'")]
+    ChannelMismatch { expected: String, actual: String },
+    /// The request_id doesn't match the active pending gate (already
+    /// resolved, dropped, or replaced by a newer gate row).
+    #[error("Approval request is stale or already resolved")]
+    Stale,
+    /// The pending gate's `expires_at` has elapsed.
+    #[error("Approval request has expired")]
+    Expired,
+    /// The pending gate exists but does not belong to the requesting user.
+    /// Surfaced as a 403 to avoid leaking gate existence across tenants.
+    #[error("not authorized to resolve this gate")]
+    Unauthorized,
+    /// Any other gate-store failure.
+    #[error("gate error: {0}")]
+    Other(String),
+}
+
+/// Fast-path inline resolution for an Approval gate, intended to be
+/// callable from HTTP handlers without going through the agent-loop
+/// mpsc.
+///
+/// **Why this exists.** When `BridgeGateController::pause` parks a Tier 0
+/// or Tier 1 execution on an Approval gate, the engine call sits in
+/// `await rx`. That await is held by the bridge call invoked from the
+/// agent loop's `handle_message`, which means the per-user agent loop
+/// is blocked at `match self.handle_message(...).await` and cannot
+/// drain new submissions from `msg_tx`. A subsequent `ExecApproval`
+/// posted to `/api/chat/approval` and forwarded through `msg_tx` would
+/// queue indefinitely behind the parked alpha — so `try_deliver` would
+/// never run and alpha would only wake on the 30-minute pause timeout.
+///
+/// This function lets the HTTP handler skip the mpsc and call into
+/// the gate controller's in-memory delivery channel directly. The
+/// engine resumes from its exact suspension point, and the handler
+/// returns 202 to the user.
+///
+/// On `NoLiveVm` the caller should still dispatch the legacy
+/// `ExecApproval` submission so the agent loop can resume the thread
+/// via `state.thread_manager.resume_thread`. That path uses
+/// `&Agent` for status updates and remains the source of truth for
+/// non-inline resolutions (Authentication, External callbacks).
+///
+/// Errors are returned only when the gate exists but verification
+/// fails (channel mismatch, stale request_id, expired). Those map to
+/// 4xx responses via [`InlineGateError`]; the caller should not fall
+/// through.
+pub async fn try_resolve_inline_approval_gate(
+    user_id: &str,
+    channel: &str,
+    request_id: uuid::Uuid,
+    resolution: t3claw_engine::GateResolution,
+    settings_store: Option<&(dyn crate::db::SettingsStore + Send + Sync)>,
+) -> Result<InlineGateOutcome, InlineGateError> {
+    // Only Approval-shaped resolutions are eligible for inline-await.
+    // `BridgeGateController::pause` returns Cancelled immediately for
+    // Authentication and External resume kinds without parking, so
+    // there's nothing to deliver to and we'd just need the legacy
+    // resume path.
+    if !matches!(
+        resolution,
+        t3claw_engine::GateResolution::Approved { .. }
+            | t3claw_engine::GateResolution::Denied { .. }
+            | t3claw_engine::GateResolution::Cancelled
+    ) {
+        return Ok(InlineGateOutcome::NoLiveVm);
+    }
+
+    let Some(lock) = ENGINE_STATE.get() else {
+        return Ok(InlineGateOutcome::NoLiveVm);
+    };
+    let guard = lock.read().await;
+    let Some(state) = guard.as_ref() else {
+        return Ok(InlineGateOutcome::NoLiveVm);
+    };
+
+    // Resolve the gate by `request_id` (system-wide unique) rather
+    // than by a caller-supplied thread identifier. The wire
+    // `req.thread_id` on the HTTP surface is the channel-visible
+    // value — for the web gateway that is the per-conversation UUID
+    // returned by `/api/chat/thread/new`, recorded on the gate as
+    // `scope_thread_id` — not the internal engine `ThreadId` that
+    // keys `PendingGateStore`. Looking up by `request_id` under the
+    // store's single mutex keeps the lookup + remove atomic and
+    // avoids the wire-vs.-engine identifier confusion that would
+    // otherwise miss every gate whose channel scope differs from its
+    // engine thread.
+    //
+    // Verification failures surface as a typed `InlineGateError` so
+    // the HTTP handler can map to the right 4xx without inspecting
+    // message strings. `NotFound` is treated as `NoLiveVm` (legacy
+    // mpsc fall-through) — a `request_id` we don't have means the
+    // gate was already resolved, never existed, or wasn't restored
+    // after a process restart, none of which should surface a 5xx
+    // here.
+    let pending = match state
+        .pending_gates
+        .take_verified_by_request_id(request_id, user_id, channel)
+        .await
+    {
+        Ok(gate) => gate,
+        Err(e) => {
+            use crate::gate::store::GateStoreError;
+            return match e {
+                GateStoreError::NotFound => Ok(InlineGateOutcome::NoLiveVm),
+                GateStoreError::ChannelMismatch { expected, actual } => {
+                    Err(InlineGateError::ChannelMismatch { expected, actual })
+                }
+                GateStoreError::Unauthorized => Err(InlineGateError::Unauthorized),
+                GateStoreError::Expired => Err(InlineGateError::Expired),
+                GateStoreError::RequestIdMismatch => Err(InlineGateError::Stale),
+                other => Err(InlineGateError::Other(other.to_string())),
+            };
+        }
+    };
+    let thread_id = pending.thread_id;
+
+    // Only Approval-resume gates are parked by the gate controller. A
+    // non-Approval gate hitting take_verified here means a different
+    // resume_kind happened to share the request_id — re-insert and tell
+    // the caller to fall back to legacy resume.
+    if !matches!(
+        pending.resume_kind,
+        t3claw_engine::ResumeKind::Approval { .. }
+    ) {
+        if let Err(e) = state.pending_gates.insert(pending.clone()).await {
+            debug!(
+                user_id = %user_id,
+                thread_id = %thread_id,
+                error = %e,
+                "try_resolve_inline_approval_gate: failed to re-insert non-Approval gate"
+            );
+        }
+        return Ok(InlineGateOutcome::NoLiveVm);
+    }
+
+    let always_for_inline = match &resolution {
+        t3claw_engine::GateResolution::Approved { always } => {
+            clamp_always_to_resume_kind(*always, &pending.resume_kind)
+        }
+        _ => false,
+    };
+
+    let legacy_registry_name = legacy_extension_alias(&pending.action_name);
+    let prior_permission = if always_for_inline {
+        state
+            .effect_adapter
+            .auto_approve_tool(&pending.action_name)
+            .await;
+        if let Some(ref registry_name) = legacy_registry_name {
+            state.effect_adapter.auto_approve_tool(registry_name).await;
+        }
+        persist_always_allow_with_store(settings_store, state, &pending).await
+    } else {
+        None
+    };
+
+    let inline_resolution = match &resolution {
+        t3claw_engine::GateResolution::Approved { .. } => t3claw_engine::GateResolution::Approved {
+            always: always_for_inline,
+        },
+        t3claw_engine::GateResolution::Denied { reason } => t3claw_engine::GateResolution::Denied {
+            reason: reason.clone(),
+        },
+        t3claw_engine::GateResolution::Cancelled => t3claw_engine::GateResolution::Cancelled,
+        _ => unreachable!("guarded by outer matches!()"),
+    };
+
+    if state
+        .gate_controller
+        .try_deliver(request_id, inline_resolution)
+        .await
+    {
+        if let Some(ref sse) = state.sse {
+            let (label, status_msg) = match &resolution {
+                t3claw_engine::GateResolution::Approved { .. } => {
+                    if always_for_inline {
+                        ("approved_always", "Gate approved. Resuming execution.")
+                    } else {
+                        ("approved", "Gate approved. Resuming execution.")
+                    }
+                }
+                t3claw_engine::GateResolution::Denied { .. } => ("denied", "Gate denied."),
+                t3claw_engine::GateResolution::Cancelled => ("cancelled", "Gate cancelled."),
+                _ => unreachable!(),
+            };
+            let event = AppEvent::GateResolved {
+                request_id: pending.request_id.to_string(),
+                gate_name: pending.gate_name.clone(),
+                tool_name: pending.action_name.clone(),
+                resolution: label.into(),
+                message: status_msg.into(),
+                thread_id: Some(pending.effective_wire_thread_id()),
+            };
+            sse.broadcast_for_user(user_id, event); // projection-exempt: bridge dispatcher, inline-await fast-path resolution event
+        }
+        return Ok(InlineGateOutcome::Delivered);
+    }
+
+    // try_deliver returned false: no parked future for this request_id.
+    // Roll back the auto-approve preference we installed and re-insert
+    // the pending gate so the legacy mpsc dispatch path can find it.
+    if always_for_inline {
+        state
+            .effect_adapter
+            .revoke_auto_approve(&pending.action_name)
+            .await;
+        if let Some(registry_name) = legacy_registry_name {
+            state
+                .effect_adapter
+                .revoke_auto_approve(&registry_name)
+                .await;
+        }
+        revert_always_allow_with_store(settings_store, &pending, prior_permission).await;
+    }
+    if let Err(e) = state.pending_gates.insert(pending).await {
+        debug!(
+            user_id = %user_id,
+            thread_id = %thread_id,
+            error = %e,
+            "try_resolve_inline_approval_gate: failed to re-insert pending gate after no-live-VM"
+        );
+    }
+    Ok(InlineGateOutcome::NoLiveVm)
+}
+
 /// Resolve a unified pending gate.
 ///
 /// This is the single entry point for resolving gates stored in the
@@ -2451,6 +3177,112 @@ pub async fn resolve_gate(
                 other => engine_err("gate", other),
             }
         })?;
+
+    // Inline gate-await fast path: if the engine is actively awaiting
+    // this gate (live Tier 0 batch or Tier 1 CodeAct VM), hand the
+    // resolution back through the controller's in-memory channel.
+    // The engine continues from the exact suspension point — no
+    // re-entry, no replay, no double-execution of earlier non-idempotent
+    // tool calls in the same step.
+    //
+    // We still install any auto-approve preference *before* delivery so
+    // subsequent gates in the same execution see policy `Allow` rather
+    // than gating again.
+    if matches!(
+        resolution,
+        t3claw_engine::GateResolution::Approved { .. }
+            | t3claw_engine::GateResolution::Denied { .. }
+            | t3claw_engine::GateResolution::Cancelled
+    ) {
+        let always_for_inline = match &resolution {
+            t3claw_engine::GateResolution::Approved { always } => {
+                clamp_always_to_resume_kind(*always, &pending.resume_kind)
+            }
+            _ => false,
+        };
+
+        let legacy_registry_name = legacy_extension_alias(&pending.action_name);
+        let prior_permission = if always_for_inline {
+            state
+                .effect_adapter
+                .auto_approve_tool(&pending.action_name)
+                .await;
+            if let Some(ref registry_name) = legacy_registry_name {
+                state.effect_adapter.auto_approve_tool(registry_name).await;
+            }
+            persist_always_allow(agent, state, &pending).await
+        } else {
+            None
+        };
+
+        // Re-build the resolution clamped to the pending gate's policy.
+        let inline_resolution = match &resolution {
+            t3claw_engine::GateResolution::Approved { .. } => {
+                t3claw_engine::GateResolution::Approved {
+                    always: always_for_inline,
+                }
+            }
+            t3claw_engine::GateResolution::Denied { reason } => {
+                t3claw_engine::GateResolution::Denied {
+                    reason: reason.clone(),
+                }
+            }
+            t3claw_engine::GateResolution::Cancelled => t3claw_engine::GateResolution::Cancelled,
+            _ => unreachable!("guarded by outer matches!()"),
+        };
+
+        if state
+            .gate_controller
+            .try_deliver(request_id, inline_resolution)
+            .await
+        {
+            if let Some(ref sse) = state.sse {
+                let (label, status_msg) = match &resolution {
+                    t3claw_engine::GateResolution::Approved { .. } => {
+                        if always_for_inline {
+                            ("approved_always", "Gate approved. Resuming execution.")
+                        } else {
+                            ("approved", "Gate approved. Resuming execution.")
+                        }
+                    }
+                    t3claw_engine::GateResolution::Denied { .. } => ("denied", "Gate denied."),
+                    t3claw_engine::GateResolution::Cancelled => ("cancelled", "Gate cancelled."),
+                    _ => unreachable!(),
+                };
+                sse.broadcast_for_user(
+                    &message.user_id,
+                    AppEvent::GateResolved {
+                        request_id: pending.request_id.to_string(),
+                        gate_name: pending.gate_name.clone(),
+                        tool_name: pending.action_name.clone(),
+                        resolution: label.into(),
+                        message: status_msg.into(),
+                        thread_id: Some(pending.effective_wire_thread_id()),
+                    },
+                ); // projection-exempt: bridge dispatcher, inline-await fast-path resolution event
+            }
+            return Ok(BridgeOutcome::Pending);
+        }
+
+        // Delivery failed — no live VM was waiting (process restart, or
+        // gate was created via a code path that didn't register an
+        // inline-await receiver). Roll back any auto-approve we just
+        // installed so subsequent calls don't see a stale preference,
+        // then fall through to the legacy re-entry path below.
+        if always_for_inline {
+            state
+                .effect_adapter
+                .revoke_auto_approve(&pending.action_name)
+                .await;
+            if let Some(registry_name) = legacy_registry_name {
+                state
+                    .effect_adapter
+                    .revoke_auto_approve(&registry_name)
+                    .await;
+            }
+            revert_always_allow(agent, &pending, prior_permission).await;
+        }
+    }
 
     match resolution {
         t3claw_engine::GateResolution::Approved { always } => {
@@ -2564,8 +3396,17 @@ pub async fn resolve_gate(
                 )
                 .await;
 
+            // Word the deny message carefully: the resume handler treats
+            // certain imperative verb phrases ("execute it", "run it", "send
+            // it", …) as fresh execution intent and re-arms the
+            // require_action_attempt obligation, which then nudges the LLM
+            // to issue another tool call — exactly the opposite of what a
+            // denial should produce. Avoid every phrase in
+            // `t3claw_llm::user_signals_execution_intent`'s list (the
+            // helper is defined in `src/llm/reasoning.rs` and re-exported
+            // from `crate::llm`).
             let deny_msg = t3claw_engine::ThreadMessage::user(format!(
-                "User denied action '{}'. Do not execute it; choose an alternative approach.{}",
+                "User denied action '{}'. Do not retry; choose a different approach.{}",
                 pending.action_name,
                 reason
                     .as_deref()
@@ -2839,7 +3680,7 @@ pub async fn resolve_gate(
             }
         }
 
-        t3claw_engine::GateResolution::ExternalCallback { .. } => {
+        t3claw_engine::GateResolution::ExternalCallback { ref payload } => {
             if let Some(ref sse) = state.sse {
                 sse.broadcast_for_user(
                     &message.user_id,
@@ -2853,7 +3694,58 @@ pub async fn resolve_gate(
                     },
                 );
             }
-            if let Some(resume_output) = pending.resume_output.clone() {
+
+            // Caller-tool callbacks (Responses API) carry the tool's
+            // output in the resolution payload. The pending gate has
+            // `resume_output: None` because at gate-fire time the
+            // adapter doesn't have the output yet — so the legacy
+            // OAuth/pairing branch (which uses `pending.resume_output`)
+            // would re-run the action and re-pause forever. Instead,
+            // synthesize an `ActionResult`-shaped ThreadMessage from
+            // the resolution payload and resume directly.
+            //
+            // OAuth/pairing flows keep using the original
+            // `pending.resume_output` path (their callback_id has the
+            // `pairing:` prefix, not `ext_tool:`).
+            let is_external_tool_callback = matches!(
+                pending.resume_kind,
+                t3claw_engine::ResumeKind::External { ref callback_id }
+                    if crate::bridge::is_external_tool_callback_id(callback_id)
+            );
+
+            if is_external_tool_callback {
+                let resolved_call_id =
+                    resolved_or_synthetic_call_id_for_pending_action(state, &pending).await?;
+                let synthesized_output = extract_external_tool_output(payload, &resolved_call_id);
+                // External-tool payloads originate outside the
+                // EffectBridgeAdapter's sanitization pipeline. Run them
+                // through the same safety pass internal tool outputs
+                // get — leak detection, length cap, injection sanitizer,
+                // policy — before they reach the LLM. Caller is not a
+                // trust boundary; treat the payload like any other
+                // tool output.
+                let raw_rendered = serde_json::to_string_pretty(&synthesized_output)
+                    .unwrap_or_else(|_| synthesized_output.to_string());
+                let sanitized = state
+                    .effect_adapter
+                    .safety()
+                    .sanitize_tool_output(&pending.action_name, &raw_rendered);
+                state
+                    .thread_manager
+                    .resume_thread(
+                        pending.thread_id,
+                        message.user_id.clone(),
+                        Some(t3claw_engine::ThreadMessage::action_result(
+                            &resolved_call_id,
+                            &pending.action_name,
+                            sanitized.content,
+                        )),
+                        None,
+                        Some(resolved_call_id),
+                    )
+                    .await
+                    .map_err(|e| engine_err("resume error", e))?;
+            } else if let Some(resume_output) = pending.resume_output.clone() {
                 let resolved_call_id =
                     resolved_or_synthetic_call_id_for_pending_action(state, &pending).await?;
                 state
@@ -3108,6 +4000,120 @@ pub async fn handle_expected(
     }
 }
 
+/// Handle `approve <channel> <code>` — claim a pairing code from any chat
+/// surface (TUI, CLI, web, or Telegram itself). Mirrors what the web
+/// `POST /api/pairing/{channel}/approve` handler does, so the same approval
+/// works regardless of where the user typed it. This closes #3317, where
+/// the Telegram bot's pairing reply pointed users at "T3Claw" without
+/// naming a surface and the agent rejected the resulting chat input.
+pub async fn handle_pairing_claim(
+    agent: &Agent,
+    message: &IncomingMessage,
+    channel: &str,
+    code: &str,
+) -> Result<BridgeOutcome, Error> {
+    use t3claw_common::ExtensionName;
+
+    // Validate the channel name at the boundary, mirroring
+    // `web::features::pairing::parse_channel`. We discard the canonical
+    // form and carry the lowercased raw string forward because the pairing
+    // store keys off the un-folded name (see `pairing/mod.rs`
+    // `normalize_channel_name`).
+    let lowered = channel.to_ascii_lowercase();
+    if ExtensionName::new(&lowered).is_err() {
+        // The raw `channel` token comes from chat input and is unbounded.
+        // Cap the echo at 32 characters and strip non-printable / non-
+        // alphanumeric characters before rendering, so a hostile or
+        // accidentally-pasted blob can't blow up the chat reply or smuggle
+        // control characters / Markdown through to the SSE / Telegram /
+        // TUI surface. The underlying `IdentityError` variants also carry
+        // the raw input verbatim, so we render a fixed category message
+        // rather than `{e}` to keep the reply size bounded by the echo.
+        let preview: String = channel
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .take(32)
+            .collect();
+        let preview = if preview.is_empty() {
+            "<empty>".to_string()
+        } else {
+            preview
+        };
+        return Ok(BridgeOutcome::Respond(format!(
+            "Invalid channel name `{preview}` — channel names must be \
+             lowercase letters, digits, hyphens, or underscores (e.g. \
+             `telegram`, `slack-relay`)."
+        )));
+    }
+
+    let Some(ext_mgr) = agent.deps.extension_manager.as_ref() else {
+        return Ok(BridgeOutcome::Respond(
+            "Pairing is not available — extension manager is not configured.".into(),
+        ));
+    };
+    let Some(pairing_store) = ext_mgr.pairing_store() else {
+        return Ok(BridgeOutcome::Respond(
+            "Pairing is not available — pairing store is not configured.".into(),
+        ));
+    };
+
+    // Bind the pairing to the message's user_id. `from_trusted` matches the
+    // web handler's pattern: the user identity is sourced from the inbound
+    // channel auth, not user-controlled chat content. Role is irrelevant
+    // for self-service approval — only the id is recorded on the pairing
+    // row.
+    let owner_id = crate::ownership::UserId::from_trusted(
+        message.user_id.clone(),
+        crate::ownership::UserRole::Regular,
+    );
+
+    let approval = match pairing_store.approve(&lowered, code, &owner_id).await {
+        Ok(approval) => approval,
+        Err(crate::error::DatabaseError::NotFound { .. }) => {
+            return Ok(BridgeOutcome::Respond(
+                "Invalid or expired pairing code.".into(),
+            ));
+        }
+        Err(e) => {
+            debug!(channel = %lowered, error = %e, "pairing approval failed");
+            return Ok(BridgeOutcome::Respond(
+                "Internal error processing pairing approval.".into(),
+            ));
+        }
+    };
+
+    // Propagate to the running channel so the WASM channel picks up the new
+    // owner binding without a restart. Same shape as the web handler — on
+    // propagation failure, revert the DB approval so the user can retry.
+    match ext_mgr
+        .complete_pairing_approval(&lowered, &approval.external_id)
+        .await
+    {
+        Ok(()) => Ok(BridgeOutcome::Respond(format!(
+            "Pairing approved — `{lowered}` is now linked to your account."
+        ))),
+        Err(e) => {
+            tracing::warn!(
+                channel = %lowered,
+                error = %e,
+                "pairing approval propagation to running channel failed"
+            );
+            if let Err(revert_err) = pairing_store.revert_approval(&approval).await {
+                tracing::warn!(
+                    channel = %lowered,
+                    error = %revert_err,
+                    "failed to revert pairing approval after propagation failure"
+                );
+            }
+            Ok(BridgeOutcome::Respond(
+                "Pairing was approved, but the running channel could not be updated. \
+                 Please retry or restart the channel."
+                    .into(),
+            ))
+        }
+    }
+}
+
 /// Find the most recent thread in a conversation (checks active threads first,
 /// then falls back to the last completed thread visible in conversation entries).
 async fn find_most_recent_thread(
@@ -3171,6 +4177,29 @@ async fn clear_engine_conversation(agent: &Agent, message: &IncomingMessage) -> 
             // Discard all pending gates for this thread regardless of user,
             // preventing orphaned gates that can never be resolved (#2323).
             state.pending_gates.discard_for_thread(*tid).await;
+        }
+    }
+
+    // Drain in-flight OAuth flows for this user (#3320).
+    //
+    // Pending flows otherwise live until `OAUTH_FLOW_EXPIRY` (5 min). On a
+    // user-initiated `/clear`, the user expects a clean slate — leaving a
+    // ghost flow can: (a) match a stale `state` from a never-completed
+    // browser tab, (b) fool a fresh auth attempt's CSRF dedupe, or
+    // (c) cause the next `extension_manager::pending_oauth_flows()` lookup
+    // to find an entry whose corresponding engine gate has already been
+    // discarded above. Drain all flows owned by the clearing user.
+    if let Some(ext_mgr) = agent.deps.extension_manager.as_ref() {
+        let mut flows = ext_mgr.pending_oauth_flows().write().await;
+        let before = flows.len();
+        flows.retain(|_state, flow| flow.user_id != message.user_id);
+        let removed = before.saturating_sub(flows.len());
+        if removed > 0 {
+            debug!(
+                user_id = %message.user_id,
+                removed,
+                "engine v2: drained pending OAuth flows on /clear"
+            );
         }
     }
 
@@ -3249,6 +4278,45 @@ pub async fn clear_engine_pending_auth(user_id: &str, thread_id: Option<&str>) {
             gate.resume_kind,
             t3claw_engine::ResumeKind::Authentication { .. }
         ) {
+            let _ = state.pending_gates.discard(&gate.key()).await;
+        }
+    }
+}
+
+/// Clear pending auth gates for a user that match a specific credential.
+///
+/// Used by OAuth failure paths where we need to release the gate that
+/// was waiting on *this* OAuth flow without disturbing unrelated
+/// authentication gates. A bare `clear_engine_pending_auth(user, None)`
+/// would discard every pending Authentication gate for the user — e.g. a
+/// failed Gmail callback would also nuke an in-flight Slack/MCP gate
+/// running on a different thread.
+///
+/// `credential_name` is taken as `&str` so callers in
+/// `src/channels/web/**` don't have to construct an
+/// `t3claw_common::CredentialName` at the web boundary (per
+/// `web/CLAUDE.md` — credential identity stays backend-side). Invalid
+/// credential strings silently no-op rather than erroring; the gate
+/// simply stays open and the user retries.
+pub async fn clear_engine_pending_auth_for_credential(user_id: &str, credential_name: &str) {
+    let Ok(target) = t3claw_common::CredentialName::new(credential_name) else {
+        return;
+    };
+    let Some(lock) = ENGINE_STATE.get() else {
+        return;
+    };
+    let guard = lock.read().await;
+    let Some(state) = guard.as_ref() else {
+        return;
+    };
+
+    for gate in state.pending_gates.list_for_user(user_id).await {
+        if let t3claw_engine::ResumeKind::Authentication {
+            credential_name: gate_credential,
+            ..
+        } = &gate.resume_kind
+            && gate_credential == &target
+        {
             let _ = state.pending_gates.discard(&gate.key()).await;
         }
     }
@@ -3583,14 +4651,61 @@ async fn handle_with_engine_inner(
     // Detect execution intent and configure obligation accordingly
     let thread_config = {
         let mut cfg = ThreadConfig::default();
-        if crate::llm::user_signals_execution_intent(content) {
+        if t3claw_llm::user_signals_execution_intent(content) {
             cfg.require_action_attempt = true;
         }
         cfg
     };
 
-    // Handle the message — spawns a new thread or injects into active one
-    let thread_id = state
+    // Stamp the conversation scope (parseable as a Uuid) into the
+    // thread's `initial_metadata`. The engine reads it back into
+    // `ThreadExecutionContext.conversation_scope`, which lets the
+    // bridge's `EffectBridgeAdapter` resolve per-conversation state
+    // (today: caller-supplied external tool catalog) by either the
+    // engine `thread_id` or the caller-side scope. Without this the
+    // executor task that starts immediately after spawn would race the
+    // bridge's post-spawn `transfer` and miss caller tools on the
+    // first turn.
+    let scope_uuid = parse_engine_thread_id(scope);
+    let extra_metadata = scope_uuid.map(|tid| {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "conversation_scope".into(),
+            serde_json::Value::String(tid.0.to_string()),
+        );
+        map
+    });
+
+    // Pre-bind per-execution context BEFORE the engine spawns the
+    // thread. `handle_user_message` allocates and starts the engine
+    // task internally; if a fast tool gate fires before
+    // `set_execution_context` lands, the controller's `pause()` would
+    // otherwise find no entry and cancel the gate silently. The
+    // pre-execution slot is keyed by user_id and the per-conversation
+    // lock upstream guarantees at most one bridge turn per
+    // conversation is in flight.
+    let scope_thread_id = message
+        .conversation_scope()
+        .and_then(|s| t3claw_common::ExternalThreadId::new(s).ok());
+    let per_exec_context = crate::bridge::gate_controller::PerExecutionContext {
+        conversation_id: conv_id,
+        source_channel: message.channel.clone(),
+        scope_thread_id,
+        channel_metadata: message.metadata.clone(),
+        original_message: Some(message.content.clone()),
+    };
+    state
+        .gate_controller
+        .set_pre_execution_context(message.user_id.clone(), conv_id, per_exec_context.clone())
+        .await;
+
+    // Handle the message — spawns a new thread or injects into active one.
+    // On error we must clear the pre-execution slot we just installed:
+    // without this, a failed `handle_user_message` (engine spawn / inject
+    // failed before any thread_id was allocated) leaves a stale entry
+    // keyed by user_id that would mis-route the next gate prompt for
+    // the same user.
+    let thread_id = match state
         .conversation_manager
         .handle_user_message(
             conv_id,
@@ -3599,9 +4714,40 @@ async fn handle_with_engine_inner(
             &message.user_id,
             thread_config,
             validated_tz.as_ref().map(|tz| tz.name()),
+            extra_metadata,
         )
         .await
-        .map_err(|e| engine_err("thread error", e))?;
+    {
+        Ok(tid) => tid,
+        Err(e) => {
+            state
+                .gate_controller
+                .clear_pre_execution_context(&message.user_id, conv_id)
+                .await;
+            return Err(engine_err("thread error", e));
+        }
+    };
+
+    // Promote the pre-execution entry to (user, thread)-keyed. From
+    // here on, gates from this thread land on the thread-keyed entry
+    // first; the per-user fallback covers any gates that fire before
+    // this promotion lands.
+    state
+        .gate_controller
+        .set_execution_context(message.user_id.clone(), thread_id, per_exec_context)
+        .await;
+
+    // Re-key the catalog onto the engine's allocated `thread_id` so
+    // the terminal-state cleanup hook in `await_thread_outcome` finds
+    // the entry under the canonical key. The race-window protection
+    // is the conversation_scope plumbing above; this transfer is the
+    // bookkeeping leg.
+    if let Some(scope_uuid) = scope_uuid {
+        state
+            .external_tool_catalog
+            .transfer(scope_uuid, thread_id)
+            .await;
+    }
 
     if !attachment_notes.is_empty() {
         save_attachment_index_notes(
@@ -3615,37 +4761,457 @@ async fn handle_with_engine_inner(
     }
 
     // Dual-write to v1 database so the gateway history API shows messages.
-    // Use the thread-scoped conversation (from thread_id) when available,
-    // falling back to the default assistant conversation.
+    // Use the scoped conversation when available, falling back to the default
+    // assistant conversation. External channel scopes such as `wecom:group:*`
+    // are not UUIDs, so they are mapped to stable UUID conversation IDs while
+    // preserving the original scope in `conversations.thread_id`.
     if let Some(ref db) = state.db {
-        let v1_conv_id = if let Some(tid) = scope
-            && let Ok(uuid) = uuid::Uuid::parse_str(tid)
-        {
-            // Ensure the v1 conversation exists for this thread
-            let _ = db
-                .ensure_conversation(
-                    uuid,
-                    &message.channel,
-                    &message.user_id,
-                    Some(tid),
-                    Some(&message.channel),
-                )
-                .await;
-            Some(uuid)
-        } else {
-            db.get_or_create_assistant_conversation(&message.user_id, &message.channel)
-                .await
-                .ok()
-        };
-        if let Some(cid) = v1_conv_id {
-            let _ = db
-                .add_conversation_message(cid, "user", effective_content)
-                .await;
+        match resolve_v1_conversation_for_message(db, message).await {
+            Ok(cid) => {
+                let _ = db
+                    .add_conversation_message(cid, "user", effective_content)
+                    .await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    message_id = %message.id,
+                    "failed to resolve v1 conversation for user message persist: {e}"
+                );
+            }
         }
     }
 
     debug!(thread_id = %thread_id, "engine v2: thread spawned");
-    await_thread_outcome(agent, state, message, conv_id, thread_id).await
+    let outcome = await_thread_outcome(agent, state, message, conv_id, thread_id).await;
+    // Drop per-execution context. The `PendingGate` row (if a gate
+    // fired) carries everything the resolver needs from here on.
+    //
+    // BridgeOutcome::Pending means the request handler hit its deadline
+    // while the engine was still running (typically parked in
+    // `BridgeGateController::pause` waiting for an approval). Clearing
+    // context here would strand the parked thread — its eventual
+    // resolution would call `pause()` for any subsequent gate with no
+    // registered context, surfacing as silent `Cancelled`. Defer the
+    // cleanup to a background task that watches for thread completion
+    // and clears once the engine is actually done.
+    if matches!(outcome, Ok(BridgeOutcome::Pending))
+        && state.thread_manager.is_running(thread_id).await
+    {
+        spawn_deferred_context_cleanup(
+            Arc::clone(&state.gate_controller),
+            Arc::clone(&state.thread_manager),
+            message.user_id.clone(),
+            thread_id,
+            conv_id,
+        );
+    } else {
+        state
+            .gate_controller
+            .clear_execution_context(&message.user_id, thread_id, conv_id)
+            .await;
+    }
+    outcome
+}
+
+/// Watch a still-running thread for completion and clear its
+/// per-execution context once the engine task has actually finished.
+///
+/// Used when `await_thread_outcome` returned [`BridgeOutcome::Pending`]
+/// because the request-level deadline fired while the thread was
+/// parked in [`crate::bridge::gate_controller::BridgeGateController::pause`].
+/// The thread is still alive and the (user, thread)-keyed context must
+/// stay registered until the eventual gate resolution drives the engine
+/// to completion — otherwise a follow-up gate from the same execution
+/// surfaces as silent `Cancelled` (no prompt).
+///
+/// Polls `is_running` with a coarse cadence; gate `expires_at` (30 min)
+/// upper-bounds how long the thread can stay parked, so the watcher is
+/// guaranteed to terminate. The cap is a defensive safety against any
+/// future code path that could deadlock the engine task.
+fn spawn_deferred_context_cleanup(
+    gate_controller: Arc<crate::bridge::gate_controller::BridgeGateController>,
+    thread_manager: Arc<t3claw_engine::ThreadManager>,
+    user_id: String,
+    thread_id: t3claw_engine::ThreadId,
+    conv_id: t3claw_engine::ConversationId,
+) {
+    tokio::spawn(async move {
+        // Poll cadence: 30s (cheap; thread completion is on the order
+        // of seconds-to-minutes once the user resolves). Cap at one
+        // hour — well past the 30-min PendingGate expiry that bounds
+        // any pause() call.
+        let poll_interval = std::time::Duration::from_secs(30);
+        let max_wait = std::time::Duration::from_secs(60 * 60);
+        let started = tokio::time::Instant::now();
+        loop {
+            if !thread_manager.is_running(thread_id).await {
+                break;
+            }
+            if started.elapsed() >= max_wait {
+                tracing::warn!(
+                    thread_id = %thread_id,
+                    "deferred context cleanup hit one-hour cap; clearing context anyway"
+                );
+                break;
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+        gate_controller
+            .clear_execution_context(&user_id, thread_id, conv_id)
+            .await;
+        debug!(
+            thread_id = %thread_id,
+            "engine v2: deferred context cleanup ran"
+        );
+    });
+}
+
+/// Background continuation that takes over event forwarding and final
+/// response delivery for a thread that parked at an inline approval
+/// gate. Spawned by `await_thread_outcome` once it detects a pending
+/// gate row for the (user, thread) — at that point the foreground
+/// `handle_message` future is unblocked (returns `Pending`) so the
+/// per-user agent loop can dispatch other threads, while this task
+/// continues to:
+///
+/// 1. Forward `ThreadEvent`s for `thread_id` to SSE and the originating
+///    channel — covers both the events emitted before the user
+///    resolves the gate and the post-resume events once the engine
+///    continues from the parked tool call.
+/// 2. Detect thread completion via `is_running`, then call
+///    `join_thread` for the final outcome.
+/// 3. Broadcast the final response via SSE (`AppEvent::Response`),
+///    deliver it through the originating channel
+///    (`ChannelManager::respond` + `Done` status), and persist it to
+///    the v1 conversation table for the history API.
+/// 4. Clear the per-(user, thread) execution context so the gate
+///    controller's bookkeeping bounds.
+///
+/// Without this task, after early-Pending-on-park the engine resumes
+/// invisibly: SSE clients never see the assistant response, non-web
+/// channels (Telegram, CLI) never receive the response message, and
+/// the history table is missing the final assistant turn.
+///
+/// Capped at one hour to bound execution against any pathological
+/// post-resume hang; the gate `expires_at` (30 min) upper-bounds the
+/// pre-resume wait, and a sane post-resume thread completes well
+/// inside the second 30 min.
+#[allow(clippy::too_many_arguments)]
+fn spawn_post_park_continuation(
+    state: &EngineState,
+    channels: Arc<crate::channels::ChannelManager>,
+    message: IncomingMessage,
+    conv_id: t3claw_engine::ConversationId,
+    thread_id: t3claw_engine::ThreadId,
+) {
+    let thread_manager = Arc::clone(&state.thread_manager);
+    let conversation_manager = Arc::clone(&state.conversation_manager);
+    let effect_adapter = Arc::clone(&state.effect_adapter);
+    let store = Arc::clone(&state.store);
+    let gate_controller = Arc::clone(&state.gate_controller);
+    let pending_gates = Arc::clone(&state.pending_gates);
+    let sse = state.sse.clone();
+    let db = state.db.clone();
+    let auth_manager = state.auth_manager.clone();
+    let extension_manager = state.extension_manager.clone();
+    let user_id = message.user_id.clone();
+    let channel_name = message.channel.clone();
+    let metadata = message.metadata.clone();
+    let tid_str = thread_id.to_string();
+
+    tokio::spawn(async move {
+        let mut event_rx = thread_manager.subscribe_events();
+        // Cap at one hour: gate expiry bounds the pre-resume wait, and
+        // a sane post-resume thread completes well inside that.
+        let max_wait = std::time::Duration::from_secs(60 * 60);
+        let started = tokio::time::Instant::now();
+        loop {
+            tokio::select! {
+                event = event_rx.recv() => {
+                    match event {
+                        Ok(ref evt) if evt.thread_id == thread_id => {
+                            forward_event_to_channel(evt, &channels, &channel_name, &metadata).await;
+                            if let Some(ref sse) = sse {
+                                let skip_verbose = !sse.has_verbose_receivers();
+                                let leak_detector = effect_adapter.safety().leak_detector();
+                                for mut app_event in thread_event_to_app_events(evt, &tid_str) {
+                                    if skip_verbose && app_event.is_verbose_only() {
+                                        continue;
+                                    }
+                                    redact_code_executed_secrets(&mut app_event, leak_detector);
+                                    sse.broadcast_for_user(&user_id, app_event); // projection-exempt: bridge dispatcher, post-park event forwarding
+                                }
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        _ => {}
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                    if !thread_manager.is_running(thread_id).await {
+                        break;
+                    }
+                    if started.elapsed() >= max_wait {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            "post-park continuation hit one-hour cap; abandoning"
+                        );
+                        gate_controller.clear_execution_context(&user_id, thread_id, conv_id).await;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Thread completed. Mirror `await_thread_outcome`'s post-loop
+        // outcome → BridgeOutcome path, but deliver the response
+        // directly via channel + SSE rather than returning it through
+        // the bridge return value (the foreground call returned Pending
+        // long ago).
+        let outcome = match thread_manager.join_thread(thread_id).await {
+            Ok(o) => o,
+            Err(e) => {
+                tracing::debug!(
+                    thread_id = %thread_id,
+                    error = %e,
+                    "post-park continuation: join_thread failed"
+                );
+                gate_controller
+                    .clear_execution_context(&user_id, thread_id, conv_id)
+                    .await;
+                return;
+            }
+        };
+
+        if let Err(e) = conversation_manager
+            .record_thread_outcome(conv_id, thread_id, &outcome)
+            .await
+        {
+            tracing::debug!(
+                thread_id = %thread_id,
+                error = %e,
+                "post-park continuation: record_thread_outcome failed"
+            );
+        }
+
+        let response_text: Option<String> = match &outcome {
+            ThreadOutcome::Completed { response } => {
+                if let Some(ref db) = db {
+                    persist_v2_tool_calls(&store, db, thread_id, &message).await;
+                }
+                response.clone()
+            }
+            ThreadOutcome::Stopped => Some("Thread was stopped.".into()),
+            ThreadOutcome::MaxIterations => {
+                Some("Reached maximum iterations without completing.".into())
+            }
+            ThreadOutcome::Failed {
+                error,
+                debug_detail,
+            } => {
+                let sanitized =
+                    crate::bridge::user_facing_errors::user_facing_thread_failure(error);
+                let sse_will_deliver_to_user =
+                    sse.is_some() && channel_name == GATEWAY_CHANNEL_NAME;
+                if let Some(ref sse) = sse {
+                    sse.broadcast_for_user(
+                        // projection-exempt: bridge dispatcher, post-park failed thread error
+                        &user_id,
+                        AppEvent::Error {
+                            message: sanitized.clone(),
+                            thread_id: Some(tid_str.clone()),
+                        },
+                    );
+                }
+                match bridge_outcome_for_failed_thread(
+                    error,
+                    debug_detail.as_deref(),
+                    &user_id,
+                    &channel_name,
+                    sse_will_deliver_to_user,
+                ) {
+                    BridgeOutcome::Respond(text) => Some(text),
+                    _ => None,
+                }
+            }
+            ThreadOutcome::GatePaused {
+                gate_name,
+                action_name,
+                call_id,
+                parameters,
+                resume_kind,
+                resume_output,
+                paused_lease,
+            } => {
+                // The post-resume engine hit ANOTHER (legacy) GatePaused
+                // outcome — typically Authentication or External. Build
+                // the new pending gate row and surface the prompt; no
+                // response text to deliver yet.
+                let redacted_params =
+                    if let Some(tool) = effect_adapter.tools().get(action_name).await {
+                        crate::tools::redact_params(parameters, tool.sensitive_params())
+                    } else {
+                        parameters.clone()
+                    };
+                let pending = PendingGate {
+                    request_id: uuid::Uuid::new_v4(),
+                    gate_name: gate_name.clone(),
+                    user_id: user_id.clone(),
+                    thread_id,
+                    scope_thread_id: message
+                        .conversation_scope()
+                        .and_then(|s| t3claw_common::ExternalThreadId::new(s).ok()),
+                    conversation_id: conv_id,
+                    source_channel: channel_name.clone(),
+                    action_name: action_name.clone(),
+                    call_id: call_id.clone(),
+                    parameters: parameters.clone(),
+                    display_parameters: Some(redacted_params),
+                    description: format!(
+                        "Tool '{}' requires {} (gate: {gate_name})",
+                        action_name,
+                        resume_kind.kind_name()
+                    ),
+                    resume_kind: resume_kind.clone(),
+                    created_at: chrono::Utc::now(),
+                    expires_at: chrono::Utc::now() + chrono::Duration::minutes(30),
+                    original_message: Some(message.content.clone()),
+                    resume_output: resume_output.clone(),
+                    paused_lease: paused_lease.as_deref().cloned(),
+                    approval_already_granted: false,
+                };
+                // Skip the prompt entirely if we couldn't persist the
+                // follow-up gate. Without a row backing the
+                // `request_id`, the user has nothing to resolve against
+                // — emitting a card here would dead-end as soon as
+                // they click it.
+                let insert_succeeded = match pending_gates.insert(pending.clone()).await {
+                    Ok(()) => true,
+                    Err(e) => {
+                        tracing::debug!(
+                            gate = %gate_name,
+                            error = %e,
+                            "post-park continuation: failed to store follow-up pending gate"
+                        );
+                        false
+                    }
+                };
+                if insert_succeeded {
+                    let extension_name = resolve_auth_gate_extension_name(
+                        auth_manager.as_deref(),
+                        extension_manager.as_deref(),
+                        effect_adapter.tools(),
+                        &pending,
+                    )
+                    .await;
+                    // Match `send_pending_gate_status` semantics rather
+                    // than collapsing every non-Approval gate into an
+                    // `AuthRequired` card with `pending.description` /
+                    // `auth_url: None`. The previous catch-all dropped
+                    // real `Authentication` instructions and OAuth
+                    // URLs, and surfaced spurious auth prompts for
+                    // `External` callbacks (which the canonical helper
+                    // intentionally ignores).
+                    let status_update = match &pending.resume_kind {
+                        t3claw_engine::ResumeKind::Approval { allow_always } => {
+                            Some(StatusUpdate::ApprovalNeeded {
+                                request_id: pending.request_id.to_string(),
+                                tool_name: pending.action_name.clone(),
+                                description: pending.description.clone(),
+                                parameters: pending
+                                    .display_parameters
+                                    .clone()
+                                    .unwrap_or_else(|| pending.parameters.clone()),
+                                allow_always: *allow_always,
+                            })
+                        }
+                        t3claw_engine::ResumeKind::Authentication {
+                            instructions,
+                            auth_url,
+                            ..
+                        } => Some(StatusUpdate::AuthRequired {
+                            extension_name: extension_name.unwrap_or_else(|| {
+                                t3claw_common::ExtensionName::from_trusted(
+                                    pending.action_name.clone(),
+                                )
+                            }),
+                            instructions: Some(instructions.clone()),
+                            auth_url: auth_url.clone(),
+                            setup_url: None,
+                            request_id: Some(pending.request_id.to_string()),
+                        }),
+                        t3claw_engine::ResumeKind::External { .. } => None,
+                    };
+                    if let Some(status) = status_update {
+                        let _ = channels.send_status(&channel_name, status, &metadata).await;
+                    }
+                }
+                None
+            }
+        };
+
+        if let Some(ref text) = response_text {
+            // SSE Response broadcast (web).
+            if let Some(ref sse) = sse {
+                sse.broadcast_for_user(
+                    // projection-exempt: bridge dispatcher, post-park final response
+                    &user_id,
+                    AppEvent::Response {
+                        content: text.clone(),
+                        thread_id: tid_str.clone(),
+                    },
+                );
+            }
+            // Channel respond + Done status (Telegram, CLI, gateway).
+            if let Err(e) = channels
+                .respond(&message, OutgoingResponse::text(text.clone()))
+                .await
+            {
+                tracing::debug!(
+                    channel = %channel_name,
+                    error = %e,
+                    "post-park continuation: channel respond failed"
+                );
+            }
+            if let Err(e) = channels
+                .send_status(
+                    &channel_name,
+                    StatusUpdate::Status("Done".into()),
+                    &metadata,
+                )
+                .await
+            {
+                tracing::debug!(
+                    channel = %channel_name,
+                    error = %e,
+                    "post-park continuation: Done status failed"
+                );
+            }
+            // Persist to v1 DB so the history API renders the final
+            // assistant message.
+            if let Some(ref db) = db {
+                match resolve_v1_conversation_for_message(db, &message).await {
+                    Ok(cid) => {
+                        let _ = db.add_conversation_message(cid, "assistant", text).await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            "post-park continuation: failed to resolve v1 conversation for assistant response persist: {e}"
+                        );
+                    }
+                }
+            }
+        }
+
+        gate_controller
+            .clear_execution_context(&user_id, thread_id, conv_id)
+            .await;
+        debug!(
+            thread_id = %thread_id,
+            "engine v2: post-park continuation ran"
+        );
+    });
 }
 
 /// Fire active OnEvent missions whose pattern matches the inbound message.
@@ -3741,6 +5307,17 @@ async fn await_thread_outcome(
     // break out to avoid hanging the user session forever (e.g. after
     // a denied approval where the thread fails to resume).
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
+    let mut timed_out = false;
+    // Set when we detect the thread has parked at an inline gate. The
+    // gate-park handoff (below) returns `Pending` immediately so the
+    // per-user agent loop unblocks and can dispatch other threads, while
+    // a background task takes over event forwarding and final-response
+    // delivery for this thread.
+    let mut gate_parked = false;
+    let pending_key = PendingGateKey {
+        user_id: message.user_id.clone(),
+        thread_id,
+    };
 
     loop {
         tokio::select! {
@@ -3749,7 +5326,28 @@ async fn await_thread_outcome(
                     Ok(ref evt) if evt.thread_id == thread_id => {
                         forward_event_to_channel(evt, channels, channel_name, metadata).await;
                         if let Some(sse) = sse {
-                            for app_event in thread_event_to_app_events(evt, &tid_str) {
+                            // Mirror the `send_status` gate: verbose-only
+                            // events (e.g. `CodeExecuted`, `Warning`) are
+                            // only useful when a debug subscriber is
+                            // actually listening. Skipping here avoids
+                            // flooding the shared SSE broadcast buffer
+                            // and the per-event clone cost for normal
+                            // (non-debug) browser tabs.
+                            let skip_verbose = !sse.has_verbose_receivers();
+                            let leak_detector = state.effect_adapter.safety().leak_detector();
+                            for mut app_event in thread_event_to_app_events(evt, &tid_str) {
+                                if skip_verbose && app_event.is_verbose_only() {
+                                    continue;
+                                }
+                                // The engine crate emits CodeExecuted
+                                // raw — it has no dependency on
+                                // `t3claw_safety`. Scrub secrets
+                                // (bearer tokens, API keys, etc.) out
+                                // of the code/stdout/return_value
+                                // payload here, at the bridge boundary,
+                                // before the event reaches any SSE
+                                // subscriber.
+                                redact_code_executed_secrets(&mut app_event, leak_detector);
                                 sse.broadcast_for_user(&message.user_id, app_event);
                             }
                         }
@@ -3762,15 +5360,61 @@ async fn await_thread_outcome(
                 if !state.thread_manager.is_running(thread_id).await {
                     break;
                 }
+                // Inline gate detection: if a pending gate has been
+                // registered for (user, thread) while the thread is
+                // still running, the engine is parked inside
+                // `BridgeGateController::pause` awaiting user
+                // resolution. Holding `handle_message` here would
+                // serialize the per-user agent loop behind the parked
+                // pause — a second thread's `UserInput` queued in
+                // `msg_tx` cannot dispatch until either the user
+                // resolves this gate or the 5-minute deadline below
+                // fires. Hand off to a background continuation task
+                // (preserves event forwarding + final-response delivery)
+                // and surface as `Pending` so the agent loop unblocks.
+                if state.pending_gates.peek(&pending_key).await.is_some() {
+                    gate_parked = true;
+                    break;
+                }
                 if tokio::time::Instant::now() >= deadline {
                     tracing::warn!(
                         thread_id = %thread_id,
                         "await_thread_outcome timed out after 5 minutes — breaking to avoid hang"
                     );
+                    timed_out = true;
                     break;
                 }
             }
         }
+    }
+
+    // If we exited because the thread parked at an inline gate, hand
+    // off the rest of the lifecycle (event forwarding + final response
+    // broadcast on completion + per-execution context cleanup) to a
+    // background task and return `Pending`. join_thread cannot run on
+    // the foreground task because it would block on the parked future
+    // for up to the gate's 30-min expiry.
+    if gate_parked && state.thread_manager.is_running(thread_id).await {
+        spawn_post_park_continuation(
+            state,
+            agent.channels.clone(),
+            message.clone(),
+            conv_id,
+            thread_id,
+        );
+        return Ok(BridgeOutcome::Pending);
+    }
+
+    // If we hit the deadline and the thread is still running (typically
+    // because it's parked in `BridgeGateController::pause` waiting for
+    // an approval the user hasn't acted on), do NOT call `join_thread`
+    // — that would block the request handler for up to the gate's
+    // `expires_at` (30 min) on the same parked task. Surface as
+    // `Pending`: the live `PendingGate` row stays available, the user
+    // can still resolve it, and the resolver path will deliver the
+    // resolution into the parked oneshot.
+    if timed_out && state.thread_manager.is_running(thread_id).await {
+        return Ok(BridgeOutcome::Pending);
     }
 
     let outcome = state
@@ -3778,6 +5422,16 @@ async fn await_thread_outcome(
         .join_thread(thread_id)
         .await
         .map_err(|e| engine_err("join error", e))?;
+
+    // Drop the external-tool catalog entry on terminal outcomes —
+    // the thread can never resume from `Completed`, `Stopped`,
+    // `MaxIterations`, or `Failed`, so the entry would otherwise
+    // leak forever. `GatePaused` deliberately keeps the entry: a
+    // follow-up resume request needs the catalog to still know
+    // about this thread's caller-supplied tools.
+    if !matches!(outcome, ThreadOutcome::GatePaused { .. }) {
+        state.external_tool_catalog.clear(thread_id).await;
+    }
 
     state
         .conversation_manager
@@ -3789,22 +5443,19 @@ async fn await_thread_outcome(
     // shows it correctly for all outcomes that produce a response.
     let write_v1_response = |db: &Arc<dyn crate::db::Database>, text: &str| {
         let db = Arc::clone(db);
-        let scope = message.conversation_scope().map(String::from);
-        let user_id = message.user_id.clone();
-        let channel = message.channel.clone();
+        let message = message.clone();
         let text = text.to_string();
         async move {
-            let v1_conv_id = if let Some(tid) = scope
-                && let Ok(uuid) = uuid::Uuid::parse_str(&tid)
-            {
-                Some(uuid)
-            } else {
-                db.get_or_create_assistant_conversation(&user_id, &channel)
-                    .await
-                    .ok()
-            };
-            if let Some(cid) = v1_conv_id {
-                let _ = db.add_conversation_message(cid, "assistant", &text).await;
+            match resolve_v1_conversation_for_message(&db, &message).await {
+                Ok(cid) => {
+                    let _ = db.add_conversation_message(cid, "assistant", &text).await;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        message_id = %message.id,
+                        "failed to resolve v1 conversation for assistant response persist: {e}"
+                    );
+                }
             }
         }
     };
@@ -3953,11 +5604,46 @@ async fn await_thread_outcome(
         ThreadOutcome::MaxIterations => Ok(BridgeOutcome::Respond(
             "Reached maximum iterations without completing.".into(),
         )),
-        ThreadOutcome::Failed { error } => Ok(bridge_outcome_for_failed_thread(
-            &error,
-            &message.user_id,
-            &message.channel,
-        )),
+        ThreadOutcome::Failed {
+            error,
+            debug_detail,
+        } => {
+            // Emit the sanitized failure on SSE so the web gateway's
+            // chat surface (and the Debug Inspector) renders a structured
+            // error card with activity cleanup + input re-enable. The
+            // raw `debug_detail` is deliberately NOT broadcast — SSE
+            // error frames reach every authenticated consumer, so raw
+            // tracebacks and upstream HTTP bodies must stay server-side
+            // only (logged at `debug!` inside
+            // `bridge_outcome_for_failed_thread`).
+            //
+            // When the originating channel is the gateway itself, that
+            // SSE frame IS the user-visible surface — returning
+            // `Respond(sanitized)` on top of it would double-render the
+            // same failure. For non-gateway channels the SSE frame is
+            // only a secondary per-user stream, so we still return
+            // `Respond(sanitized)` so the primary channel (telegram,
+            // relay, …) delivers the sanitized failure.
+            let sanitized = crate::bridge::user_facing_errors::user_facing_thread_failure(&error);
+            let sse_will_deliver_to_user =
+                state.sse.is_some() && message.channel == GATEWAY_CHANNEL_NAME;
+            if let Some(ref sse) = state.sse {
+                sse.broadcast_for_user(
+                    &message.user_id,
+                    AppEvent::Error {
+                        message: sanitized,
+                        thread_id: Some(thread_id.to_string()),
+                    },
+                );
+            }
+            Ok(bridge_outcome_for_failed_thread(
+                &error,
+                debug_detail.as_deref(),
+                &message.user_id,
+                &message.channel,
+                sse_will_deliver_to_user,
+            ))
+        }
         ThreadOutcome::GatePaused {
             gate_name,
             action_name,
@@ -4025,6 +5711,46 @@ async fn await_thread_outcome(
                     error = %e,
                     "failed to store pending gate (may be duplicate)"
                 );
+            }
+
+            // Caller-supplied external tool from the Responses API:
+            // surface as `AppEvent::ExternalToolCall` so the
+            // /v1/responses handler can emit a `function_call`
+            // ResponseOutputItem and complete the turn. Without this
+            // emit the handler times out waiting for a never-arriving
+            // event and the user sees `response.failed`. The mid-exec
+            // path (`notify_pending_gate`) emits the same variant, but
+            // CodeAct converts the gate into a Python RuntimeError —
+            // the thread ends with a `ThreadOutcome::GatePaused` and
+            // never traverses `notify_pending_gate`, so we have to
+            // emit it here too.
+            if let t3claw_engine::ResumeKind::External { ref callback_id } = pending.resume_kind
+                && crate::bridge::is_external_tool_callback_id(callback_id)
+            {
+                if let Some(ref sse) = state.sse {
+                    let arguments = serde_json::to_string(&pending.parameters)
+                        .unwrap_or_else(|_| pending.parameters.to_string());
+                    let event = AppEvent::ExternalToolCall {
+                        request_id: pending.request_id.to_string(),
+                        call_id: pending.call_id.clone(),
+                        name: pending.action_name.clone(),
+                        arguments,
+                        thread_id: Some(pending.effective_wire_thread_id()),
+                    };
+                    sse.broadcast_for_user(&message.user_id, event); // projection-exempt: bridge dispatcher, ThreadOutcome::GatePaused External-tool projection from CodeAct re-entry path
+                } else {
+                    tracing::debug!(
+                        user_id = %message.user_id,
+                        callback = %callback_id,
+                        request_id = %pending.request_id,
+                        "external tool gate paused (post-CodeAct) but no broadcaster is wired; \
+                         caller will not be notified"
+                    );
+                }
+                // Skip the approval-card delivery path below — that
+                // surface is for human-in-the-loop UX which doesn't
+                // apply to caller-executed tool calls.
+                return Ok(BridgeOutcome::Pending);
             }
 
             // Send the approval/auth card via the source channel. Each
@@ -4106,18 +5832,104 @@ fn interpret_message_event(role: &str, content_preview: &str) -> Option<&'static
 ///    consistent with what the user actually saw.
 // pub(crate) for #[cfg(test)] re-export in mod.rs; the module itself
 // is private so this has no production visibility beyond router.rs.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_mission_notification(
     notif: &t3claw_engine::MissionNotification,
     channels: &std::sync::Arc<crate::channels::ChannelManager>,
     sse: Option<&Arc<SseManager>>,
     db: Option<&Arc<dyn Database>>,
     conv_mgr: Option<&t3claw_engine::ConversationManager>,
+    auth_manager: Option<&AuthManager>,
+    tools: Option<&Arc<crate::tools::ToolRegistry>>,
+    extension_manager: Option<&crate::extensions::ExtensionManager>,
 ) {
     let Some(ref text) = notif.response else {
         return;
     };
 
     let full_text = format!("**[{}]** {text}", notif.mission_name);
+
+    // If the mission paused on a gate (auth, approval, external), surface
+    // the gate on every notify_channel via a structured StatusUpdate. This
+    // is what lights up the gateway UI's auth tray (or the equivalent in
+    // chat-only channels). The friendly text response below is still
+    // delivered alongside so the user sees the prompt in chat history.
+    //
+    // Pinned by issue #3133: previously a mission's child thread that
+    // paused on Gmail OAuth would emit no channel signal at all — the
+    // user got nothing actionable, the cron would re-fire on the same
+    // gate, and the LLM eventually narrated "Status: None Error: None"
+    // when its `http` fallback failed. The mission is now Paused
+    // (engine-side) AND the user gets an auth-tray entry to resolve.
+    if let Some(gate) = &notif.gate
+        && let Some(tools) = tools
+    {
+        for channel_name in &notif.notify_channels {
+            let metadata = serde_json::json!({"user_id": notif.user_id});
+            let status = match &gate.resume_kind {
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name,
+                    instructions,
+                    auth_url,
+                } => {
+                    let extension_name = resolve_extension_for_action(
+                        auth_manager,
+                        extension_manager,
+                        tools,
+                        &gate.action_name,
+                        &gate.parameters,
+                        credential_name.as_str(),
+                        &notif.user_id,
+                    )
+                    .await;
+                    // Forward `gate_request_id` (a freshly-generated
+                    // UUID), NOT the engine `call_id`. The gateway's
+                    // gate-resolve handler at
+                    // `channels/web/features/chat/mod.rs:183` (and the
+                    // WS handler at `platform/ws.rs:236`) call
+                    // `Uuid::parse_str` on the inbound `request_id` and
+                    // 400 on non-UUIDs — `call_id` ("call_xyz...") would
+                    // make the auth-tray entry unresolvable. Engine
+                    // `call_id` is preserved on `MissionGateInfo` for
+                    // half-2 auto-resume (#3166).
+                    StatusUpdate::AuthRequired {
+                        extension_name,
+                        instructions: Some(instructions.clone()),
+                        auth_url: auth_url.clone(),
+                        setup_url: None,
+                        request_id: Some(gate.gate_request_id.to_string()),
+                    }
+                }
+                t3claw_engine::ResumeKind::Approval { allow_always } => {
+                    StatusUpdate::ApprovalNeeded {
+                        // See the AuthRequired arm above for why we
+                        // forward `gate_request_id` rather than the
+                        // engine `call_id`.
+                        request_id: gate.gate_request_id.to_string(),
+                        tool_name: gate.action_name.clone(),
+                        description: format!(
+                            "Mission '{}' is waiting for approval to run '{}'.",
+                            notif.mission_name, gate.action_name
+                        ),
+                        parameters: gate.parameters.clone(),
+                        allow_always: *allow_always,
+                    }
+                }
+                // External callbacks (webhooks etc.) don't have a
+                // user-facing tray entry — there's nothing the user can do
+                // beyond wait for the external system to reply. The text
+                // response still tells them what's pending.
+                t3claw_engine::ResumeKind::External { .. } => continue,
+            };
+            if let Err(e) = channels.send_status(channel_name, status, &metadata).await {
+                debug!(
+                    channel = %channel_name,
+                    mission = %notif.mission_name,
+                    "failed to surface mission gate status: {e}"
+                );
+            }
+        }
+    }
 
     // `notify_user` takes precedence over the mission owner's user_id when
     // set — it lets a routine/mission deliver to a specific recipient
@@ -4286,30 +6098,19 @@ async fn persist_v2_tool_calls(
         }
     };
 
-    // Resolve the v1 conversation ID
-    let v1_conv_id = if let Some(tid) = message.conversation_scope()
-        && let Ok(uuid) = uuid::Uuid::parse_str(tid)
-    {
-        Some(uuid)
-    } else {
-        match db
-            .get_or_create_assistant_conversation(&message.user_id, &message.channel)
-            .await
-        {
-            Ok(cid) => Some(cid),
-            Err(e) => {
-                tracing::warn!(
-                    thread_id = %thread_id,
-                    "failed to resolve v1 conversation for tool_calls persist: {e}"
-                );
-                return;
-            }
+    let cid = match resolve_v1_conversation_for_message(db, message).await {
+        Ok(cid) => cid,
+        Err(e) => {
+            tracing::warn!(
+                thread_id = %thread_id,
+                "failed to resolve v1 conversation for tool_calls persist: {e}"
+            );
+            return;
         }
     };
-    if let Some(cid) = v1_conv_id
-        && let Err(e) = db
-            .add_conversation_message(cid, "tool_calls", &content)
-            .await
+    if let Err(e) = db
+        .add_conversation_message(cid, "tool_calls", &content)
+        .await
     {
         tracing::warn!(thread_id = %thread_id, "failed to persist v2 tool_calls to v1 DB: {e}");
     }
@@ -4470,9 +6271,124 @@ async fn forward_event_to_channel(
     }
 }
 
-/// Convert a ThreadEvent to AppEvents for the web gateway SSE stream.
+/// Bridge engine-side `CodeExecutionFailure` to its wire mirror
+/// `CodeExecutionFailureCategory` in `t3claw_common`.
 ///
-/// Returns multiple events when needed (e.g., ToolStarted + ToolCompleted
+/// Exhaustive on purpose: if the engine enum gains a variant, this must
+/// fail to compile so both enums stay in lockstep. Per
+/// `.claude/rules/types.md` "Wire-stable enums" — do not reach for
+/// `format!("{:?}", ...)` or `.to_string()` here; the serde rename rules
+/// on the two enums independently produce snake_case, and a `Debug`
+/// detour would silently drift.
+fn code_execution_category_to_wire(
+    category: &t3claw_engine::CodeExecutionFailure,
+) -> t3claw_common::CodeExecutionFailureCategory {
+    use t3claw_common::CodeExecutionFailureCategory as Wire;
+    use t3claw_engine::CodeExecutionFailure as Src;
+    match category {
+        Src::SyntaxError => Wire::SyntaxError,
+        Src::RuntimeError => Wire::RuntimeError,
+        Src::NameLookup => Wire::NameLookup,
+        Src::VmPanic => Wire::VmPanic,
+        Src::ResourceLimit => Wire::ResourceLimit,
+        Src::ToolError => Wire::ToolError,
+        Src::OsDenied => Wire::OsDenied,
+    }
+}
+
+/// Scrub secrets (bearer tokens, API keys, etc.) out of the payload of
+/// an `AppEvent::CodeExecuted` before it is broadcast on SSE.
+///
+/// The engine crate (`t3claw_engine`) emits `CodeExecuted` with raw
+/// `code` / `stdout` / `return_value` because it does not depend on
+/// `t3claw_safety`. Verbose-only SSE subscribers would otherwise see
+/// model-authored Python snippets that printed credentials, API
+/// responses echoed to stdout, or credential-shaped return values —
+/// material that `sanitize_tool_output` would normally catch on the
+/// tool-output path but that never flows through that pipeline.
+///
+/// Redaction is no-op for any other `AppEvent` variant.
+fn redact_code_executed_secrets(event: &mut AppEvent, leak_detector: &t3claw_safety::LeakDetector) {
+    let AppEvent::CodeExecuted {
+        code,
+        stdout,
+        return_value,
+        ..
+    } = event
+    else {
+        return;
+    };
+
+    *code = redact_leaks_in_string(code, leak_detector);
+    *stdout = redact_leaks_in_string(stdout, leak_detector);
+
+    if let Some(value) = return_value {
+        redact_secrets_in_json(value, leak_detector);
+    }
+}
+
+/// Return `content` with every `LeakDetector` match replaced by
+/// `[REDACTED]`. Unlike `scan_and_clean`, this redacts matches under
+/// *any* action (`Block`, `Redact`, or `Warn`) — for a verbose-only
+/// observability event, a leak-carrying field is never appropriate to
+/// keep verbatim, regardless of what the detector's policy would say
+/// for tool output. `Block`-action patterns in particular were only
+/// flagging `should_block` before, which `scan()`'s `redacted_content`
+/// leaves `None` for — so a `ghp_…` token would have flowed through
+/// unchanged without this path.
+fn redact_leaks_in_string(content: &str, leak_detector: &t3claw_safety::LeakDetector) -> String {
+    let scan = leak_detector.scan(content);
+    if scan.matches.is_empty() {
+        return content.to_string();
+    }
+    let mut ranges: Vec<_> = scan.matches.iter().map(|m| m.location.clone()).collect();
+    ranges.sort_by_key(|r| r.start);
+
+    let mut out = String::with_capacity(content.len());
+    let mut cursor = 0usize;
+    for range in ranges {
+        // Overlapping / duplicate ranges — skip any already covered.
+        if range.start < cursor {
+            continue;
+        }
+        out.push_str(&content[cursor..range.start]);
+        out.push_str("[REDACTED]");
+        cursor = range.end;
+    }
+    if cursor < content.len() {
+        out.push_str(&content[cursor..]);
+    }
+    out
+}
+
+/// Walk a `serde_json::Value` and replace leak-detector matches inside
+/// string values with `[REDACTED]`. Structural positions (object keys,
+/// numeric values, null/bool) pass through unchanged.
+fn redact_secrets_in_json(
+    value: &mut serde_json::Value,
+    leak_detector: &t3claw_safety::LeakDetector,
+) {
+    match value {
+        serde_json::Value::String(s) => {
+            *s = redact_leaks_in_string(s, leak_detector);
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                redact_secrets_in_json(item, leak_detector);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                redact_secrets_in_json(v, leak_detector);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Convert a `ThreadEvent` to `AppEvent`s for the web gateway SSE stream.
+///
+/// Returns multiple events when needed (e.g., `ToolStarted` + `ToolCompleted`
 /// so the frontend creates the card then resolves it).
 fn thread_event_to_app_events(
     event: &t3claw_engine::ThreadEvent,
@@ -4504,7 +6420,7 @@ fn thread_event_to_app_events(
                     name: display_name,
                     success: true,
                     error: None,
-                    parameters: None,
+                    parameters: params_summary.clone(),
                     call_id: Some(call_id.clone()),
                     duration_ms: Some(*duration_ms),
                     thread_id: Some(thread_id.into()),
@@ -4531,7 +6447,7 @@ fn thread_event_to_app_events(
                     name: display_name,
                     success: false,
                     error: Some(error.clone()),
-                    parameters: None,
+                    parameters: params_summary.clone(),
                     call_id: Some(call_id.clone()),
                     duration_ms: Some(*duration_ms),
                     thread_id: Some(thread_id.into()),
@@ -4568,12 +6484,129 @@ fn thread_event_to_app_events(
             child_thread_id: child_id.to_string(),
             goal: goal.clone(),
         }],
+        EventKind::ChildCompleted { child_id } => vec![AppEvent::ChildThreadCompleted {
+            parent_thread_id: thread_id.into(),
+            child_thread_id: child_id.to_string(),
+        }],
+        EventKind::StepFailed { error, .. } => vec![AppEvent::Error {
+            message: format!("Step failed: {error}"),
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::CodeExecutionFailed {
+            category,
+            error,
+            code_hash,
+            duration_ms,
+            ..
+        } => vec![AppEvent::CodeExecutionFailed {
+            category: code_execution_category_to_wire(category),
+            error: error.clone(),
+            duration_ms: *duration_ms,
+            code_hash: code_hash.clone(),
+            thread_id: Some(thread_id.into()),
+        }],
         EventKind::SkillActivated { skill_names } => vec![AppEvent::SkillActivated {
             skill_names: skill_names.clone(),
             thread_id: Some(thread_id.into()),
             feedback: Vec::new(),
         }],
-        _ => vec![],
+        EventKind::CodeExecuted {
+            code,
+            stdout,
+            return_value,
+            duration_ms,
+            ..
+        } => vec![AppEvent::CodeExecuted {
+            code: code.clone(),
+            stdout: stdout.clone(),
+            return_value: return_value.clone(),
+            duration_ms: *duration_ms,
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::LeaseGranted {
+            lease_id,
+            capability_name,
+        } => vec![AppEvent::LeaseGranted {
+            lease_id: lease_id.to_string(),
+            capability_name: capability_name.clone(),
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::LeaseRevoked { lease_id, reason } => vec![AppEvent::LeaseRevoked {
+            lease_id: lease_id.to_string(),
+            reason: reason.clone(),
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::LeaseExpired { lease_id } => vec![AppEvent::LeaseExpired {
+            lease_id: lease_id.to_string(),
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::SelfImprovementStarted => vec![AppEvent::SelfImprovement {
+            phase: t3claw_common::SelfImprovementPhase::Started,
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::SelfImprovementComplete {
+            prompt_updated,
+            patterns_added,
+        } => vec![AppEvent::SelfImprovement {
+            phase: t3claw_common::SelfImprovementPhase::Complete {
+                prompt_updated: *prompt_updated,
+                patterns_added: *patterns_added,
+            },
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::SelfImprovementFailed { error } => vec![AppEvent::SelfImprovement {
+            phase: t3claw_common::SelfImprovementPhase::Failed {
+                error: error.clone(),
+            },
+            thread_id: Some(thread_id.into()),
+        }],
+        EventKind::OrchestratorRollback {
+            from_version,
+            to_version,
+            reason,
+        } => {
+            // `reason` originates from `format!("execution failed: {e}")`
+            // in the engine's rollback path, where `e: EngineError` can
+            // render DB connection strings, file paths, or raw upstream
+            // HTTP bodies. SSE error-adjacent frames reach every
+            // authenticated consumer, so the wire carries a classified
+            // operator-facing message and the raw text stays in the log.
+            tracing::debug!(
+                from_version = *from_version,
+                to_version = *to_version,
+                raw_reason = %reason,
+                "orchestrator rollback event"
+            );
+            vec![AppEvent::OrchestratorRollback {
+                from_version: *from_version,
+                to_version: *to_version,
+                reason: crate::bridge::user_facing_errors::user_facing_rollback_reason(reason)
+                    .to_string(),
+                thread_id: Some(thread_id.into()),
+            }]
+        }
+
+        // Temporarily-suppressed engine variants. These are NOT bridged
+        // to `AppEvent` today because equivalent gate events are still
+        // emitted directly by the gate manager, and forwarding them
+        // here as well would make the UI render the same state twice.
+        // Migration plan per #2792 Phase 1 PR 3:
+        //
+        // - `ApprovalRequested` / `ApprovalReceived` are suppressed
+        //   only until the gate manager stops broadcasting direct
+        //   `AppEvent::GateRequired` / `GateResolved` events.
+        // - Once that migration lands, this function remains the
+        //   bridge: map these engine variants to the corresponding
+        //   `AppEvent`s here (or remove the direct emits), rather
+        //   than treating them as permanently dropped.
+        EventKind::ApprovalRequested { .. } => vec![],
+        EventKind::ApprovalReceived { .. } => vec![],
+
+        // Forward-compat catch-all in the engine enum (see
+        // `#[serde(other)] Unknown` in `t3claw_engine::EventKind`).
+        // Nothing useful to show; the unknown variant would have been
+        // written by a newer binary during a rolling deploy.
+        EventKind::Unknown => vec![],
     }
 }
 
@@ -4584,6 +6617,8 @@ fn thread_event_to_app_events(
 pub struct EngineThreadInfo {
     pub id: String,
     pub goal: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub thread_type: String,
     pub state: String,
     pub project_id: String,
@@ -4830,9 +6865,18 @@ fn describe_cron(expression: &str) -> Option<String> {
 }
 
 fn thread_to_info(t: &t3claw_engine::Thread) -> EngineThreadInfo {
+    // Fall back to a derived short label from `goal` for legacy threads
+    // persisted before the `title` field existed. Without this, frontend
+    // consumers of `EngineThreadInfo` (TUI, mission detail views) render
+    // a UUID prefix since the DTO lacks `turn_count`.
+    let title = t
+        .title
+        .clone()
+        .or_else(|| t3claw_engine::Thread::derive_title_from_message(&t.goal));
     EngineThreadInfo {
         id: t.id.to_string(),
         goal: t.goal.clone(),
+        title,
         thread_type: format!("{:?}", t.thread_type),
         state: format!("{:?}", t.state),
         project_id: t.project_id.to_string(),
@@ -5078,6 +7122,35 @@ pub async fn get_engine_project(
         }))
 }
 
+/// Whether `thread` should be surfaced as a user-actionable failure.
+///
+/// A thread counts as a "real" failure for the projects "needs attention"
+/// feed when:
+/// - its state is `Failed`, AND
+/// - it failed within the last 24 hours, AND
+/// - it was NOT force-failed by `recover_project_threads` on engine
+///   restart (those carry the
+///   [`t3claw_engine::ENGINE_RESTART_RECOVERY_METADATA_KEY`] flag and
+///   are crash-recovery artifacts, not user errors).
+///
+/// Filtering on the metadata flag fixes #3274: an upgrade transitioned
+/// every still-running thread to `Failed`, which then flooded the
+/// Projects tab with phantom "Thread failed" warnings.
+fn is_real_thread_failure(
+    thread: &t3claw_engine::types::thread::Thread,
+    h24_ago: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    matches!(
+        thread.state,
+        t3claw_engine::types::thread::ThreadState::Failed
+    ) && thread.updated_at >= h24_ago
+        && !thread
+            .metadata
+            .get(t3claw_engine::ENGINE_RESTART_RECOVERY_METADATA_KEY)
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+}
+
 /// Projects overview — health, stats, attention items for all projects.
 ///
 /// Iterates all projects, computes per-project stats from missions and threads,
@@ -5173,12 +7246,14 @@ pub async fn get_engine_projects_overview(
             .map(|t| t.total_cost_usd)
             .sum();
 
+        // Filter restart-recovery noise: `recover_project_threads`
+        // force-fails non-terminal threads on engine restart and tags
+        // them with `engine_restart_recovery`. They aren't actionable
+        // failures, so we exclude them from both the count and the
+        // attention feed (#3274).
         let failures_24h = threads
             .iter()
-            .filter(|t| {
-                matches!(t.state, t3claw_engine::types::thread::ThreadState::Failed)
-                    && t.updated_at >= h24_ago
-            })
+            .filter(|t| is_real_thread_failure(t, h24_ago))
             .count() as u64;
 
         let last_activity = threads
@@ -5207,11 +7282,7 @@ pub async fn get_engine_projects_overview(
             });
         }
         for thread in &threads {
-            if matches!(
-                thread.state,
-                t3claw_engine::types::thread::ThreadState::Failed
-            ) && thread.updated_at >= h24_ago
-            {
+            if is_real_thread_failure(thread, h24_ago) {
                 attention.push(AttentionItem {
                     kind: "failure".to_string(),
                     project_id: pid.to_string(),
@@ -5463,6 +7534,27 @@ pub async fn reset_engine_state() {
     }
 }
 
+/// Test-only override for `EngineState::project_root`.
+///
+/// Attachment persistence resolves paths through the cached
+/// `bootstrap::t3claw_base_dir()`; in tests that want to assert on a
+/// tempdir this override lets the test redirect writes to a known
+/// location after `init_engine` has populated `ENGINE_STATE`. Returns
+/// `true` if the override was applied.
+#[doc(hidden)]
+#[cfg(feature = "libsql")]
+pub async fn override_engine_project_root_for_test(path: PathBuf) -> bool {
+    let Some(lock) = ENGINE_STATE.get() else {
+        return false;
+    };
+    let mut guard = lock.write().await;
+    let Some(state) = guard.as_mut() else {
+        return false;
+    };
+    state.project_root = path;
+    true
+}
+
 /// Build retrospective `ExecutionTrace`s for every currently-known engine
 /// thread. Returns an empty vector when engine v2 is not initialized.
 ///
@@ -5702,10 +7794,24 @@ pub(crate) mod test_support {
             async fn available_actions(
                 &self,
                 _: &[CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, EngineError> {
                 Ok(vec![])
             }
+
+            async fn available_capabilities(
+                &self,
+                _: &[CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, EngineError> {
+                Ok(vec![])
+            }
         }
+
+        let project_id = threads
+            .first()
+            .map(|thread| thread.project_id)
+            .unwrap_or_default();
 
         let store = Arc::new(ThreadTestStore::new());
         for thread in threads {
@@ -5734,7 +7840,12 @@ pub(crate) mod test_support {
         ));
         let cm = Arc::new(ConversationManager::new(Arc::clone(&tm), store_dyn.clone()));
 
-        let project_id = ProjectId::new();
+        // Share a single `Arc<GateResolutions>` between the gate
+        // controller and the EngineState field so
+        // `resolve_inline_gates_for_credential` reads the same index
+        // that `BridgeGateController::pause` writes to.
+        let test_gate_resolutions =
+            Arc::new(crate::bridge::gate_controller::GateResolutions::new());
         let state = EngineState {
             thread_manager: tm,
             conversation_manager: cm,
@@ -5747,7 +7858,19 @@ pub(crate) mod test_support {
             secrets_store: None,
             auth_manager: None,
             extension_manager: None,
+            gate_controller: Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+                Arc::new(crate::gate::store::PendingGateStore::in_memory()),
+                None,
+                Arc::new(crate::tools::ToolRegistry::new()),
+                None,
+                None,
+                Arc::new(crate::channels::ChannelManager::new()),
+                Arc::clone(&test_gate_resolutions),
+            )),
+            gate_resolutions: test_gate_resolutions,
             project_root: super::resolve_project_root(),
+            external_tool_catalog: Arc::new(crate::bridge::ExternalToolCatalog::new()),
+            capability_registry: Arc::new(t3claw_engine::CapabilityRegistry::new()),
         };
 
         let lock = ENGINE_STATE.get_or_init(|| TokioRwLock::new(None));
@@ -5914,11 +8037,16 @@ mod tests {
     use crate::hooks::HookRegistry;
     use crate::testing::{StubChannel, StubLlm};
     use crate::tools::ToolRegistry;
-    use futures::{StreamExt, stream};
+    use futures::{FutureExt, StreamExt, stream};
     use rust_decimal::Decimal;
     use t3claw_safety::SafetyLayer;
 
-    static ENGINE_STATE_TEST_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| TokioMutex::new(()));
+    // Share the `test_support::ENGINE_STATE_TEST_LOCK` declared for the rest of
+    // the crate instead of a sibling copy — a private duplicate here would only
+    // serialize against tests in this module and would race against tests in
+    // other modules that already hold `test_support::ENGINE_STATE_TEST_LOCK`,
+    // letting concurrent tests overwrite the shared `ENGINE_STATE` `OnceLock`.
+    use super::test_support::ENGINE_STATE_TEST_LOCK;
     static CWD_TEST_LOCK: LazyLock<TokioMutex<()>> = LazyLock::new(|| TokioMutex::new(()));
 
     // ──────────────────────────────────────────────────────────────────
@@ -5940,7 +8068,9 @@ mod tests {
              File \"orchestrator.py\", line 907, in  \
              File \"orchestrator.py\", line 548, in run_loop \
              RuntimeError: LLM call failed: Provider nearai_chat request failed: HTTP 502 Bad Gateway";
-        let outcome = bridge_outcome_for_failed_thread(raw, "alice", "web");
+        // Non-gateway channel: SSE is not the primary surface, so the
+        // user-visible delivery comes through `Respond(sanitized)`.
+        let outcome = bridge_outcome_for_failed_thread(raw, None, "alice", "telegram", false);
         let BridgeOutcome::Respond(text) = outcome else {
             panic!("expected Respond, got {outcome:?}");
         };
@@ -5957,8 +8087,13 @@ mod tests {
 
     #[test]
     fn failed_thread_outcome_maps_unknown_error_to_generic_message() {
-        let outcome =
-            bridge_outcome_for_failed_thread("some unexpected internal failure", "alice", "web");
+        let outcome = bridge_outcome_for_failed_thread(
+            "some unexpected internal failure",
+            None,
+            "alice",
+            "telegram",
+            false,
+        );
         let BridgeOutcome::Respond(text) = outcome else {
             panic!("expected Respond, got {outcome:?}");
         };
@@ -5972,13 +8107,29 @@ mod tests {
     #[test]
     fn failed_thread_outcome_maps_context_too_large() {
         let raw = "Orchestrator error: Llm { reason: \"Context length exceeded: 200000 tokens used, 128000 allowed\" }";
-        let outcome = bridge_outcome_for_failed_thread(raw, "alice", "web");
+        let outcome = bridge_outcome_for_failed_thread(raw, None, "alice", "telegram", false);
         let BridgeOutcome::Respond(text) = outcome else {
             panic!("expected Respond, got {outcome:?}");
         };
         assert!(
             text.starts_with("The request was too large"),
             "unexpected text: {text}"
+        );
+    }
+
+    /// When the SSE stream is already rendering the failure to the
+    /// originating channel (gateway web UI), the helper must return
+    /// `NoResponse` so `channel.respond()` does not broadcast a second
+    /// SSE `response` frame for the same turn. Regression fence for the
+    /// double-render bug flagged on PR #2753 by serrrfirat.
+    #[test]
+    fn failed_thread_outcome_is_no_response_when_sse_will_deliver() {
+        let raw = "Orchestrator error: Llm { reason: \"HTTP 502 Bad Gateway\" }";
+        let outcome =
+            bridge_outcome_for_failed_thread(raw, Some("debug only"), "alice", "gateway", true);
+        assert!(
+            matches!(outcome, BridgeOutcome::NoResponse),
+            "expected NoResponse to avoid double-rendering an SSE-delivered failure, got {outcome:?}",
         );
     }
 
@@ -6315,7 +8466,7 @@ mod tests {
         struct StaticLlmProvider;
 
         #[async_trait::async_trait]
-        impl crate::llm::LlmProvider for StaticLlmProvider {
+        impl t3claw_llm::LlmProvider for StaticLlmProvider {
             fn model_name(&self) -> &str {
                 "static-mock"
             }
@@ -6326,13 +8477,14 @@ mod tests {
 
             async fn complete(
                 &self,
-                _request: crate::llm::CompletionRequest,
-            ) -> Result<crate::llm::CompletionResponse, crate::error::LlmError> {
-                Ok(crate::llm::CompletionResponse {
+                _request: t3claw_llm::CompletionRequest,
+            ) -> Result<t3claw_llm::CompletionResponse, crate::error::LlmError> {
+                Ok(t3claw_llm::CompletionResponse {
                     content: "ok".to_string(),
                     input_tokens: 0,
                     output_tokens: 0,
-                    finish_reason: crate::llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
+                    reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                 })
@@ -6340,16 +8492,17 @@ mod tests {
 
             async fn complete_with_tools(
                 &self,
-                _request: crate::llm::ToolCompletionRequest,
-            ) -> Result<crate::llm::ToolCompletionResponse, crate::error::LlmError> {
-                Ok(crate::llm::ToolCompletionResponse {
+                _request: t3claw_llm::ToolCompletionRequest,
+            ) -> Result<t3claw_llm::ToolCompletionResponse, crate::error::LlmError> {
+                Ok(t3claw_llm::ToolCompletionResponse {
                     content: Some("ok".to_string()),
                     tool_calls: Vec::new(),
                     input_tokens: 0,
                     output_tokens: 0,
-                    finish_reason: crate::llm::FinishReason::Stop,
+                    finish_reason: t3claw_llm::FinishReason::Stop,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
+                    reasoning: None,
                 })
             }
         }
@@ -6385,6 +8538,7 @@ mod tests {
             builder: None,
             llm_backend: "nearai".to_string(),
             tenant_rates: Arc::new(crate::tenant::TenantRateRegistry::new(4, 3)),
+            runtime_policy: None,
         };
 
         let channels = Arc::new(crate::channels::ChannelManager::new());
@@ -6778,6 +8932,95 @@ mod tests {
         ));
     }
 
+    /// Boot-time sweep must evict every `Approval` gate row carried
+    /// over from a prior process — they have no live `oneshot::Sender`
+    /// to deliver to, and falling through to `execute_pending_gate_action`
+    /// would re-run the LLM step and replay earlier non-idempotent tool
+    /// calls (the bug the inline-await path exists to prevent).
+    /// Authentication and External rows survive because their resume
+    /// path doesn't depend on a live VM.
+    #[tokio::test]
+    async fn invalidate_stranded_approval_gates_evicts_only_approval_kind() {
+        let store = crate::gate::store::PendingGateStore::in_memory();
+
+        let approval_a = uuid::Uuid::new_v4();
+        let approval_b = uuid::Uuid::new_v4();
+        let auth = uuid::Uuid::new_v4();
+        let external = uuid::Uuid::new_v4();
+
+        store
+            .insert(sample_pending_gate_with_request_id(
+                "alice",
+                t3claw_engine::ThreadId::new(),
+                approval_a,
+                t3claw_engine::ResumeKind::Approval { allow_always: true },
+            ))
+            .await
+            .unwrap();
+        store
+            .insert(sample_pending_gate_with_request_id(
+                "bob",
+                t3claw_engine::ThreadId::new(),
+                approval_b,
+                t3claw_engine::ResumeKind::Approval {
+                    allow_always: false,
+                },
+            ))
+            .await
+            .unwrap();
+        store
+            .insert(sample_pending_gate_with_request_id(
+                "alice",
+                t3claw_engine::ThreadId::new(),
+                auth,
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name: t3claw_common::CredentialName::new("github").unwrap(),
+                    instructions: "paste token".into(),
+                    auth_url: None,
+                },
+            ))
+            .await
+            .unwrap();
+        store
+            .insert(sample_pending_gate_with_request_id(
+                "alice",
+                t3claw_engine::ThreadId::new(),
+                external,
+                t3claw_engine::ResumeKind::External {
+                    callback_id: "cb-1".into(),
+                },
+            ))
+            .await
+            .unwrap();
+
+        // No SSE wired — exercises the `if let Some(sse)` skip branch.
+        invalidate_stranded_approval_gates(&store, None).await;
+
+        let surviving: std::collections::HashSet<uuid::Uuid> = store
+            .list_all()
+            .await
+            .into_iter()
+            .map(|g| g.request_id)
+            .collect();
+        assert!(
+            !surviving.contains(&approval_a),
+            "approval gate for alice must be evicted"
+        );
+        assert!(
+            !surviving.contains(&approval_b),
+            "approval gate for bob must be evicted"
+        );
+        assert!(
+            surviving.contains(&auth),
+            "auth gate must survive: {surviving:?}"
+        );
+        assert!(
+            surviving.contains(&external),
+            "external gate must survive: {surviving:?}"
+        );
+        assert_eq!(surviving.len(), 2, "exactly two non-Approval gates remain");
+    }
+
     #[tokio::test]
     async fn handle_approval_ignores_pending_gate_from_different_thread() {
         let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
@@ -6954,6 +9197,400 @@ mod tests {
                 && duration_ms == &Some(17)
                 && thread_id.as_deref() == Some("thread-123")
         ));
+    }
+
+    #[test]
+    fn redact_code_executed_scrubs_secrets_from_code_stdout_and_return_value() {
+        // Regression: PR #2850 review — `AppEvent::CodeExecuted` carried
+        // raw code / stdout / return_value to verbose SSE subscribers
+        // without passing through any leak-detection layer, so a model
+        // snippet that printed a bearer token or returned an API key
+        // would surface that material to every debug client.
+        let detector = t3claw_safety::LeakDetector::new();
+
+        // GitHub personal access token pattern (`ghp_` + 36+
+        // alphanumerics) is in the default LeakDetector patterns.
+        let fake_secret = "ghp_aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrR";
+
+        let code = format!("headers = {{ 'X-Auth-Token': '{fake_secret}' }}");
+        let stdout = format!("response: token={fake_secret}");
+        let mut event = AppEvent::CodeExecuted {
+            code: code.clone(),
+            stdout: stdout.clone(),
+            return_value: Some(serde_json::json!({
+                "token": fake_secret,
+                "count": 42,
+            })),
+            duration_ms: 12,
+            thread_id: Some("thread-x".into()),
+        };
+
+        redact_code_executed_secrets(&mut event, &detector);
+
+        let AppEvent::CodeExecuted {
+            code: redacted_code,
+            stdout: redacted_stdout,
+            return_value,
+            ..
+        } = event
+        else {
+            panic!("expected CodeExecuted after redaction");
+        };
+
+        assert!(
+            !redacted_code.contains(fake_secret),
+            "leaked key in code: {redacted_code}"
+        );
+        assert!(
+            !redacted_stdout.contains(fake_secret),
+            "leaked key in stdout: {redacted_stdout}"
+        );
+        let rv = return_value.expect("return_value preserved");
+        let token = rv.get("token").and_then(|v| v.as_str()).unwrap_or_default();
+        assert!(
+            !token.contains(fake_secret),
+            "leaked key in return_value: {token}"
+        );
+        // Numeric sibling fields survive untouched.
+        assert_eq!(rv.get("count").and_then(|v| v.as_u64()), Some(42));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_step_failed_to_error() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::StepFailed {
+                step_id: t3claw_engine::StepId::new(),
+                error: "llm provider returned 502".to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-step-fail");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::Error { message, thread_id } = &app_events[0] else {
+            panic!("expected AppEvent::Error, got {:?}", app_events[0]);
+        };
+        assert!(
+            message.contains("llm provider returned 502"),
+            "error message should carry the engine error text, got {message:?}"
+        );
+        assert_eq!(thread_id.as_deref(), Some("thread-step-fail"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_child_completed() {
+        let child = t3claw_engine::ThreadId::new();
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ChildCompleted { child_id: child },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-parent");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::ChildThreadCompleted {
+            parent_thread_id,
+            child_thread_id,
+        } = &app_events[0]
+        else {
+            panic!(
+                "expected AppEvent::ChildThreadCompleted, got {:?}",
+                app_events[0]
+            );
+        };
+        assert_eq!(parent_thread_id, "thread-parent");
+        assert_eq!(child_thread_id, &child.to_string());
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_code_execution_failed() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::CodeExecutionFailed {
+                step_id: t3claw_engine::StepId::new(),
+                category: t3claw_engine::CodeExecutionFailure::RuntimeError,
+                error: "NameError: 'foo' is not defined".to_string(),
+                code_hash: Some("abc123".to_string()),
+                duration_ms: 42,
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-codeact");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::CodeExecutionFailed {
+            category,
+            error,
+            duration_ms,
+            code_hash,
+            thread_id,
+        } = &app_events[0]
+        else {
+            panic!(
+                "expected AppEvent::CodeExecutionFailed, got {:?}",
+                app_events[0]
+            );
+        };
+        assert_eq!(
+            *category,
+            t3claw_common::CodeExecutionFailureCategory::RuntimeError
+        );
+        assert_eq!(error, "NameError: 'foo' is not defined");
+        assert_eq!(*duration_ms, 42);
+        assert_eq!(code_hash.as_deref(), Some("abc123"));
+        assert_eq!(thread_id.as_deref(), Some("thread-codeact"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_lease_granted() {
+        let lease = t3claw_engine::LeaseId::new();
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::LeaseGranted {
+                lease_id: lease,
+                capability_name: "http_fetch".to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-lease");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::LeaseGranted {
+            lease_id,
+            capability_name,
+            thread_id,
+        } = &app_events[0]
+        else {
+            panic!("expected AppEvent::LeaseGranted, got {:?}", app_events[0]);
+        };
+        assert_eq!(lease_id, &lease.to_string());
+        assert_eq!(capability_name, "http_fetch");
+        assert_eq!(thread_id.as_deref(), Some("thread-lease"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_lease_revoked() {
+        let lease = t3claw_engine::LeaseId::new();
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::LeaseRevoked {
+                lease_id: lease,
+                reason: "policy check failed".to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-revoke");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::LeaseRevoked {
+            lease_id,
+            reason,
+            thread_id,
+        } = &app_events[0]
+        else {
+            panic!("expected AppEvent::LeaseRevoked, got {:?}", app_events[0]);
+        };
+        assert_eq!(lease_id, &lease.to_string());
+        assert_eq!(reason, "policy check failed");
+        assert_eq!(thread_id.as_deref(), Some("thread-revoke"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_lease_expired() {
+        let lease = t3claw_engine::LeaseId::new();
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::LeaseExpired { lease_id: lease },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-expire");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::LeaseExpired {
+            lease_id,
+            thread_id,
+        } = &app_events[0]
+        else {
+            panic!("expected AppEvent::LeaseExpired, got {:?}", app_events[0]);
+        };
+        assert_eq!(lease_id, &lease.to_string());
+        assert_eq!(thread_id.as_deref(), Some("thread-expire"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_self_improvement_started() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::SelfImprovementStarted,
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-improve-start");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::SelfImprovement { phase, thread_id } = &app_events[0] else {
+            panic!(
+                "expected AppEvent::SelfImprovement, got {:?}",
+                app_events[0]
+            );
+        };
+        assert_eq!(phase, &t3claw_common::SelfImprovementPhase::Started);
+        assert_eq!(thread_id.as_deref(), Some("thread-improve-start"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_self_improvement_failed() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::SelfImprovementFailed {
+                error: "diagnosis prompt timed out".to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-improve-fail");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::SelfImprovement { phase, thread_id } = &app_events[0] else {
+            panic!(
+                "expected AppEvent::SelfImprovement, got {:?}",
+                app_events[0]
+            );
+        };
+        let t3claw_common::SelfImprovementPhase::Failed { error } = phase else {
+            panic!("expected SelfImprovementPhase::Failed, got {phase:?}");
+        };
+        assert_eq!(error, "diagnosis prompt timed out");
+        assert_eq!(thread_id.as_deref(), Some("thread-improve-fail"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_self_improvement_complete() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::SelfImprovementComplete {
+                prompt_updated: true,
+                patterns_added: 3,
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-improve");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::SelfImprovement { phase, thread_id } = &app_events[0] else {
+            panic!(
+                "expected AppEvent::SelfImprovement, got {:?}",
+                app_events[0]
+            );
+        };
+        let t3claw_common::SelfImprovementPhase::Complete {
+            prompt_updated,
+            patterns_added,
+        } = phase
+        else {
+            panic!("expected SelfImprovementPhase::Complete, got {phase:?}");
+        };
+        assert!(*prompt_updated);
+        assert_eq!(*patterns_added, 3);
+        assert_eq!(thread_id.as_deref(), Some("thread-improve"));
+    }
+
+    #[test]
+    fn thread_event_to_app_events_bridges_orchestrator_rollback() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::OrchestratorRollback {
+                from_version: 7,
+                to_version: 6,
+                reason: "health probe failed after upgrade".to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-rollback");
+
+        assert_eq!(app_events.len(), 1);
+        let AppEvent::OrchestratorRollback {
+            from_version,
+            to_version,
+            reason,
+            thread_id,
+        } = &app_events[0]
+        else {
+            panic!(
+                "expected AppEvent::OrchestratorRollback, got {:?}",
+                app_events[0]
+            );
+        };
+        assert_eq!(*from_version, 7);
+        assert_eq!(*to_version, 6);
+        // Unknown-shape reasons collapse to the safe generic classification.
+        assert_eq!(reason, "execution failed");
+        assert_eq!(thread_id.as_deref(), Some("thread-rollback"));
+    }
+
+    #[test]
+    fn orchestrator_rollback_does_not_leak_engine_error_detail() {
+        // Regression for PR #2844 review: the engine rollback path emits
+        // `format!("execution failed: {e}")` where `e: EngineError`.
+        // Variants like `Store { reason }` / `Llm { reason }` can render
+        // DB connection strings, file paths, and raw upstream HTTP bodies.
+        // The bridge must sanitize before broadcasting to SSE consumers.
+        let leaky = "execution failed: store error: connection string \
+            'postgres://bob:hunter2@db.internal:5432/t3claw' refused: \
+            File \"/home/runner/.t3claw/state.db\" not found";
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::OrchestratorRollback {
+                from_version: 3,
+                to_version: 2,
+                reason: leaky.to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-leak");
+
+        let AppEvent::OrchestratorRollback { reason, .. } = &app_events[0] else {
+            panic!("expected AppEvent::OrchestratorRollback");
+        };
+        assert!(
+            !reason.contains("postgres://"),
+            "leaked connection string: {reason}"
+        );
+        assert!(!reason.contains("hunter2"), "leaked password: {reason}");
+        assert!(
+            !reason.contains("/home/runner"),
+            "leaked filesystem path: {reason}"
+        );
+        assert!(
+            !reason.contains("store error"),
+            "leaked internal wrap: {reason}"
+        );
+        assert!(
+            !reason.contains("state.db"),
+            "leaked internal filename: {reason}"
+        );
+    }
+
+    #[test]
+    fn orchestrator_rollback_classifies_known_upstream_failures() {
+        // A 502 in the rollback reason should still render a classified
+        // operator-facing message, not the bare "execution failed" fallback.
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::OrchestratorRollback {
+                from_version: 4,
+                to_version: 3,
+                reason: "execution failed: LLM error: Provider nearai request failed: \
+                     HTTP 502 Bad Gateway"
+                    .to_string(),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-502");
+
+        let AppEvent::OrchestratorRollback { reason, .. } = &app_events[0] else {
+            panic!("expected AppEvent::OrchestratorRollback");
+        };
+        assert_eq!(reason, "LLM provider unavailable");
     }
 
     #[test]
@@ -7172,6 +9809,212 @@ mod tests {
         *lock.write().await = None;
     }
 
+    /// Regression for review on #3381: the OAuth failure cleanup must
+    /// scope to the credential of the failed flow, not nuke every
+    /// pending auth gate the user has open. Concrete failure mode this
+    /// covers — Gmail OAuth fails while a Slack auth gate is in flight
+    /// on a different thread; only the Gmail gate should clear.
+    #[tokio::test]
+    async fn clear_engine_pending_auth_for_credential_only_clears_matching_credential() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let store = Arc::new(TestStore::new());
+        let state = make_expected_test_state(store);
+        let thread_gmail = t3claw_engine::ThreadId::new();
+        let thread_slack = t3claw_engine::ThreadId::new();
+
+        state
+            .pending_gates
+            .insert(sample_pending_gate(
+                "alice",
+                thread_gmail,
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name: t3claw_common::CredentialName::new("google_oauth_token")
+                        .unwrap(),
+                    instructions: "complete OAuth".into(),
+                    auth_url: None,
+                },
+            ))
+            .await
+            .unwrap();
+        state
+            .pending_gates
+            .insert(sample_pending_gate(
+                "alice",
+                thread_slack,
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name: t3claw_common::CredentialName::new("slack_oauth_token")
+                        .unwrap(),
+                    instructions: "complete OAuth".into(),
+                    auth_url: None,
+                },
+            ))
+            .await
+            .unwrap();
+
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+        *lock.write().await = Some(state);
+
+        clear_engine_pending_auth_for_credential("alice", "google_oauth_token").await;
+
+        let guard = lock.read().await;
+        let state = guard.as_ref().unwrap();
+        let remaining = state.pending_gates.list_for_user("alice").await;
+        assert_eq!(
+            remaining.len(),
+            1,
+            "only the Gmail gate should be discarded; Slack must remain"
+        );
+        assert!(
+            remaining.iter().any(|gate| gate.thread_id == thread_slack),
+            "Slack gate must survive Gmail OAuth failure"
+        );
+        drop(guard);
+        *lock.write().await = None;
+    }
+
+    /// Regression for review on PR #3381: an OAuth callback that arrives
+    /// after the 5-minute flow expiry is a terminal failure — the engine
+    /// pending auth gate must be cleared, otherwise the conversation
+    /// sits paused forever waiting on a callback that will never arrive
+    /// (#3320). Cleanup must stay scoped to the failed flow's credential
+    /// so an unrelated auth gate (Slack/MCP) running on a different
+    /// thread for the same user survives.
+    #[tokio::test]
+    async fn oauth_callback_expired_flow_clears_credential_scoped_engine_gate() {
+        use crate::channels::web::features::oauth::oauth_callback_handler;
+        use crate::channels::web::test_helpers::{test_ext_mgr, test_gateway_state};
+        use crate::testing::credentials::TEST_GATEWAY_CRYPTO_KEY;
+        use axum::body::Body;
+        use axum::routing::get;
+        use tower::ServiceExt;
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+
+        // Two pending auth gates for the same user, on different threads
+        // and different credentials. The OAuth callback will be for the
+        // Gmail flow; the Slack gate must survive.
+        let store = Arc::new(TestStore::new());
+        let engine_state = make_expected_test_state(store);
+        let thread_gmail = t3claw_engine::ThreadId::new();
+        let thread_slack = t3claw_engine::ThreadId::new();
+        engine_state
+            .pending_gates
+            .insert(sample_pending_gate(
+                "expiry-user",
+                thread_gmail,
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name: t3claw_common::CredentialName::new("google_oauth_token")
+                        .unwrap(),
+                    instructions: "complete OAuth".into(),
+                    auth_url: None,
+                },
+            ))
+            .await
+            .unwrap();
+        engine_state
+            .pending_gates
+            .insert(sample_pending_gate(
+                "expiry-user",
+                thread_slack,
+                t3claw_engine::ResumeKind::Authentication {
+                    credential_name: t3claw_common::CredentialName::new("slack_oauth_token")
+                        .unwrap(),
+                    instructions: "complete OAuth".into(),
+                    auth_url: None,
+                },
+            ))
+            .await
+            .unwrap();
+
+        let lock = ENGINE_STATE.get_or_init(|| TokioRwLock::new(None));
+        *lock.write().await = None;
+        *lock.write().await = Some(engine_state);
+
+        // GatewayState with an ext_mgr holding an expired pending flow
+        // for the Gmail credential. The `state` query parameter we send
+        // below must round-trip through `decode_hosted_oauth_state`, so
+        // we mint it via the matching encoder.
+        let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+            Arc::new(crate::secrets::InMemorySecretsStore::new(Arc::new(
+                crate::secrets::SecretsCrypto::new(secrecy::SecretString::from(
+                    TEST_GATEWAY_CRYPTO_KEY.to_string(),
+                ))
+                .expect("crypto"),
+            )));
+        let (ext_mgr, _wasm_tools_dir, _wasm_channels_dir) = test_ext_mgr(secrets.clone());
+
+        let flow_id = "expiry-flow".to_string();
+        let encoded_state = crate::auth::oauth::encode_hosted_oauth_state(&flow_id, None);
+        let expired_created_at = std::time::Instant::now()
+            .checked_sub(crate::auth::oauth::OAUTH_FLOW_EXPIRY + Duration::from_secs(1))
+            .expect("monotonic clock");
+        let flow = crate::auth::oauth::PendingOAuthFlow {
+            extension_name: t3claw_common::ExtensionName::new("gmail").unwrap(),
+            display_name: "Gmail".to_string(),
+            token_url: "https://example.com/token".to_string(),
+            client_id: "client123".to_string(),
+            client_secret: None,
+            redirect_uri: "https://example.com/oauth/callback".to_string(),
+            code_verifier: None,
+            access_token_field: "access_token".to_string(),
+            secret_name: "google_oauth_token".to_string(),
+            provider: None,
+            validation_endpoint: None,
+            scopes: vec![],
+            user_id: "expiry-user".to_string(),
+            secrets,
+            sse_manager: None,
+            gateway_token: None,
+            token_exchange_extra_params: std::collections::HashMap::new(),
+            client_id_secret_name: None,
+            client_secret_secret_name: None,
+            client_secret_expires_at: None,
+            created_at: expired_created_at,
+            auto_activate_extension: true,
+        };
+        ext_mgr
+            .pending_oauth_flows()
+            .write()
+            .await
+            .insert(flow_id, flow);
+
+        let gateway_state = test_gateway_state(Some(ext_mgr));
+        let app = axum::Router::new()
+            .route("/oauth/callback", get(oauth_callback_handler))
+            .with_state(gateway_state);
+
+        let req = axum::http::Request::builder()
+            .uri(format!(
+                "/oauth/callback?code=test_code&state={}",
+                encoded_state
+            ))
+            .body(Body::empty())
+            .expect("request");
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), axum::http::StatusCode::OK);
+
+        // The Gmail gate (matching credential) must be gone; the Slack
+        // gate (different credential) must survive.
+        let guard = lock.read().await;
+        let state = guard.as_ref().unwrap();
+        let remaining = state.pending_gates.list_for_user("expiry-user").await;
+        assert_eq!(
+            remaining.len(),
+            1,
+            "expired OAuth callback must clear the matching auth gate; \
+             unrelated gate must survive. Remaining: {remaining:?}"
+        );
+        assert!(
+            remaining.iter().any(|gate| gate.thread_id == thread_slack),
+            "Slack gate must survive Gmail flow expiry"
+        );
+        drop(guard);
+        *lock.write().await = None;
+    }
+
     #[tokio::test]
     async fn discard_engine_pending_auth_request_discards_only_matching_auth_gate() {
         let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
@@ -7368,7 +10211,17 @@ mod tests {
             async fn available_actions(
                 &self,
                 _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, t3claw_engine::EngineError> {
+                Ok(vec![])
+            }
+
+            async fn available_capabilities(
+                &self,
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, t3claw_engine::EngineError>
+            {
                 Ok(vec![])
             }
         }
@@ -7396,6 +10249,11 @@ mod tests {
 
         let cm = Arc::new(ConversationManager::new(Arc::clone(&tm), store_dyn.clone()));
 
+        // Share a single `Arc<GateResolutions>` between the gate
+        // controller and the EngineState field so
+        // `resolve_inline_gates_for_credential` reads the same index
+        // that `BridgeGateController::pause` writes to.
+        let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
         EngineState {
             thread_manager: tm,
             conversation_manager: cm,
@@ -7408,7 +10266,19 @@ mod tests {
             secrets_store: None,
             auth_manager: None,
             extension_manager: None,
+            gate_controller: Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+                Arc::new(crate::gate::store::PendingGateStore::in_memory()),
+                None,
+                Arc::new(crate::tools::ToolRegistry::new()),
+                None,
+                None,
+                Arc::new(crate::channels::ChannelManager::new()),
+                Arc::clone(&resolutions),
+            )),
+            gate_resolutions: resolutions,
             project_root: resolve_project_root(),
+            external_tool_catalog: Arc::new(crate::bridge::ExternalToolCatalog::new()),
+            capability_registry: Arc::new(t3claw_engine::CapabilityRegistry::new()),
         }
     }
 
@@ -7447,6 +10317,7 @@ mod tests {
             builder: None,
             llm_backend: "nearai".to_string(),
             tenant_rates: Arc::new(crate::tenant::TenantRateRegistry::new(4, 3)),
+            runtime_policy: None,
         };
 
         let agent = Agent::new(
@@ -7508,7 +10379,17 @@ mod tests {
             async fn available_actions(
                 &self,
                 _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, t3claw_engine::EngineError> {
+                Ok(vec![])
+            }
+
+            async fn available_capabilities(
+                &self,
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, t3claw_engine::EngineError>
+            {
                 Ok(vec![])
             }
         }
@@ -7536,6 +10417,11 @@ mod tests {
 
         let cm = Arc::new(ConversationManager::new(Arc::clone(&tm), store_dyn.clone()));
 
+        // Share a single `Arc<GateResolutions>` between the gate
+        // controller and the EngineState field so
+        // `resolve_inline_gates_for_credential` reads the same index
+        // that `BridgeGateController::pause` writes to.
+        let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
         EngineState {
             thread_manager: tm,
             conversation_manager: cm,
@@ -7548,7 +10434,19 @@ mod tests {
             secrets_store: None,
             auth_manager: None,
             extension_manager: None,
+            gate_controller: Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+                Arc::new(crate::gate::store::PendingGateStore::in_memory()),
+                None,
+                Arc::new(crate::tools::ToolRegistry::new()),
+                None,
+                None,
+                Arc::new(crate::channels::ChannelManager::new()),
+                Arc::clone(&resolutions),
+            )),
+            gate_resolutions: resolutions,
             project_root: resolve_project_root(),
+            external_tool_catalog: Arc::new(crate::bridge::ExternalToolCatalog::new()),
+            capability_registry: Arc::new(t3claw_engine::CapabilityRegistry::new()),
         }
     }
 
@@ -7723,6 +10621,138 @@ mod tests {
         outcome.expect("router attachment persistence test");
     }
 
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn handle_with_engine_persists_non_uuid_channel_scopes_to_separate_v1_conversations() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let backend = Arc::new(
+            crate::db::libsql::LibSqlBackend::new_local(&tmp.path().join("scoped-history.db"))
+                .await
+                .expect("local libsql"),
+        );
+        backend.run_migrations().await.expect("migrations");
+        let db: Arc<dyn crate::db::Database> = backend.clone();
+
+        let store = Arc::new(TestStore::new());
+        let llm: Arc<dyn t3claw_engine::LlmBackend> = Arc::new(CompletedTextLlm {
+            text: "done".to_string(),
+        });
+        let mut state = make_expected_test_state_with_llm(store, llm);
+        state.db = Some(Arc::clone(&db));
+
+        let dm_scope = "wecom:dm:ZhangSan";
+        let group_scope = "wecom:group:wr-t-7ZAAAM7uwzeRXYC2jrlq2JI6pxA";
+
+        let outcome = with_installed_engine_state(state, async move {
+            let (agent, _statuses) = make_test_agent_with_status_channel("wecom").await;
+
+            let dm_message =
+                IncomingMessage::new("wecom", "default", "hi").with_conversation_scope(dm_scope);
+            let dm_result = handle_with_engine_inner(&agent, &dm_message, &dm_message.content, 0)
+                .await
+                .expect("handle dm message");
+            assert!(matches!(dm_result, BridgeOutcome::Respond(_)));
+
+            let group_message =
+                IncomingMessage::new("wecom", "default", "@T3ClawBot tell me a joke")
+                    .with_conversation_scope(group_scope);
+            let group_result =
+                handle_with_engine_inner(&agent, &group_message, &group_message.content, 0)
+                    .await
+                    .expect("handle group message");
+            assert!(matches!(group_result, BridgeOutcome::Respond(_)));
+
+            let conversations = db
+                .list_conversations_with_preview("default", "wecom", 10)
+                .await
+                .expect("list conversations");
+            assert_eq!(
+                conversations.len(),
+                2,
+                "private and group WeCom messages must not share one v1 history thread"
+            );
+
+            let dm_conv_id = crate::db::scoped_conversation_id("wecom", "default", dm_scope);
+            let group_conv_id = crate::db::scoped_conversation_id("wecom", "default", group_scope);
+            assert_ne!(
+                dm_conv_id, group_conv_id,
+                "different non-UUID channel scopes must map to different v1 conversations"
+            );
+
+            let dm_messages = db
+                .list_conversation_messages(dm_conv_id)
+                .await
+                .expect("list dm messages");
+            let group_messages = db
+                .list_conversation_messages(group_conv_id)
+                .await
+                .expect("list group messages");
+
+            assert!(
+                dm_messages
+                    .iter()
+                    .any(|msg| msg.role == "user" && msg.content == "hi"),
+                "DM conversation should contain the DM user message: {dm_messages:?}"
+            );
+            assert!(
+                !dm_messages
+                    .iter()
+                    .any(|msg| msg.content.contains("@T3ClawBot")),
+                "DM conversation must not contain the group mention: {dm_messages:?}"
+            );
+            assert!(
+                group_messages
+                    .iter()
+                    .any(|msg| msg.role == "user" && msg.content.contains("@T3ClawBot")),
+                "group conversation should contain the group user message: {group_messages:?}"
+            );
+            assert!(
+                !group_messages
+                    .iter()
+                    .any(|msg| msg.role == "user" && msg.content == "hi"),
+                "group conversation must not contain the DM message: {group_messages:?}"
+            );
+
+            let conn = backend.connect().await.expect("connect libsql");
+            let mut rows = conn
+                .query(
+                    "SELECT id, thread_id FROM conversations WHERE id IN (?1, ?2)",
+                    libsql::params![
+                        crate::db::scoped_conversation_id("wecom", "default", dm_scope).to_string(),
+                        crate::db::scoped_conversation_id("wecom", "default", group_scope)
+                            .to_string()
+                    ],
+                )
+                .await
+                .expect("query conversation scopes");
+            let mut stored_scopes = HashMap::new();
+            while let Some(row) = rows.next().await.expect("read conversation scope row") {
+                let id: String = row.get(0).expect("id");
+                let thread_id: Option<String> = row.get(1).expect("thread_id");
+                stored_scopes.insert(id, thread_id);
+            }
+            assert_eq!(
+                stored_scopes
+                    .get(&dm_conv_id.to_string())
+                    .and_then(|value| value.as_deref()),
+                Some(dm_scope)
+            );
+            assert_eq!(
+                stored_scopes
+                    .get(&group_conv_id.to_string())
+                    .and_then(|value| value.as_deref()),
+                Some(group_scope)
+            );
+
+            Ok::<(), crate::error::Error>(())
+        })
+        .await;
+
+        outcome.expect("scoped WeCom history should stay separated");
+    }
+
     #[tokio::test]
     async fn resolve_gate_repairs_call_id_for_resume_output_auth_resume() {
         struct InspectingLlm {
@@ -7873,6 +10903,142 @@ mod tests {
 
         *lock.write().await = None;
         outcome.expect("router auth resume_output call-id repair test");
+    }
+
+    #[tokio::test]
+    async fn execute_pending_gate_action_populates_snapshots_for_tool_info_resume() {
+        struct SnapshotInspectingLlm {
+            expected_call_id: String,
+        }
+
+        #[async_trait::async_trait]
+        impl t3claw_engine::LlmBackend for SnapshotInspectingLlm {
+            async fn complete(
+                &self,
+                messages: &[t3claw_engine::ThreadMessage],
+                _: &[t3claw_engine::ActionDef],
+                _: &t3claw_engine::LlmCallConfig,
+            ) -> Result<t3claw_engine::LlmOutput, t3claw_engine::EngineError> {
+                let matched = messages.iter().any(|message| {
+                    message.role == t3claw_engine::MessageRole::ActionResult
+                        && message.action_name.as_deref() == Some("tool_info")
+                        && message.action_call_id.as_deref() == Some(self.expected_call_id.as_str())
+                        && message.content.contains("mission_create")
+                });
+
+                Ok(t3claw_engine::LlmOutput {
+                    response: t3claw_engine::LlmResponse::Text(if matched {
+                        "snapshot-used".into()
+                    } else {
+                        "snapshot-missing".into()
+                    }),
+                    usage: t3claw_engine::TokenUsage::default(),
+                })
+            }
+
+            fn model_name(&self) -> &str {
+                "inspect-snapshot"
+            }
+        }
+
+        let store = Arc::new(TestStore::new());
+        let llm: Arc<dyn t3claw_engine::LlmBackend> = Arc::new(SnapshotInspectingLlm {
+            expected_call_id: "call-tool-info".to_string(),
+        });
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.add_message(t3claw_engine::ThreadMessage::assistant_with_actions(
+            Some("inspect tool_info".to_string()),
+            vec![t3claw_engine::ActionCall {
+                id: "call-tool-info".to_string(),
+                action_name: "tool_info".to_string(),
+                parameters: serde_json::json!({
+                    "name": "mission_create",
+                    "detail": "summary"
+                }),
+            }],
+        ));
+        thread.state = t3claw_engine::ThreadState::Waiting;
+        store
+            .save_thread(&thread)
+            .await
+            .expect("save waiting thread");
+
+        let mut conversation = t3claw_engine::ConversationSurface::new("web", "alice");
+        conversation.track_thread(thread.id);
+        let conversation_id = conversation.id;
+        store
+            .save_conversation(&conversation)
+            .await
+            .expect("save conversation");
+
+        let state = make_expected_test_state_with_llm(store.clone(), llm);
+        state
+            .conversation_manager
+            .bootstrap_user("alice")
+            .await
+            .expect("bootstrap conversations");
+        state.effect_adapter.tools().register_tool_info();
+        let mut capabilities = CapabilityRegistry::new();
+        capabilities.register(Capability {
+            name: "missions".into(),
+            description: "Mission and routine lifecycle management".into(),
+            actions: mission_capability_actions(),
+            knowledge: vec![],
+            policies: vec![],
+        });
+        state
+            .effect_adapter
+            .set_capability_registry(Arc::new(capabilities))
+            .await;
+        state
+            .thread_manager
+            .leases
+            .grant(
+                thread.id,
+                "tools",
+                t3claw_engine::GrantedActions::All,
+                None,
+                None,
+            )
+            .await
+            .expect("grant lease");
+
+        let pending = PendingGate {
+            conversation_id,
+            action_name: "tool_info".into(),
+            parameters: serde_json::json!({
+                "name": "mission_create",
+                "detail": "summary"
+            }),
+            call_id: String::new(),
+            ..sample_pending_gate(
+                "alice",
+                thread.id,
+                t3claw_engine::ResumeKind::Approval {
+                    allow_always: false,
+                },
+            )
+        };
+
+        let (agent, _statuses) = make_router_test_agent(None).await;
+        let message =
+            IncomingMessage::new("web", "alice", "approve").with_thread(thread.id.to_string());
+
+        let result = execute_pending_gate_action(&agent, &state, &message, &pending, true, None)
+            .await
+            .expect("execute pending gate action");
+
+        assert!(
+            matches!(result, BridgeOutcome::Respond(ref text) if text == "snapshot-used"),
+            "unexpected result: {result:?}"
+        );
     }
 
     /// Hosted instance path: no `AuthManager`, but the `ExtensionManager`
@@ -8425,6 +11591,203 @@ mod tests {
         assert_eq!(result.unwrap().id, tid);
     }
 
+    struct CompletedTextLlm {
+        text: String,
+    }
+
+    #[async_trait::async_trait]
+    impl t3claw_engine::LlmBackend for CompletedTextLlm {
+        async fn complete(
+            &self,
+            _messages: &[t3claw_engine::ThreadMessage],
+            _actions: &[t3claw_engine::ActionDef],
+            _config: &t3claw_engine::LlmCallConfig,
+        ) -> Result<t3claw_engine::LlmOutput, t3claw_engine::EngineError> {
+            Ok(t3claw_engine::LlmOutput {
+                response: t3claw_engine::LlmResponse::Text(self.text.clone()),
+                usage: t3claw_engine::TokenUsage::default(),
+            })
+        }
+
+        fn model_name(&self) -> &str {
+            "completed-text-llm"
+        }
+    }
+
+    async fn with_installed_engine_state<T, F>(state: EngineState, future: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        let lock = ENGINE_STATE.get_or_init(|| TokioRwLock::new(None));
+        *lock.write().await = Some(state);
+
+        let outcome = std::panic::AssertUnwindSafe(future).catch_unwind().await;
+
+        *lock.write().await = None;
+        match outcome {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    /// Caller-level regression: the text-based auth fallback inside
+    /// `handle_with_engine_inner()` must convert a completed thread
+    /// response containing `authentication_required` into a pending auth
+    /// gate **only when** the parsed credential name survives both the
+    /// helper parse and the credential-registry trust check.
+    #[tokio::test]
+    async fn handle_with_engine_text_auth_fallback_emits_pending_gate_for_registered_credential() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let store = Arc::new(TestStore::new());
+        let llm: Arc<dyn t3claw_engine::LlmBackend> = Arc::new(CompletedTextLlm {
+            text: r#"{"error":"authentication_required","credential_name":"github_pat"}"#
+                .to_string(),
+        });
+        let state = make_expected_test_state_with_llm(store, llm);
+        let pending_gates = Arc::clone(&state.pending_gates);
+
+        let outcome = with_installed_engine_state(state, async move {
+            let (mut agent, statuses) = make_test_agent_with_status_channel("web").await;
+
+            let credential_registry = Arc::new(crate::tools::wasm::SharedCredentialRegistry::new());
+            credential_registry.add_mappings([crate::secrets::CredentialMapping::bearer(
+                "github_pat",
+                "api.github.com",
+            )]);
+            let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+                Arc::new(crate::testing::credentials::test_secrets_store());
+            agent.deps.tools = Arc::new(
+                crate::tools::ToolRegistry::new().with_credentials(credential_registry, secrets),
+            );
+
+            let message = IncomingMessage::new("web", "alice", "call the github api");
+            let result = handle_with_engine_inner(&agent, &message, &message.content, 0)
+                .await
+                .expect("handle_with_engine_inner");
+
+            assert!(matches!(result, BridgeOutcome::Pending));
+
+            let statuses = statuses.lock().expect("poisoned").clone();
+            assert!(
+                statuses.iter().any(|status| matches!(
+                    status,
+                    StatusUpdate::AuthRequired {
+                        extension_name,
+                        request_id: Some(_),
+                        ..
+                    } if extension_name.as_str() == "github_pat"
+                )),
+                "expected AuthRequired with request_id, got: {statuses:?}"
+            );
+
+            let pending = pending_gates.list_for_user("alice").await;
+            assert_eq!(pending.len(), 1, "expected one pending auth gate");
+            assert_eq!(pending[0].action_name, "authentication_fallback");
+            assert_eq!(pending[0].parameters["credential_name"], "github_pat");
+
+            Ok::<(), crate::error::Error>(())
+        })
+        .await;
+
+        outcome.expect("registered auth fallback should create pending gate");
+    }
+
+    /// Negative caller-level branch: if the parsed credential name is not
+    /// registered, `handle_with_engine_inner()` must NOT surface an auth
+    /// card. It must hand the original response text back to the caller.
+    #[tokio::test]
+    async fn handle_with_engine_text_auth_fallback_passthrough_for_unregistered_credential() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let store = Arc::new(TestStore::new());
+        let raw = r#"{"error":"authentication_required","credential_name":"github_pat"}"#;
+        let llm: Arc<dyn t3claw_engine::LlmBackend> = Arc::new(CompletedTextLlm {
+            text: raw.to_string(),
+        });
+        let state = make_expected_test_state_with_llm(store, llm);
+        let pending_gates = Arc::clone(&state.pending_gates);
+
+        let outcome = with_installed_engine_state(state, async move {
+            let (agent, statuses) = make_test_agent_with_status_channel("web").await;
+            let message = IncomingMessage::new("web", "alice", "call the github api");
+            let result = handle_with_engine_inner(&agent, &message, &message.content, 0)
+                .await
+                .expect("handle_with_engine_inner");
+
+            let BridgeOutcome::Respond(text) = result else {
+                panic!("expected Respond passthrough, got {result:?}");
+            };
+            assert_eq!(text, raw);
+            let seen_auth_required = statuses
+                .lock()
+                .expect("poisoned")
+                .iter()
+                .any(|status| matches!(status, StatusUpdate::AuthRequired { .. }));
+            assert!(
+                !seen_auth_required,
+                "no AuthRequired should be emitted when credential is unregistered"
+            );
+            assert!(
+                pending_gates.list_for_user("alice").await.is_empty(),
+                "no pending gate should be inserted for unregistered credentials"
+            );
+
+            Ok::<(), crate::error::Error>(())
+        })
+        .await;
+
+        outcome.expect("unregistered auth fallback should pass through raw text");
+    }
+
+    /// Security-focused negative branch: invalid credential names must be
+    /// rejected by the helper parse and therefore never become a real auth
+    /// gate, even when the surrounding response otherwise matches the
+    /// `authentication_required` shape.
+    #[tokio::test]
+    async fn handle_with_engine_text_auth_fallback_rejects_invalid_credential_name() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+
+        let store = Arc::new(TestStore::new());
+        let raw = r#"{"error":"authentication_required","credential_name":"github-pat"}"#;
+        let llm: Arc<dyn t3claw_engine::LlmBackend> = Arc::new(CompletedTextLlm {
+            text: raw.to_string(),
+        });
+        let state = make_expected_test_state_with_llm(store, llm);
+        let pending_gates = Arc::clone(&state.pending_gates);
+
+        let outcome = with_installed_engine_state(state, async move {
+            let (agent, statuses) = make_test_agent_with_status_channel("web").await;
+            let message = IncomingMessage::new("web", "alice", "call the github api");
+            let result = handle_with_engine_inner(&agent, &message, &message.content, 0)
+                .await
+                .expect("handle_with_engine_inner");
+
+            let BridgeOutcome::Respond(text) = result else {
+                panic!("expected Respond passthrough, got {result:?}");
+            };
+            assert_eq!(text, raw);
+            let seen_auth_required = statuses
+                .lock()
+                .expect("poisoned")
+                .iter()
+                .any(|status| matches!(status, StatusUpdate::AuthRequired { .. }));
+            assert!(
+                !seen_auth_required,
+                "invalid credential names must not emit AuthRequired"
+            );
+            assert!(
+                pending_gates.list_for_user("alice").await.is_empty(),
+                "invalid credential names must not create pending gates"
+            );
+
+            Ok::<(), crate::error::Error>(())
+        })
+        .await;
+
+        outcome.expect("invalid credential names should be rejected by caller path");
+    }
+
     #[test]
     fn parse_credential_name_full_json() {
         let text = r#"{"error":"authentication_required","credential_name":"github_pat"}"#;
@@ -8684,6 +12047,85 @@ mod tests {
         );
     }
 
+    // ── is_real_thread_failure (#3274) ──────────────────────────────────
+
+    /// Helper: build a Failed thread with a configurable updated_at.
+    fn make_failed_thread(updated_at: chrono::DateTime<chrono::Utc>) -> t3claw_engine::Thread {
+        let mut t = t3claw_engine::Thread::new(
+            "test goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        t.transition_to(t3claw_engine::ThreadState::Running, None)
+            .unwrap();
+        t.transition_to(t3claw_engine::ThreadState::Failed, Some("LLM error".into()))
+            .unwrap();
+        t.updated_at = updated_at;
+        t
+    }
+
+    #[test]
+    fn real_failure_recent_within_window() {
+        let now = chrono::Utc::now();
+        let h24_ago = now - chrono::Duration::hours(24);
+        let t = make_failed_thread(now);
+        assert!(
+            super::is_real_thread_failure(&t, h24_ago),
+            "recent failed thread should surface as a real failure"
+        );
+    }
+
+    #[test]
+    fn real_failure_excluded_when_older_than_24h() {
+        let now = chrono::Utc::now();
+        let h24_ago = now - chrono::Duration::hours(24);
+        let t = make_failed_thread(now - chrono::Duration::hours(25));
+        assert!(
+            !super::is_real_thread_failure(&t, h24_ago),
+            "stale failure outside the 24h window must not be surfaced"
+        );
+    }
+
+    #[test]
+    fn real_failure_excludes_engine_restart_recovery() {
+        let now = chrono::Utc::now();
+        let h24_ago = now - chrono::Duration::hours(24);
+        let mut t = make_failed_thread(now);
+        // Simulate `recover_project_threads` having tagged the thread.
+        if let Some(obj) = t.metadata.as_object_mut() {
+            obj.insert(
+                t3claw_engine::ENGINE_RESTART_RECOVERY_METADATA_KEY.to_string(),
+                serde_json::Value::Bool(true),
+            );
+        }
+        assert!(
+            !super::is_real_thread_failure(&t, h24_ago),
+            "restart-recovery threads must not surface as user-actionable failures"
+        );
+    }
+
+    #[test]
+    fn real_failure_ignores_non_failed_states() {
+        let now = chrono::Utc::now();
+        let h24_ago = now - chrono::Duration::hours(24);
+        let mut t = t3claw_engine::Thread::new(
+            "still running",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "alice",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        t.transition_to(t3claw_engine::ThreadState::Running, None)
+            .unwrap();
+        t.updated_at = now;
+        assert!(
+            !super::is_real_thread_failure(&t, h24_ago),
+            "Running thread must not be classified as a failure"
+        );
+    }
+
     // ── persist_always_allow / revert_always_allow ─────────────────────
 
     /// Minimal in-memory SettingsStore for persistence tests.
@@ -8833,7 +12275,17 @@ mod tests {
             async fn available_actions(
                 &self,
                 _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, t3claw_engine::EngineError> {
+                Ok(vec![])
+            }
+
+            async fn available_capabilities(
+                &self,
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, t3claw_engine::EngineError>
+            {
                 Ok(vec![])
             }
         }
@@ -8856,6 +12308,11 @@ mod tests {
             Arc::new(LeaseManager::new()),
             Arc::new(PolicyEngine::new()),
         ));
+        // Share a single `Arc<GateResolutions>` between the gate
+        // controller and the EngineState field so
+        // `resolve_inline_gates_for_credential` reads the same index
+        // that `BridgeGateController::pause` writes to.
+        let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
         EngineState {
             conversation_manager: Arc::new(ConversationManager::new(
                 Arc::clone(&thread_manager),
@@ -8871,7 +12328,19 @@ mod tests {
             secrets_store: None,
             auth_manager: None,
             extension_manager: None,
+            gate_controller: Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+                Arc::new(crate::gate::store::PendingGateStore::in_memory()),
+                None,
+                Arc::new(crate::tools::ToolRegistry::new()),
+                None,
+                None,
+                Arc::new(crate::channels::ChannelManager::new()),
+                Arc::clone(&resolutions),
+            )),
+            gate_resolutions: resolutions,
             project_root: resolve_project_root(),
+            external_tool_catalog: Arc::new(crate::bridge::ExternalToolCatalog::new()),
+            capability_registry: Arc::new(t3claw_engine::CapabilityRegistry::new()),
         }
     }
 
@@ -9354,12 +12823,15 @@ mod tests {
         );
     }
 
-    /// Regression for the bug fixed in commit 652315e8: `persist_v2_tool_calls`
-    /// must only be called from the `ThreadOutcome::Completed` arm. If a
-    /// future refactor moves the call out of that arm, partial tool
-    /// executions on `GatePaused` would orphan a `role="tool_calls"` DB row
-    /// that then duplicates when the gate resumes. Pin the call-site
-    /// conditional by inspecting the source of `await_thread_outcome`.
+    /// Regression for the bug fixed in commit 652315e8:
+    /// `persist_v2_tool_calls` must only be called from a
+    /// `ThreadOutcome::Completed` arm. If a future refactor moves the
+    /// call out of that arm, partial tool executions on `GatePaused`
+    /// would orphan a `role="tool_calls"` DB row that then duplicates
+    /// when the gate resumes. Pin the call-site invariant by inspecting
+    /// the source of `await_thread_outcome` and any sibling arm-driven
+    /// dispatchers (currently `spawn_post_park_continuation`, which
+    /// re-runs the same outcome match in a background task).
     #[test]
     fn persist_v2_tool_calls_only_called_from_completed_arm() {
         let source = include_str!("router.rs");
@@ -9367,33 +12839,49 @@ mod tests {
             .split_once("async fn persist_v2_tool_calls")
             .expect("persist_v2_tool_calls must exist in router.rs");
 
-        // There should be exactly one call site in the pre-definition body
-        // (the call inside `await_thread_outcome`). The text below the
-        // definition is allowed to reference it (doc comments, unit tests).
-        let call_sites = before_fn.matches("persist_v2_tool_calls(").count();
-        assert_eq!(
-            call_sites, 1,
-            "expected exactly one call site for persist_v2_tool_calls, found {call_sites}"
-        );
-
-        // The call must live inside `ThreadOutcome::Completed` and must not
-        // appear in any of the terminal arms that represent non-completion
-        // outcomes. `GatePaused` is the one that triggered the bug.
-        let completed_idx = before_fn
-            .find("ThreadOutcome::Completed")
-            .expect("Completed arm must exist");
-        let gate_paused_idx = before_fn
-            .find("ThreadOutcome::GatePaused")
-            .expect("GatePaused arm must exist");
-        let call_idx = before_fn
-            .find("persist_v2_tool_calls(")
-            .expect("call site must exist");
-
+        // The text below the definition is allowed to reference it
+        // (doc comments, unit tests). Above the definition there must
+        // be at least one call site, and every call site must sit
+        // between a `ThreadOutcome::Completed` opening match arm and
+        // the nearest non-Completed sibling arm.
+        let call_sites: Vec<usize> = before_fn
+            .match_indices("persist_v2_tool_calls(")
+            .map(|(idx, _)| idx)
+            .collect();
         assert!(
-            completed_idx < call_idx && call_idx < gate_paused_idx,
-            "persist_v2_tool_calls call must sit between Completed and GatePaused arms, got \
-             completed={completed_idx} call={call_idx} gate_paused={gate_paused_idx}"
+            !call_sites.is_empty(),
+            "expected at least one call site for persist_v2_tool_calls"
         );
+
+        let other_outcome_arms = [
+            "ThreadOutcome::GatePaused",
+            "ThreadOutcome::Failed",
+            "ThreadOutcome::Stopped",
+            "ThreadOutcome::MaxIterations",
+        ];
+        for call_idx in &call_sites {
+            // Find the most recent match-arm marker preceding this call.
+            // Must be `ThreadOutcome::Completed` — anything else means
+            // the call sits in a non-completion arm and risks the bug.
+            let prefix = &before_fn[..*call_idx];
+            let last_completed = prefix.rfind("ThreadOutcome::Completed");
+            let last_other = other_outcome_arms
+                .iter()
+                .filter_map(|arm| prefix.rfind(arm))
+                .max();
+            assert!(
+                last_completed.is_some(),
+                "persist_v2_tool_calls call at byte {call_idx} must be inside a \
+                 ThreadOutcome::Completed arm — no preceding Completed marker"
+            );
+            assert!(
+                last_other.unwrap_or(0) < last_completed.unwrap_or(0),
+                "persist_v2_tool_calls call at byte {call_idx} must be inside the \
+                 closest enclosing ThreadOutcome::Completed arm; a non-Completed arm \
+                 marker (GatePaused/Failed/Stopped/MaxIterations) appears between \
+                 the Completed marker and the call"
+            );
+        }
     }
 
     // ── resume_lease_for_pending_gate tests ────────────────────
@@ -9592,5 +13080,1104 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    #[test]
+    fn thread_to_info_carries_title_and_goal_separately() {
+        // Regression: mission-spawned threads put `mission.name` in
+        // `title` and the multi-paragraph meta-prompt in `goal`. The
+        // DTO must carry both through so UI callers can render the
+        // short label without reading the full goal.
+        let long_goal = "a".repeat(500);
+        let mut thread = t3claw_engine::Thread::new(
+            &long_goal,
+            t3claw_engine::ThreadType::Mission,
+            t3claw_engine::ProjectId::new(),
+            "user-1",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.title = Some("Daily summary".to_string());
+
+        let info = thread_to_info(&thread);
+        assert_eq!(info.title.as_deref(), Some("Daily summary"));
+        assert_eq!(info.goal.len(), 500);
+    }
+
+    #[test]
+    fn thread_to_info_derives_title_from_goal_when_absent() {
+        // Regression: legacy engine threads persisted before the `title`
+        // field existed deserialize as `title = None`. The DTO must
+        // derive a short label from `goal` so frontend consumers don't
+        // fall through `threadTitle()` to rendering a UUID prefix.
+        let thread = t3claw_engine::Thread::new(
+            "plain goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "user-1",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let info = thread_to_info(&thread);
+        assert_eq!(info.title.as_deref(), Some("plain goal"));
+        assert_eq!(info.goal, "plain goal");
+    }
+
+    #[test]
+    fn thread_to_info_derives_from_first_line_of_long_goal() {
+        // Multi-paragraph meta-prompt (mission pattern without explicit
+        // title set): derive from first non-empty line, truncated to
+        // the helper's char limit.
+        let long_goal = format!("Short first line\n\n{}\n", "x".repeat(500));
+        let thread = t3claw_engine::Thread::new(
+            long_goal,
+            t3claw_engine::ThreadType::Mission,
+            t3claw_engine::ProjectId::new(),
+            "user-1",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let info = thread_to_info(&thread);
+        assert_eq!(info.title.as_deref(), Some("Short first line"));
+    }
+
+    /// `extract_external_tool_output` returns the tool result for the
+    /// matching call_id when the payload follows the canonical
+    /// `{"outputs": [...]}` shape the responses_api handler builds.
+    #[test]
+    fn extract_external_tool_output_matches_call_id() {
+        let payload = serde_json::json!({
+            "outputs": [
+                {"call_id": "call_a", "output": "first result"},
+                {"call_id": "call_b", "output": {"weather": "sunny"}},
+            ]
+        });
+        assert_eq!(
+            extract_external_tool_output(&payload, "call_a"),
+            serde_json::Value::String("first result".into())
+        );
+        assert_eq!(
+            extract_external_tool_output(&payload, "call_b"),
+            serde_json::json!({"weather": "sunny"})
+        );
+    }
+
+    /// When the payload carries an `outputs` array but no entry
+    /// matches the requested call_id, the helper must surface a typed
+    /// `null` so the LLM sees an explicit empty result rather than
+    /// the (possibly stale) raw payload of some other call. Without
+    /// this, the bridge would echo back unrelated tool output to the
+    /// model, confusing the next turn.
+    #[test]
+    fn extract_external_tool_output_returns_null_when_call_id_missing() {
+        let payload = serde_json::json!({
+            "outputs": [
+                {"call_id": "call_other", "output": "wrong call"},
+            ]
+        });
+        let result = extract_external_tool_output(&payload, "call_missing");
+        assert_eq!(
+            result,
+            serde_json::Value::Null,
+            "missing call_id must produce a typed null, got: {result:?}"
+        );
+    }
+
+    /// When the payload has no `outputs` array at all (defensive path
+    /// for legacy OAuth-style raw resolutions), the helper falls back
+    /// to returning the whole payload — preserving the historical
+    /// `Submission::ExternalCallback { payload: <raw value> }` shape.
+    #[test]
+    fn extract_external_tool_output_falls_back_to_raw_payload() {
+        let payload = serde_json::json!({"token": "abc123"});
+        let result = extract_external_tool_output(&payload, "any_call_id");
+        assert_eq!(result, payload);
+    }
+
+    /// An `outputs` entry without a matching call_id but a different
+    /// matching one further down the array must still be found —
+    /// guards against an early-return regression in the lookup loop.
+    #[test]
+    fn extract_external_tool_output_finds_match_after_misses() {
+        let payload = serde_json::json!({
+            "outputs": [
+                {"call_id": "call_a", "output": "a"},
+                {"call_id": "call_b", "output": "b"},
+                {"call_id": "call_target", "output": "match"},
+            ]
+        });
+        assert_eq!(
+            extract_external_tool_output(&payload, "call_target"),
+            serde_json::Value::String("match".into())
+        );
+    }
+
+    /// Regression test for #3317: when a user types a pairing claim into a
+    /// chat surface but the gateway has no `ExtensionManager` wired up, the
+    /// handler must produce a clear, user-facing message instead of
+    /// panicking or returning an internal error. The corresponding
+    /// happy-path test (with a real `ExtensionManager`) lives in the
+    /// telegram pairing chat-claim integration test (gated on libsql).
+    #[tokio::test]
+    async fn handle_pairing_claim_without_ext_mgr_responds_with_unavailable_message() {
+        let (agent, _statuses) = make_router_test_agent(None).await;
+        let message = IncomingMessage::new("tui", "alice", "approve telegram ABC12345");
+
+        let outcome = handle_pairing_claim(&agent, &message, "telegram", "ABC12345")
+            .await
+            .expect("handle_pairing_claim should not error");
+
+        match outcome {
+            BridgeOutcome::Respond(text) => {
+                assert!(
+                    text.contains("Pairing is not available"),
+                    "expected unavailable-message, got: {text}"
+                );
+            }
+            other => panic!("expected Respond, got {other:?}"),
+        }
+    }
+
+    /// Regression test for #3317: malformed channel slugs (path traversal,
+    /// empty, oversize) must reject at the boundary rather than reaching
+    /// the pairing store. Mirrors `web::features::pairing::parse_channel`'s
+    /// `ExtensionName::new` validation.
+    #[tokio::test]
+    async fn handle_pairing_claim_rejects_invalid_channel_name() {
+        let (agent, _statuses) = make_router_test_agent(None).await;
+        let message = IncomingMessage::new("tui", "alice", "approve ../etc/passwd ABC");
+
+        let outcome = handle_pairing_claim(&agent, &message, "../etc/passwd", "ABC")
+            .await
+            .expect("handle_pairing_claim should not error");
+
+        match outcome {
+            BridgeOutcome::Respond(text) => {
+                assert!(
+                    text.contains("Invalid channel name"),
+                    "expected invalid-channel message, got: {text}"
+                );
+            }
+            other => panic!("expected Respond, got {other:?}"),
+        }
+    }
+
+    /// The invalid-channel reply echoes a slice of what the user typed so
+    /// they know which token was rejected, but the echo must be bounded
+    /// and printable: an attacker-controlled chat input shouldn't be able
+    /// to inject backticks, control characters, or kilobytes of payload
+    /// into the SSE / Telegram / TUI reply through this path.
+    #[tokio::test]
+    async fn handle_pairing_claim_invalid_channel_echo_is_bounded_and_sanitized() {
+        let (agent, _statuses) = make_router_test_agent(None).await;
+        let message = IncomingMessage::new("tui", "alice", "approve x ABC");
+
+        // 200-character payload mixing control chars, backticks, and
+        // markdown — well beyond any real channel slug.
+        let hostile = format!(
+            "{}`malicious`\x07\x1b[31m{}",
+            "A".repeat(80),
+            "B".repeat(120)
+        );
+        let outcome = handle_pairing_claim(&agent, &message, &hostile, "ABC")
+            .await
+            .expect("handle_pairing_claim should not error");
+
+        let text = match outcome {
+            BridgeOutcome::Respond(text) => text,
+            other => panic!("expected Respond, got {other:?}"),
+        };
+
+        assert!(
+            text.contains("Invalid channel name"),
+            "expected invalid-channel message, got: {text}"
+        );
+        // Pull the echoed preview out from between the first two backticks
+        // — the message also embeds backtick-quoted examples
+        // (`telegram`, `slack-relay`), so a global backtick count is
+        // fragile and not what the user-controlled-input invariant cares
+        // about. What matters is that whatever the user typed doesn't
+        // smuggle anything into the *preview* region.
+        let mut parts = text.splitn(3, '`');
+        parts.next();
+        let preview = parts.next().expect("preview region delimited by backticks");
+        assert!(
+            !preview.contains('`'),
+            "preview must not contain user-injected backticks: {preview:?}"
+        );
+        assert!(
+            preview
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+                || preview == "<empty>",
+            "preview must be alphanumeric (with - / _) or the explicit \
+             <empty> placeholder, got {preview:?}"
+        );
+        assert!(
+            !text.contains('\x07') && !text.contains('\x1b'),
+            "echo must strip control characters: {text:?}"
+        );
+        assert!(
+            !text.contains("malicious"),
+            "non-alphanumeric markup must be stripped from the echo: {text}"
+        );
+        // Cap the rendered length to "Invalid channel name `<≤32 chars>`: <err>"
+        // — generous upper bound here just confirms the echo isn't unbounded.
+        assert!(
+            text.len() < 256,
+            "rendered reply must be bounded, got {} chars: {text}",
+            text.len()
+        );
+    }
+
+    /// Regression: when an Approval gate is parked in
+    /// `BridgeGateController::pause`, the agent loop is blocked at
+    /// `handle_message`, so the legacy mpsc-driven `ExecApproval`
+    /// submission would never reach `try_deliver`. The new
+    /// `try_resolve_inline_approval_gate` entry point bypasses the
+    /// agent loop and delivers the resolution directly to the parked
+    /// engine VM. Without this fix the parked future would only wake
+    /// on the 30-minute pause expiry — failure mode #3157 follow-up.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_wakes_parked_pause() {
+        use crate::bridge::PerExecutionContext;
+        use std::time::Duration;
+        use t3claw_engine::{
+            ConversationId, GateController, GatePauseRequest, ResumeKind, ThreadId,
+        };
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            // Build an EngineState whose pending_gates and gate_controller
+            // share the same Arc<PendingGateStore> + Arc<GateResolutions>,
+            // matching the production wiring in `init_engine`.
+            let pending_gates = Arc::new(crate::gate::store::PendingGateStore::in_memory());
+            let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
+            let controller = Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+                Arc::clone(&pending_gates),
+                None,
+                Arc::new(crate::tools::ToolRegistry::new()),
+                None,
+                None,
+                Arc::new(crate::channels::ChannelManager::new()),
+                Arc::clone(&resolutions),
+            ));
+
+            let store = Arc::new(TestStore::new());
+            let mut state = make_expected_test_state(store);
+            state.pending_gates = Arc::clone(&pending_gates);
+            state.gate_controller = Arc::clone(&controller);
+            *lock.write().await = Some(state);
+
+            let thread_id = ThreadId::new();
+            let user_id = "alice".to_string();
+            let conversation_id = ConversationId::new();
+
+            controller
+                .set_execution_context(
+                    user_id.clone(),
+                    thread_id,
+                    PerExecutionContext {
+                        conversation_id,
+                        source_channel: "gateway".into(),
+                        scope_thread_id: None,
+                        channel_metadata: serde_json::json!({}),
+                        original_message: None,
+                    },
+                )
+                .await;
+
+            // Spawn alpha: parks in `pause()` until our inline-resolve
+            // delivers a resolution. This mirrors the production timing
+            // where the agent loop's handle_message is blocked here.
+            let controller_for_pause = Arc::clone(&controller);
+            let user_for_pause = user_id.clone();
+            let pause_task = tokio::spawn(async move {
+                controller_for_pause
+                    .pause(GatePauseRequest {
+                        thread_id,
+                        user_id: user_for_pause,
+                        gate_name: "approval".into(),
+                        action_name: "shell".into(),
+                        call_id: "call-1".into(),
+                        parameters: serde_json::json!({"cmd": "ls"}),
+                        resume_kind: ResumeKind::Approval { allow_always: true },
+                        conversation_id: Some(conversation_id),
+                    })
+                    .await
+            });
+
+            // Wait until pause() inserts its pending gate and registers
+            // its oneshot. peek() lifting Some signals insert completed;
+            // we follow up with a small sleep so the spawned task can
+            // also advance past register() and reach `rx.await`.
+            let key = crate::gate::pending::PendingGateKey {
+                user_id: user_id.clone(),
+                thread_id,
+            };
+            let mut request_id = None;
+            for _ in 0..200 {
+                tokio::task::yield_now().await;
+                if let Some(view) = pending_gates.peek(&key).await
+                    && let Ok(parsed) = uuid::Uuid::parse_str(&view.request_id)
+                {
+                    request_id = Some(parsed);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let request_id =
+                request_id.expect("pause() must insert a pending gate with a request_id");
+            // Yield a few more times so the spawned pause_task moves
+            // from `register()` past it into `rx.await`.
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+
+            // Beta: gateway HTTP fast-path — call try_resolve_inline_approval_gate
+            // directly, not through the agent-loop mpsc.
+            let result = super::try_resolve_inline_approval_gate(
+                &user_id,
+                "gateway",
+                request_id,
+                t3claw_engine::GateResolution::Approved { always: false },
+                None,
+            )
+            .await
+            .expect("inline resolve must succeed");
+
+            assert!(
+                matches!(result, super::InlineGateOutcome::Delivered),
+                "expected Delivered for parked Approval gate; got {result:?}"
+            );
+
+            // Alpha must wake promptly with our resolution — well under the
+            // 30-minute pause expiry.
+            let resolution = tokio::time::timeout(Duration::from_secs(2), pause_task)
+                .await
+                .expect("inline-resolve must wake parked pause within 2s")
+                .expect("pause task did not panic");
+            assert!(
+                matches!(
+                    resolution,
+                    t3claw_engine::GateResolution::Approved { always: false }
+                ),
+                "delivered resolution must reach the parked future; got {resolution:?}"
+            );
+
+            // The pending gate must be consumed — `take_verified` runs
+            // inside the inline path and the rollback branch only fires
+            // when try_deliver returns false.
+            assert!(
+                pending_gates.peek(&key).await.is_none(),
+                "pending gate must be removed after successful inline delivery"
+            );
+
+            drop(controller);
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("inline resolve regression");
+    }
+
+    /// Helper: park a real `pause()` future for a fresh thread and
+    /// return the controller-allocated `request_id` once it has reached
+    /// `rx.await`. Used by the multi-scenario tests below.
+    async fn park_inline_pause_for_test(
+        controller: Arc<crate::bridge::gate_controller::BridgeGateController>,
+        pending_gates: Arc<crate::gate::store::PendingGateStore>,
+        user_id: &str,
+        thread_id: t3claw_engine::ThreadId,
+        source_channel: &str,
+    ) -> (
+        uuid::Uuid,
+        tokio::task::JoinHandle<t3claw_engine::GateResolution>,
+    ) {
+        use crate::bridge::PerExecutionContext;
+        use std::time::Duration;
+        use t3claw_engine::{ConversationId, GateController, GatePauseRequest, ResumeKind};
+
+        let conversation_id = ConversationId::new();
+        controller
+            .set_execution_context(
+                user_id.to_string(),
+                thread_id,
+                PerExecutionContext {
+                    conversation_id,
+                    source_channel: source_channel.to_string(),
+                    scope_thread_id: None,
+                    channel_metadata: serde_json::json!({}),
+                    original_message: None,
+                },
+            )
+            .await;
+
+        let controller_for_pause = Arc::clone(&controller);
+        let user_for_pause = user_id.to_string();
+        let pause_task = tokio::spawn(async move {
+            controller_for_pause
+                .pause(GatePauseRequest {
+                    thread_id,
+                    user_id: user_for_pause,
+                    gate_name: "approval".into(),
+                    action_name: "shell".into(),
+                    call_id: format!("call-{thread_id}"),
+                    parameters: serde_json::json!({"cmd": "ls"}),
+                    resume_kind: ResumeKind::Approval { allow_always: true },
+                    conversation_id: Some(conversation_id),
+                })
+                .await
+        });
+
+        let key = crate::gate::pending::PendingGateKey {
+            user_id: user_id.to_string(),
+            thread_id,
+        };
+        let mut request_id = None;
+        for _ in 0..200 {
+            tokio::task::yield_now().await;
+            if let Some(view) = pending_gates.peek(&key).await
+                && let Ok(parsed) = uuid::Uuid::parse_str(&view.request_id)
+            {
+                request_id = Some(parsed);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let request_id =
+            request_id.expect("park_inline_pause_for_test: pause() did not insert a pending gate");
+        // Yield so pause() advances past register() into rx.await.
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+        (request_id, pause_task)
+    }
+
+    /// Build a controller + state pair that share `pending_gates` and
+    /// `gate_controller`, install into `ENGINE_STATE`, and return both
+    /// Arcs for the test to reuse. Caller still owns the global
+    /// `ENGINE_STATE_TEST_LOCK` guard.
+    async fn install_inline_test_state() -> (
+        Arc<crate::gate::store::PendingGateStore>,
+        Arc<crate::bridge::gate_controller::BridgeGateController>,
+    ) {
+        let pending_gates = Arc::new(crate::gate::store::PendingGateStore::in_memory());
+        let resolutions = Arc::new(crate::bridge::gate_controller::GateResolutions::new());
+        let controller = Arc::new(crate::bridge::gate_controller::BridgeGateController::new(
+            Arc::clone(&pending_gates),
+            None,
+            Arc::new(crate::tools::ToolRegistry::new()),
+            None,
+            None,
+            Arc::new(crate::channels::ChannelManager::new()),
+            Arc::clone(&resolutions),
+        ));
+        let store = Arc::new(TestStore::new());
+        let mut state = make_expected_test_state(store);
+        state.pending_gates = Arc::clone(&pending_gates);
+        state.gate_controller = Arc::clone(&controller);
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = Some(state);
+        (pending_gates, controller)
+    }
+
+    /// In-memory `SettingsStore` used by the always-allow rollback test.
+    /// Records every write so the test can assert that the rollback path
+    /// actually deleted the just-installed `tool_permissions.<tool>` key.
+    struct TestSettingsStore {
+        data: tokio::sync::RwLock<
+            std::collections::HashMap<String, std::collections::HashMap<String, serde_json::Value>>,
+        >,
+    }
+
+    impl TestSettingsStore {
+        fn new() -> Self {
+            Self {
+                data: tokio::sync::RwLock::new(std::collections::HashMap::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::db::SettingsStore for TestSettingsStore {
+        async fn get_setting(
+            &self,
+            user_id: &str,
+            key: &str,
+        ) -> Result<Option<serde_json::Value>, crate::error::DatabaseError> {
+            Ok(self
+                .data
+                .read()
+                .await
+                .get(user_id)
+                .and_then(|m| m.get(key).cloned()))
+        }
+        async fn get_setting_full(
+            &self,
+            _user_id: &str,
+            _key: &str,
+        ) -> Result<Option<crate::history::SettingRow>, crate::error::DatabaseError> {
+            Ok(None)
+        }
+        async fn set_setting(
+            &self,
+            user_id: &str,
+            key: &str,
+            value: &serde_json::Value,
+        ) -> Result<(), crate::error::DatabaseError> {
+            self.data
+                .write()
+                .await
+                .entry(user_id.to_string())
+                .or_default()
+                .insert(key.to_string(), value.clone());
+            Ok(())
+        }
+        async fn delete_setting(
+            &self,
+            user_id: &str,
+            key: &str,
+        ) -> Result<bool, crate::error::DatabaseError> {
+            Ok(self
+                .data
+                .write()
+                .await
+                .get_mut(user_id)
+                .and_then(|m| m.remove(key))
+                .is_some())
+        }
+        async fn list_settings(
+            &self,
+            _user_id: &str,
+        ) -> Result<Vec<crate::history::SettingRow>, crate::error::DatabaseError> {
+            Ok(vec![])
+        }
+        async fn get_all_settings(
+            &self,
+            user_id: &str,
+        ) -> Result<std::collections::HashMap<String, serde_json::Value>, crate::error::DatabaseError>
+        {
+            Ok(self
+                .data
+                .read()
+                .await
+                .get(user_id)
+                .cloned()
+                .unwrap_or_default())
+        }
+        async fn set_all_settings(
+            &self,
+            user_id: &str,
+            settings: &std::collections::HashMap<String, serde_json::Value>,
+        ) -> Result<(), crate::error::DatabaseError> {
+            self.data
+                .write()
+                .await
+                .insert(user_id.to_string(), settings.clone());
+            Ok(())
+        }
+        async fn has_settings(&self, user_id: &str) -> Result<bool, crate::error::DatabaseError> {
+            Ok(self
+                .data
+                .read()
+                .await
+                .get(user_id)
+                .is_some_and(|m| !m.is_empty()))
+        }
+    }
+
+    /// `try_resolve_inline_approval_gate` must roll back any
+    /// `tool_permissions.<tool>` AlwaysAllow it provisionally installed
+    /// when `try_deliver` reports no live VM. Without rollback, a
+    /// caller resolving an Approval gate from a non-engine path would
+    /// silently install a session-wide auto-approve preference even
+    /// though the resume never executed.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_rolls_back_always_when_no_live_vm() {
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            let (pending_gates, controller) = install_inline_test_state().await;
+
+            // Insert a pending Approval gate but DO NOT register a oneshot —
+            // simulating the post-restart shape where invalidate_stranded
+            // somehow missed a row, or any future code path that creates a
+            // gate without parking a VM.
+            let thread_id = t3claw_engine::ThreadId::new();
+            let user_id = "alice";
+            let request_id = uuid::Uuid::new_v4();
+            let pending = sample_pending_gate_with_request_id(
+                user_id,
+                thread_id,
+                request_id,
+                t3claw_engine::ResumeKind::Approval { allow_always: true },
+            );
+            let mut pending = pending;
+            pending.action_name = "http".into();
+            pending.source_channel = "gateway".into();
+            pending_gates
+                .insert(pending.clone())
+                .await
+                .expect("insert pending gate");
+
+            let settings = Arc::new(TestSettingsStore::new());
+            let settings_ref: &(dyn crate::db::SettingsStore + Send + Sync) = settings.as_ref();
+
+            let result = super::try_resolve_inline_approval_gate(
+                user_id,
+                "gateway",
+                request_id,
+                t3claw_engine::GateResolution::Approved { always: true },
+                Some(settings_ref),
+            )
+            .await
+            .expect("inline resolve must succeed (no-live-VM path)");
+
+            assert!(
+                matches!(result, super::InlineGateOutcome::NoLiveVm),
+                "no parked future ⇒ NoLiveVm; got {result:?}"
+            );
+
+            // Auto-approve preference must be reverted — the resume
+            // never executed, so a stale always_allow would be a leak.
+            let perm_key = format!("tool_permissions.{}", pending.action_name);
+            assert!(
+                crate::db::SettingsStore::get_setting(settings_ref, user_id, &perm_key)
+                    .await
+                    .expect("settings get")
+                    .is_none(),
+                "always_allow must NOT be persisted on no-live-VM path"
+            );
+
+            // Pending gate must be back in the store so the legacy mpsc
+            // dispatch path can find it.
+            let key = crate::gate::pending::PendingGateKey {
+                user_id: user_id.to_string(),
+                thread_id,
+            };
+            assert!(
+                pending_gates.peek(&key).await.is_some(),
+                "pending gate must be re-inserted on no-live-VM"
+            );
+
+            drop(controller);
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("rollback regression");
+    }
+
+    /// Cross-channel security: a gate raised on `telegram` (a non-trusted
+    /// source channel) cannot be resolved by `slack` (also non-trusted).
+    /// `take_verified` rejects the channel mismatch; the inline-resolve
+    /// surface must propagate that as an `authorization` error so the
+    /// HTTP handler returns 403, not silently drop into the legacy
+    /// fall-through. The parked alpha must remain parked.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_rejects_cross_channel_resolve() {
+        use std::time::Duration;
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            let (pending_gates, controller) = install_inline_test_state().await;
+            let thread_id = t3claw_engine::ThreadId::new();
+            let user_id = "alice";
+
+            let (request_id, mut pause_task) = park_inline_pause_for_test(
+                Arc::clone(&controller),
+                Arc::clone(&pending_gates),
+                user_id,
+                thread_id,
+                "telegram",
+            )
+            .await;
+
+            // Slack tries to approve a Telegram-raised gate. Neither is
+            // in TRUSTED_GATE_CHANNELS, so this is a true cross-channel
+            // attempt and must be rejected.
+            let err = super::try_resolve_inline_approval_gate(
+                user_id,
+                "slack",
+                request_id,
+                t3claw_engine::GateResolution::Approved { always: false },
+                None,
+            )
+            .await
+            .expect_err("cross-channel resolve must error");
+            assert!(
+                matches!(err, super::InlineGateError::ChannelMismatch { .. }),
+                "channel-mismatch must surface as InlineGateError::ChannelMismatch; got: {err:?}"
+            );
+
+            // Parked alpha must NOT have woken — the rejection happens
+            // inside take_verified, before any try_deliver call. Borrow
+            // `pause_task` mutably (rather than moving it into a `{ ... }`
+            // block expression) so the JoinHandle stays bound through the
+            // explicit `controller.cancel_thread` cleanup below.
+            let still_parked = tokio::time::timeout(Duration::from_millis(200), &mut pause_task)
+                .await
+                .is_err();
+            assert!(
+                still_parked,
+                "rejected cross-channel resolve must not wake the parked future"
+            );
+
+            // The original gate must still be in the store (take_verified
+            // bails *before* the remove).
+            let key = crate::gate::pending::PendingGateKey {
+                user_id: user_id.to_string(),
+                thread_id,
+            };
+            assert!(
+                pending_gates.peek(&key).await.is_some(),
+                "rejected cross-channel resolve must leave the pending gate in place"
+            );
+
+            // Clean up the parked task — cancel via controller so the
+            // test process doesn't leak the spawned tokio task.
+            use t3claw_engine::GateController;
+            controller.cancel_thread(thread_id).await;
+
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("cross-channel rejection regression");
+    }
+
+    /// Two concurrent inline-resolve calls for the same `request_id`:
+    /// the gate-store mutex serializes them so exactly one wins and
+    /// delivers. The loser's outcome is permitted to be either an error
+    /// (race observed inside the lock before the winner removed) or
+    /// `NoLiveVm` (race observed after removal — falls through to the
+    /// legacy mpsc path which will respond "no matching pending
+    /// approval"). What must NOT happen is a second `Delivered`. The
+    /// parked alpha receives the resolution from the winner.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_concurrent_resolves_one_wins() {
+        use std::time::Duration;
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            let (pending_gates, controller) = install_inline_test_state().await;
+            let thread_id = t3claw_engine::ThreadId::new();
+            let user_id = "alice";
+
+            let (request_id, pause_task) = park_inline_pause_for_test(
+                Arc::clone(&controller),
+                Arc::clone(&pending_gates),
+                user_id,
+                thread_id,
+                "gateway",
+            )
+            .await;
+
+            // Two callers race on the same request_id.
+            let resolution = t3claw_engine::GateResolution::Approved { always: false };
+            let (a, b) = tokio::join!(
+                super::try_resolve_inline_approval_gate(
+                    user_id,
+                    "gateway",
+                    request_id,
+                    resolution.clone(),
+                    None,
+                ),
+                super::try_resolve_inline_approval_gate(
+                    user_id, "gateway", request_id, resolution, None,
+                ),
+            );
+
+            let mut delivered_count = 0;
+            let mut loser_count = 0;
+            for r in [&a, &b] {
+                match r {
+                    Ok(super::InlineGateOutcome::Delivered) => delivered_count += 1,
+                    Ok(super::InlineGateOutcome::NoLiveVm) | Err(_) => loser_count += 1,
+                }
+            }
+            assert_eq!(
+                delivered_count, 1,
+                "exactly one concurrent resolve must report Delivered"
+            );
+            assert_eq!(
+                loser_count, 1,
+                "the loser must NOT also report Delivered (race => NoLiveVm or error, both acceptable)"
+            );
+
+            // Alpha woke once with the winning resolution.
+            let woken = tokio::time::timeout(Duration::from_secs(2), pause_task)
+                .await
+                .expect("alpha must wake once after the winner delivers")
+                .expect("pause task did not panic");
+            assert!(
+                matches!(
+                    woken,
+                    t3claw_engine::GateResolution::Approved { always: false }
+                ),
+                "winner's resolution must reach the parked future; got {woken:?}"
+            );
+
+            drop(controller);
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("concurrent-resolves regression");
+    }
+
+    /// Two parallel Approval gates for the same user on different
+    /// threads must each get their own oneshot. Resolving thread A
+    /// wakes only A; B stays parked until its own resolve. Verifies
+    /// `try_deliver` routes by `request_id`, not by `(user, thread)`,
+    /// and that `BridgeGateController`'s per-(user, thread) gate lock
+    /// doesn't bleed between threads.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_parallel_threads_same_user_independent() {
+        use std::time::Duration;
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            let (pending_gates, controller) = install_inline_test_state().await;
+            let user_id = "alice";
+
+            let thread_a = t3claw_engine::ThreadId::new();
+            let thread_b = t3claw_engine::ThreadId::new();
+
+            let (req_a, mut pause_a) = park_inline_pause_for_test(
+                Arc::clone(&controller),
+                Arc::clone(&pending_gates),
+                user_id,
+                thread_a,
+                "gateway",
+            )
+            .await;
+            let (req_b, mut pause_b) = park_inline_pause_for_test(
+                Arc::clone(&controller),
+                Arc::clone(&pending_gates),
+                user_id,
+                thread_b,
+                "gateway",
+            )
+            .await;
+            assert_ne!(req_a, req_b, "each thread must have its own request_id");
+
+            // Resolve A only.
+            let res = super::try_resolve_inline_approval_gate(
+                user_id,
+                "gateway",
+                req_a,
+                t3claw_engine::GateResolution::Approved { always: false },
+                None,
+            )
+            .await
+            .expect("inline resolve A must succeed");
+            assert!(
+                matches!(res, super::InlineGateOutcome::Delivered),
+                "thread A must deliver; got {res:?}"
+            );
+
+            let woken_a = tokio::time::timeout(Duration::from_secs(2), &mut pause_a)
+                .await
+                .expect("A must wake within 2s")
+                .expect("pause A did not panic");
+            assert!(matches!(
+                woken_a,
+                t3claw_engine::GateResolution::Approved { always: false }
+            ));
+
+            // B must remain parked — explicitly verify with a short
+            // timeout window.
+            let still_parked = tokio::time::timeout(Duration::from_millis(200), &mut pause_b)
+                .await
+                .is_err();
+            assert!(
+                still_parked,
+                "thread B must remain parked while only A is resolved"
+            );
+
+            // Now resolve B; it should wake independently.
+            let res = super::try_resolve_inline_approval_gate(
+                user_id,
+                "gateway",
+                req_b,
+                t3claw_engine::GateResolution::Denied { reason: None },
+                None,
+            )
+            .await
+            .expect("inline resolve B must succeed");
+            assert!(
+                matches!(res, super::InlineGateOutcome::Delivered),
+                "thread B must deliver; got {res:?}"
+            );
+
+            let woken_b = tokio::time::timeout(Duration::from_secs(2), pause_b)
+                .await
+                .expect("B must wake within 2s after its own resolve")
+                .expect("pause B did not panic");
+            assert!(
+                matches!(woken_b, t3claw_engine::GateResolution::Denied { .. }),
+                "thread B must receive its own Denied resolution; got {woken_b:?}"
+            );
+
+            drop(controller);
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("parallel-threads regression");
+    }
+
+    /// Regression for the gateway approval contract: when a web thread
+    /// records a `scope_thread_id` (the per-conversation UUID returned
+    /// by `/api/chat/thread/new`) that differs from the engine's
+    /// internal `ThreadId`, the inline fast path must still find the
+    /// pending gate by `request_id` alone — *not* by the wire
+    /// thread id. Before this fix the handler constructed
+    /// `ThreadId(scope_thread_id)` and `take_verified` missed the row,
+    /// returning 500 instead of waking the parked alpha.
+    #[tokio::test]
+    async fn try_resolve_inline_approval_gate_resolves_when_scope_id_differs_from_thread_id() {
+        use crate::bridge::PerExecutionContext;
+        use std::time::Duration;
+        use t3claw_common::ExternalThreadId;
+        use t3claw_engine::{ConversationId, GateController, GatePauseRequest, ResumeKind};
+
+        let _guard = ENGINE_STATE_TEST_LOCK.lock().await;
+        let lock = ENGINE_STATE.get_or_init(|| RwLock::new(None));
+        *lock.write().await = None;
+
+        let outcome = async {
+            let (pending_gates, controller) = install_inline_test_state().await;
+            let user_id = "alice";
+            let thread_id = t3claw_engine::ThreadId::new();
+            // The wire / scope id the web frontend would send back is
+            // *not* the engine thread id — it's the conversation UUID
+            // recorded on the gate as `scope_thread_id`.
+            let scope_id = ExternalThreadId::new(uuid::Uuid::new_v4().to_string())
+                .expect("UUID is a valid ExternalThreadId");
+            let conversation_id = ConversationId::new();
+
+            controller
+                .set_execution_context(
+                    user_id.to_string(),
+                    thread_id,
+                    PerExecutionContext {
+                        conversation_id,
+                        source_channel: "gateway".into(),
+                        scope_thread_id: Some(scope_id.clone()),
+                        channel_metadata: serde_json::json!({}),
+                        original_message: None,
+                    },
+                )
+                .await;
+
+            let controller_for_pause = Arc::clone(&controller);
+            let user_for_pause = user_id.to_string();
+            let mut pause_task = tokio::spawn(async move {
+                controller_for_pause
+                    .pause(GatePauseRequest {
+                        thread_id,
+                        user_id: user_for_pause,
+                        gate_name: "approval".into(),
+                        action_name: "shell".into(),
+                        call_id: "call-1".into(),
+                        parameters: serde_json::json!({"cmd": "ls"}),
+                        resume_kind: ResumeKind::Approval {
+                            allow_always: false,
+                        },
+                        conversation_id: Some(conversation_id),
+                    })
+                    .await
+            });
+
+            // Wait until pause() inserts the pending gate.
+            let key = crate::gate::pending::PendingGateKey {
+                user_id: user_id.to_string(),
+                thread_id,
+            };
+            let mut request_id = None;
+            for _ in 0..200 {
+                tokio::task::yield_now().await;
+                if let Some(view) = pending_gates.peek(&key).await
+                    && let Ok(parsed) = uuid::Uuid::parse_str(&view.request_id)
+                {
+                    request_id = Some(parsed);
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            let request_id = request_id.expect("pause() must insert a pending gate");
+            for _ in 0..5 {
+                tokio::task::yield_now().await;
+            }
+
+            // Sanity: the pending gate's wire-effective thread id is
+            // the scope id, not the engine ThreadId — exactly the
+            // shape that broke the original implementation.
+            let view = pending_gates
+                .peek(&key)
+                .await
+                .expect("pending gate present");
+            assert_eq!(
+                view.thread_id,
+                scope_id.as_str(),
+                "view must surface the scope id as the wire thread_id"
+            );
+            assert_ne!(
+                view.thread_id,
+                thread_id.to_string(),
+                "scope id must differ from engine thread id for this regression"
+            );
+
+            // The inline handler does not pass thread_id at all. It
+            // must still resolve the gate from `request_id` alone.
+            let result = super::try_resolve_inline_approval_gate(
+                user_id,
+                "gateway",
+                request_id,
+                t3claw_engine::GateResolution::Approved { always: false },
+                None,
+            )
+            .await
+            .expect("inline resolve must succeed even when scope id != engine thread id");
+            assert!(
+                matches!(result, super::InlineGateOutcome::Delivered),
+                "must Delivered, not NoLiveVm or error; got {result:?}"
+            );
+
+            let woken = tokio::time::timeout(Duration::from_secs(2), &mut pause_task)
+                .await
+                .expect("parked alpha must wake within 2s")
+                .expect("pause task did not panic");
+            assert!(matches!(
+                woken,
+                t3claw_engine::GateResolution::Approved { always: false }
+            ));
+
+            drop(controller);
+            Ok::<(), crate::error::Error>(())
+        }
+        .await;
+
+        *lock.write().await = None;
+        outcome.expect("scope-thread-id mismatch regression");
     }
 }

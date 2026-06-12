@@ -192,7 +192,7 @@ const REASONING_LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// prior work, decisions, preferences, or any historical context.
 pub struct MemorySearchTool {
     resolver: Arc<dyn WorkspaceResolver>,
-    llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+    llm: Option<Arc<dyn t3claw_llm::LlmProvider>>,
     reasoning_enabled: bool,
     /// Per-user rate limiter for reasoning LLM calls.
     reasoning_limiter: Arc<crate::tools::rate_limiter::RateLimiter>,
@@ -212,7 +212,7 @@ impl MemorySearchTool {
     /// Create a memory search tool with optional reasoning-augmented recall.
     pub fn with_reasoning(
         resolver: Arc<dyn WorkspaceResolver>,
-        llm: Option<Arc<dyn crate::llm::LlmProvider>>,
+        llm: Option<Arc<dyn t3claw_llm::LlmProvider>>,
         reasoning_enabled: bool,
     ) -> Self {
         Self {
@@ -334,15 +334,15 @@ impl Tool for MemorySearchTool {
                     .join("\n\n");
 
                 let llm_messages = vec![
-                    crate::llm::ChatMessage::system(include_str!(
+                    t3claw_llm::ChatMessage::system(include_str!(
                         "../../../crates/t3claw_engine/prompts/memory_reasoning_synthesis.md"
                     )),
-                    crate::llm::ChatMessage::user(format!(
+                    t3claw_llm::ChatMessage::user(format!(
                         "Query: {query}\n\nMemory fragments:\n{fragments}"
                     )),
                 ];
 
-                let request = crate::llm::CompletionRequest::new(llm_messages).with_max_tokens(500);
+                let request = t3claw_llm::CompletionRequest::new(llm_messages).with_max_tokens(500);
 
                 match tokio::time::timeout(REASONING_LLM_TIMEOUT, llm.complete(request)).await {
                     Ok(Ok(response)) => {
@@ -1682,7 +1682,7 @@ mod tests {
             let pool = crate::channels::web::platform::state::WorkspacePool::new(
                 db,
                 None,
-                crate::workspace::EmbeddingCacheConfig::default(),
+                t3claw_embeddings::EmbeddingCacheConfig::default(),
                 crate::config::WorkspaceSearchConfig::default(),
                 crate::config::WorkspaceConfig::default(),
             );
@@ -1703,7 +1703,7 @@ mod tests {
             let pool = crate::channels::web::platform::state::WorkspacePool::new(
                 db,
                 None,
-                crate::workspace::EmbeddingCacheConfig::default(),
+                t3claw_embeddings::EmbeddingCacheConfig::default(),
                 crate::config::WorkspaceSearchConfig::default(),
                 crate::config::WorkspaceConfig::default(),
             );
@@ -1723,12 +1723,12 @@ mod tests {
     #[cfg(feature = "libsql")]
     mod reasoning_recall_tests {
         use super::*;
-        use crate::llm::{
+        use rust_decimal::Decimal;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use t3claw_llm::{
             CompletionRequest, CompletionResponse, FinishReason, LlmError, LlmProvider,
             ToolCompletionRequest, ToolCompletionResponse,
         };
-        use rust_decimal::Decimal;
-        use std::sync::atomic::{AtomicU32, Ordering};
 
         /// LLM mock that records call count and returns a canned synthesis.
         struct CountingMockLlm {
@@ -1769,6 +1769,7 @@ mod tests {
                     input_tokens: 10,
                     output_tokens: 20,
                     finish_reason: FinishReason::Stop,
+                    reasoning: None,
                     cache_read_input_tokens: 0,
                     cache_creation_input_tokens: 0,
                 })

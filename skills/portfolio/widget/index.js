@@ -186,12 +186,12 @@
 
     var svg = buildCardSvg(headline, apyStr, topDelta, moves);
     svgToPng(svg, function (dataUrl) {
-      if (window.IronClaw && window.IronClaw.api && window.IronClaw.api.share) {
+      if (window.T3Claw && window.T3Claw.api && window.T3Claw.api.share) {
         var shareText = headline + ' with my DeFi portfolio keeper';
-        window.IronClaw.api.share({
+        window.T3Claw.api.share({
           imageDataUrl: dataUrl,
           text: shareText,
-          hashtags: 'DeFi,IronClaw,Crypto'
+          hashtags: 'DeFi,T3Claw,Crypto'
         });
       }
     });

@@ -15,8 +15,8 @@ use serde_json::{Value, json};
 fn run_daemon(base_dir: &std::path::Path, lines: &[Value]) -> Vec<Value> {
     let bin = env!("CARGO_BIN_EXE_sandbox_daemon");
     let mut child = Command::new(bin)
-        .env("IRONCLAW_SANDBOX_BASE_DIR", base_dir)
-        .env("IRONCLAW_SANDBOX_LOG", "warn")
+        .env("T3CLAW_SANDBOX_BASE_DIR", base_dir)
+        .env("T3CLAW_SANDBOX_LOG", "warn")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -188,8 +188,8 @@ fn malformed_json_returns_parse_error() {
     let bin = env!("CARGO_BIN_EXE_sandbox_daemon");
     let dir = tempfile::tempdir().unwrap();
     let mut child = Command::new(bin)
-        .env("IRONCLAW_SANDBOX_BASE_DIR", dir.path())
-        .env("IRONCLAW_SANDBOX_LOG", "warn")
+        .env("T3CLAW_SANDBOX_BASE_DIR", dir.path())
+        .env("T3CLAW_SANDBOX_LOG", "warn")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

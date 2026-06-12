@@ -16,14 +16,15 @@ use crate::context::ContextManager;
 use crate::db::{Database, UserStore};
 use crate::extensions::ExtensionManager;
 use crate::hooks::HookRegistry;
-use crate::llm::recording::HttpInterceptor;
-use crate::llm::{LlmProvider, LlmReloadHandle, RecordingLlm, SessionManager};
 use crate::secrets::SecretsStore;
 use crate::tools::ToolRegistry;
 use crate::tools::mcp::{McpProcessManager, McpSessionManager};
 use crate::tools::wasm::SharedCredentialRegistry;
 use crate::tools::wasm::WasmToolRuntime;
-use crate::workspace::{EmbeddingCacheConfig, EmbeddingProvider, Workspace};
+use crate::workspace::Workspace;
+use t3claw_embeddings::{EmbeddingCacheConfig, EmbeddingProvider};
+use t3claw_llm::recording::HttpInterceptor;
+use t3claw_llm::{LlmProvider, LlmReloadHandle, RecordingLlm, SessionManager};
 use t3claw_safety::SafetyLayer;
 use t3claw_skills::SkillRegistry;
 use t3claw_skills::catalog::SkillCatalog;
@@ -84,6 +85,24 @@ pub struct AppComponents {
 #[derive(Default)]
 pub struct AppBuilderFlags {
     pub no_db: bool,
+}
+
+/// Build an ephemeral in-memory secrets store backed by a freshly-generated
+/// master key.
+///
+/// Returns `Err` only if the crypto routine fails to initialize — which
+/// should not happen in practice, since the key is produced by the same
+/// generator used throughout the test suite. Propagated (rather than
+/// swallowed) so that a construction failure aborts startup at
+/// `init_secrets` instead of surfacing later as an unactionable
+/// "secrets store not initialized" error from `init_extensions`.
+fn build_ephemeral_secrets_store()
+-> Result<Arc<dyn SecretsStore + Send + Sync>, crate::secrets::SecretError> {
+    use crate::secrets::{InMemorySecretsStore, SecretsCrypto};
+    let ephemeral_key =
+        secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
+    let crypto = SecretsCrypto::new(ephemeral_key)?;
+    Ok(Arc::new(InMemorySecretsStore::new(Arc::new(crypto))))
 }
 
 /// Builder that orchestrates the 5 mechanical init phases.
@@ -211,8 +230,10 @@ impl AppBuilder {
             }
         }
 
+        let session_db: t3claw_llm::host::SharedSessionDb =
+            std::sync::Arc::new(crate::llm_host::DatabaseSessionDb::new(db.clone()));
         self.session
-            .attach_store(db.clone(), &self.config.owner_id)
+            .attach_store(session_db, &self.config.owner_id)
             .await;
 
         // Fire-and-forget housekeeping — no need to block startup.
@@ -224,6 +245,47 @@ impl AppBuilder {
         });
 
         self.db = Some(db);
+        Ok(())
+    }
+
+    /// Install an ephemeral in-memory secrets store so downstream WASM
+    /// tool/channel wiring can always rely on `self.secrets_store` being
+    /// `Some`.
+    ///
+    /// Used when persistent secrets construction fails (no master key, no DB
+    /// handle, crypto init failure). Without this fallback, WASM tool
+    /// credential injection silently does nothing on hosted TEE deployments
+    /// because the loader only wires a store when `self.secrets_store` is
+    /// `Some` — see #1537 ("WASM credential injection fails on hosted TEE").
+    ///
+    /// Tools that declare required credentials will then refuse to run via
+    /// the fail-closed branch in `resolve_host_credentials`, surfacing a
+    /// clear error instead of issuing unauthenticated HTTP requests.
+    ///
+    /// `reason` names the specific path that triggered the fallback — logged
+    /// at warn so operators diagnosing a TEE deployment can distinguish
+    /// "master key never resolved" from "master key resolved but no DB
+    /// handle" from "crypto init failed" without turning on debug logging.
+    ///
+    /// Returns the error from `build_ephemeral_secrets_store` so that a
+    /// genuinely broken crypto setup aborts startup here — otherwise a
+    /// downstream phase (e.g. `init_extensions`) would later fail with a
+    /// less actionable "secrets store not initialized" error.
+    fn install_ephemeral_secrets_store(&mut self, reason: &str) -> Result<(), anyhow::Error> {
+        let store = build_ephemeral_secrets_store().map_err(|e| {
+            anyhow::anyhow!(
+                "failed to initialize ephemeral secrets store ({reason}): {e}. \
+                 This should not happen in practice; please report at \
+                 https://github.com/Terminal-3/t3-claw/issues"
+            )
+        })?;
+        tracing::warn!(
+            reason = reason,
+            "Persistent secrets store unavailable; installing ephemeral in-memory fallback. \
+             Credentials saved via `t3claw tool auth` will not persist across restarts. \
+             Run `t3claw doctor` for diagnostics (see #1537 for hosted-TEE specifics)."
+        );
+        self.secrets_store = Some(store);
         Ok(())
     }
 
@@ -259,6 +321,7 @@ impl AppBuilder {
                     );
                 }
 
+                self.install_ephemeral_secrets_store("master key resolution produced no key")?;
                 return Ok(());
             }
         };
@@ -268,6 +331,7 @@ impl AppBuilder {
             Err(e) => {
                 tracing::warn!("Failed to initialize secrets crypto: {}", e);
                 self.handles.take();
+                self.install_ephemeral_secrets_store("secrets crypto initialization failed")?;
                 return Ok(());
             }
         };
@@ -352,10 +416,60 @@ impl AppBuilder {
 
             // Wire the secrets store into the session manager so future
             // token saves go to encrypted storage.
-            self.session.attach_secrets(Arc::clone(secrets)).await;
+            let session_secrets: t3claw_llm::host::SharedSessionSecrets = Arc::new(
+                crate::llm_host::SecretsStoreSessionSecrets::new(Arc::clone(secrets)),
+            );
+            self.session.attach_secrets(session_secrets).await;
         }
 
         self.secrets_store = store;
+
+        // If no persistent store was created (e.g. master key resolved but no
+        // DB handle was available), fall back to an ephemeral in-memory store
+        // so downstream WASM tool/channel wiring still goes through the
+        // credential-injection code path. See `install_ephemeral_secrets_store`
+        // for the rationale (#1537).
+        if self.secrets_store.is_none() {
+            let has_libsql_handle = self
+                .handles
+                .as_ref()
+                .map(|h| {
+                    #[cfg(feature = "libsql")]
+                    {
+                        h.libsql_db.is_some()
+                    }
+                    #[cfg(not(feature = "libsql"))]
+                    {
+                        let _ = h;
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            let has_pg_handle = self
+                .handles
+                .as_ref()
+                .map(|h| {
+                    #[cfg(feature = "postgres")]
+                    {
+                        h.pg_pool.is_some()
+                    }
+                    #[cfg(not(feature = "postgres"))]
+                    {
+                        let _ = h;
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            let reason = if self.handles.is_none() {
+                "master key resolved but no database handles available (no_db mode or init_database did not run)"
+            } else if !has_libsql_handle && !has_pg_handle {
+                "master key resolved but neither libsql nor postgres handle is present (likely a feature-flag / backend mismatch)"
+            } else {
+                "master key resolved and DB handles present but create_secrets_store returned None (unexpected)"
+            };
+            self.install_ephemeral_secrets_store(reason)?;
+        }
+
         Ok(())
     }
 
@@ -376,7 +490,7 @@ impl AppBuilder {
         anyhow::Error,
     > {
         let (llm, cheap_llm, recording_handle, reload_handle) =
-            crate::llm::build_provider_chain(&self.config.llm, self.session.clone()).await?;
+            t3claw_llm::build_provider_chain(&self.config.llm, self.session.clone()).await?;
         Ok((llm, cheap_llm, recording_handle, reload_handle))
     }
 
@@ -435,16 +549,27 @@ impl AppBuilder {
             tools.register_secrets_tools(Arc::clone(ss));
         }
 
-        // Create embeddings provider using the unified method
-        let embeddings = self
-            .config
-            .embeddings
-            .create_provider(
-                &self.config.llm.nearai.base_url,
-                self.session.clone(),
-                self.config.llm.bedrock.as_ref(),
-            )
-            .await;
+        // Create embeddings provider using the unified method.
+        // Translate the LLM-side `BedrockConfig` into the embeddings-side
+        // `BedrockEmbeddingSetup` at the boundary so the embeddings layer
+        // does not depend on `t3claw_llm` config types.
+        let bedrock_setup =
+            self.config
+                .llm
+                .bedrock
+                .as_ref()
+                .map(|b| t3claw_embeddings::BedrockEmbeddingSetup {
+                    region: b.region.clone(),
+                    profile: b.profile.clone(),
+                });
+        let embeddings = t3claw_embeddings::create_provider(
+            &self.config.embeddings,
+            t3claw_embeddings::ProviderDeps {
+                session: self.session.clone(),
+                bedrock_setup,
+            },
+        )
+        .await;
 
         // Register memory tools if database is available
         let workspace_user_id = self.config.owner_id.as_str();
@@ -543,13 +668,13 @@ impl AppBuilder {
                     .map(|p| p.model.clone())
                     .unwrap_or_else(|| self.config.llm.nearai.model.clone());
                 let models = vec![model_name.clone()];
-                let gen_model = crate::llm::image_models::suggest_image_model(&models)
+                let gen_model = t3claw_llm::image_models::suggest_image_model(&models)
                     .unwrap_or("black-forest-labs/FLUX.2-klein-4B")
                     .to_string();
                 tools.register_image_tools(api_base.clone(), api_key.clone(), gen_model, None);
 
                 // Check for vision models
-                let vision_model = crate::llm::vision_models::suggest_vision_model(&models)
+                let vision_model = t3claw_llm::vision_models::suggest_vision_model(&models)
                     .unwrap_or(&model_name)
                     .to_string();
                 tools.register_vision_tools(api_base, api_key, vision_model, None);
@@ -587,6 +712,7 @@ impl AppBuilder {
         tools: &Arc<ToolRegistry>,
         hooks: &Arc<HookRegistry>,
         settings_store_override: Option<Arc<dyn crate::db::SettingsStore + Send + Sync>>,
+        ownership_cache: Arc<crate::ownership::OwnershipCache>,
     ) -> Result<
         (
             Arc<McpSessionManager>,
@@ -600,6 +726,12 @@ impl AppBuilder {
     > {
         use crate::tools::wasm::{WasmToolLoader, load_dev_tools};
 
+        // `McpSessionManager::new()` hardcodes the 1800s idle timeout
+        // (see `src/tools/mcp/session.rs`). There is no session-count
+        // cap yet — if that's needed for a large deployment, add a
+        // `max_sessions` field to the manager and a real knob here;
+        // a prior `MCP_MAX_SESSIONS` env var was wired in but never
+        // reached the struct and has been removed.
         let mcp_session_manager = Arc::new(McpSessionManager::new());
         let mcp_process_manager = Arc::new(McpProcessManager::new());
 
@@ -680,7 +812,6 @@ impl AppBuilder {
         let mcp_servers_future = {
             let secrets_store = self.secrets_store.clone();
             let db = self.db.clone();
-            let tools = Arc::clone(tools);
             let mcp_sm = Arc::clone(&mcp_session_manager);
             let pm = Arc::clone(&mcp_process_manager);
             let owner_id = self.config.owner_id.clone();
@@ -702,7 +833,6 @@ impl AppBuilder {
                         for server in enabled {
                             let mcp_sm = Arc::clone(&mcp_sm);
                             let secrets = secrets_store.clone();
-                            let tools = Arc::clone(&tools);
                             let pm = Arc::clone(&pm);
                             let owner_id = owner_id.clone();
 
@@ -733,29 +863,18 @@ impl AppBuilder {
                                 match client.list_tools().await {
                                     Ok(mcp_tools) => {
                                         let tool_count = mcp_tools.len();
-                                        match client.create_tools().await {
-                                            Ok(tool_impls) => {
-                                                for tool in tool_impls {
-                                                    tools.register(tool).await;
-                                                }
-                                                tracing::debug!(
-                                                    "Loaded {} tools from MCP server '{}'",
-                                                    tool_count,
-                                                    server_name
-                                                );
-                                                return Some((
-                                                    server_name,
-                                                    Arc::new(client),
-                                                ));
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    "Failed to create tools from MCP server '{}': {}",
-                                                    server_name,
-                                                    e
-                                                );
-                                            }
-                                        }
+                                        tracing::debug!(
+                                            "Connected to MCP server '{}' ({} tools); \
+                                             deferring wrapper registration until manager init",
+                                            server_name,
+                                            tool_count
+                                        );
+                                        // Tool wrappers need an `Arc<McpClientStore>` so
+                                        // dispatch can resolve the caller's client per user
+                                        // at execute time. The store is owned by the
+                                        // ExtensionManager, which isn't built yet — defer
+                                        // registration to `manager.inject_mcp_client` below.
+                                        return Some((server_name, Arc::new(client)));
                                     }
                                     Err(e) => {
                                         let err_str = e.to_string();
@@ -853,19 +972,22 @@ impl AppBuilder {
             }
         }
 
-        // Create extension manager. Use ephemeral in-memory secrets if no
-        // persistent store is configured (listing/install/activate still work).
-        let ext_secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> = if let Some(ref s) =
-            self.secrets_store
+        // Create extension manager. `init_secrets` guarantees
+        // `self.secrets_store` is Some — either a persistent store or an
+        // ephemeral in-memory fallback — so the extension manager, WASM tool
+        // loader, and WASM channel setup all share the same store instance.
+        // See #1537 for the hosted-TEE regression that motivated unconditional
+        // wiring.
+        let ext_secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> = match self
+            .secrets_store
+            .as_ref()
         {
-            Arc::clone(s)
-        } else {
-            use crate::secrets::{InMemorySecretsStore, SecretsCrypto};
-            let ephemeral_key =
-                secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
-            let crypto = Arc::new(SecretsCrypto::new(ephemeral_key).expect("ephemeral crypto"));
-            tracing::debug!("Using ephemeral in-memory secrets store for extension manager");
-            Arc::new(InMemorySecretsStore::new(crypto))
+            Some(s) => Arc::clone(s),
+            None => {
+                return Err(anyhow::anyhow!(
+                    "secrets store not initialized; call init_secrets() before init_extensions()"
+                ));
+            }
         };
         let extension_manager = {
             let mut em = ExtensionManager::new(
@@ -885,8 +1007,26 @@ impl AppBuilder {
             if let Some(ref ss) = settings_store_override {
                 em = em.with_settings_store(Arc::clone(ss));
             }
+            let pairing_store = if let Some(ref db) = self.db {
+                let ps = Arc::new(crate::pairing::PairingStore::new(
+                    Arc::clone(db),
+                    Arc::clone(&ownership_cache),
+                ));
+                em = em.with_pairing_store(Arc::clone(&ps));
+                Some(ps)
+            } else {
+                None
+            };
+            // Wire the Reborn Telegram v2 feature flag so the manager
+            // can reject hot-activation of the legacy `telegram` WASM
+            // channel when v2 owns the webhook installation (Henry's
+            // review on PR #3356 — startup guard alone is not enough).
+            em.set_reborn_telegram_v2_enabled(self.config.channels.reborn_telegram_v2_enabled);
             let manager = Arc::new(em);
             tools.register_extension_tools(Arc::clone(&manager));
+            if let Some(ps) = pairing_store {
+                tools.register_sync(Arc::new(crate::tools::builtin::PairingApproveTool::new(ps)));
+            }
 
             // Register permission management tool and upgrade tool_list with
             // builtin registry support. Prefer the workspace-backed adapter
@@ -910,7 +1050,35 @@ impl AppBuilder {
                     "Injecting startup MCP clients into extension manager"
                 );
                 for (name, client) in startup_mcp_clients {
-                    manager.inject_mcp_client(name, client).await;
+                    // `name` here is the raw config row's `server.name`
+                    // captured before `create_client_from_config()`
+                    // normalized hyphens to underscores. The client
+                    // itself, the generated wrappers, and the session /
+                    // process managers all use the NORMALIZED name.
+                    // Using the raw `name` here would insert the client
+                    // into `McpClientStore` under `"my-mcp-server"`
+                    // while the wrappers look up `"my_mcp_server"` at
+                    // dispatch, silently failing every call with
+                    // "MCP server '…' is not active for this user"
+                    // until manual reactivation. Source the name from
+                    // the client's canonical field to guarantee the
+                    // insert key matches the dispatch-time lookup key.
+                    let normalized_name = client.server_name().to_string();
+                    let registered = manager
+                        .inject_mcp_client(normalized_name.clone(), &self.config.owner_id, client)
+                        .await;
+                    if name != normalized_name {
+                        tracing::debug!(
+                            raw_name = %name,
+                            normalized = %normalized_name,
+                            "Startup MCP server name normalized (hyphens -> underscores) for client-store injection"
+                        );
+                    }
+                    tracing::debug!(
+                        server = %normalized_name,
+                        count = registered.len(),
+                        "Registered tools for startup MCP server"
+                    );
                 }
             }
 
@@ -965,14 +1133,16 @@ impl AppBuilder {
         self.init_database().await?;
         self.init_secrets().await?;
 
-        // Post-init validation: backends with dedicated config (nearai, gemini_oauth,
-        // bedrock, openai_codex) handle their own credential resolution. For registry-based
-        // backends, fail early if no provider config was resolved.
-        if !matches!(
-            self.config.llm.backend.as_str(),
-            "nearai" | "gemini_oauth" | "bedrock" | "openai_codex"
-        ) && self.config.llm.provider.is_none()
-        {
+        // Post-init validation: backends with a dedicated config slot
+        // (nearai/gemini_oauth/bedrock/openai_codex) read from their own
+        // sub-struct and don't populate `LlmConfig.provider`. For
+        // OpenAI-shape registry backends, fail early if no provider
+        // config was resolved.
+        let registry = t3claw_llm::ProviderRegistry::load();
+        let has_dedicated_config = registry
+            .find(self.config.llm.backend.as_str())
+            .is_some_and(|d| d.protocol.has_dedicated_config());
+        if !has_dedicated_config && self.config.llm.provider.is_none() {
             let backend = &self.config.llm.backend;
             anyhow::bail!(
                 "LLM_BACKEND={backend} is configured but no credentials were found. \
@@ -1049,6 +1219,7 @@ impl AppBuilder {
             _ => (None, None),
         };
 
+        let ownership_cache = Arc::new(crate::ownership::OwnershipCache::new());
         let (
             mcp_session_manager,
             mcp_process_manager,
@@ -1057,7 +1228,12 @@ impl AppBuilder {
             catalog_entries,
             dev_loaded_tool_names,
         ) = self
-            .init_extensions(&tools, &hooks, settings_store.clone())
+            .init_extensions(
+                &tools,
+                &hooks,
+                settings_store.clone(),
+                Arc::clone(&ownership_cache),
+            )
             .await?;
 
         // Load bootstrap-completed flag from settings so that existing users
@@ -1166,10 +1342,18 @@ impl AppBuilder {
             tools.count()
         );
 
-        // Seed per-user tool permission defaults into the database.
-        // This runs after all tools (built-in, WASM, MCP) are registered so
-        // that every tool name is known.  Existing entries are never overwritten.
-        seed_tool_permissions(&tools, self.db.as_ref(), &self.config.owner_id).await;
+        // One-shot cleanup of ghost-seeded tool permission rows for the
+        // owner. Pre-#3559, `seed_tool_permissions` wrote the code-level
+        // defaults (e.g. `tool_install` → `AskEachTime`) into the DB so
+        // the permissions panel could render them. Those rows were
+        // indistinguishable from user-explicit overrides, so a user
+        // could not be told from someone who never touched the setting,
+        // and `AGENT_AUTO_APPROVE_TOOLS=true` ended up bypassing
+        // user-explicit `AskEachTime` choices (#3559 security review).
+        // The seeder is gone; this migration deletes ghost rows once,
+        // after which any remaining row is user-explicit by
+        // construction and `resolve_permission` can trust its value.
+        cleanup_ghost_seeded_tool_permissions(self.db.as_ref(), &self.config.owner_id).await;
 
         Ok(AppComponents {
             config: self.config,
@@ -1201,7 +1385,7 @@ impl AppBuilder {
             catalog_entries,
             dev_loaded_tool_names,
             builder,
-            ownership_cache: Arc::new(crate::ownership::OwnershipCache::new()),
+            ownership_cache,
         })
     }
 }
@@ -1361,76 +1545,103 @@ async fn migrate_session_credential(
     }
 }
 
-/// Seed tool permission defaults into the database for every registered tool
-/// that has no explicit user override yet.
-///
-/// This is called once at startup after the full tool registry is built.
-/// It is idempotent: existing entries in `tool_permissions.*` are never touched.
-async fn seed_tool_permissions(
-    tools: &crate::tools::ToolRegistry,
-    db: Option<&Arc<dyn Database>>,
-    owner_id: &str,
-) {
-    use crate::tools::permissions::{TOOL_RISK_DEFAULTS, effective_permission};
+/// Sentinel settings key marking that ghost-seeded tool permission rows
+/// have been cleaned up for this owner. Reads/writes are idempotent and
+/// scoped per-user, so the migration is safe to re-run.
+const TOOL_PERMISSION_CLEANUP_SENTINEL: &str = "_internal.tool_permissions_seed_cleanup_v1";
 
+/// One-shot migration that removes ghost-seeded `tool_permissions.<name>`
+/// rows whose value matches `seeded_default_permission(name)` from the
+/// owner's settings. After this runs, any surviving DB row is a
+/// user-explicit choice — which lets `ToolPermissionSnapshot` treat all
+/// DB rows as explicit again. See `cleanup_ghost_seeded_tool_permissions`
+/// call site for context and the #3559 security review.
+async fn cleanup_ghost_seeded_tool_permissions(db: Option<&Arc<dyn Database>>, owner_id: &str) {
     let db = match db {
         Some(db) => db,
         None => {
-            tracing::debug!("seed_tool_permissions: no database available, skipping");
+            tracing::debug!(
+                "cleanup_ghost_seeded_tool_permissions: no database available, skipping"
+            );
             return;
         }
     };
 
-    // Load existing tool permission overrides from the DB.
+    // Skip if migration already ran for this owner.
+    match db
+        .get_setting(owner_id, TOOL_PERMISSION_CLEANUP_SENTINEL)
+        .await
+    {
+        Ok(Some(_)) => {
+            tracing::debug!("cleanup_ghost_seeded_tool_permissions: sentinel present, skipping");
+            return;
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(
+                "cleanup_ghost_seeded_tool_permissions: failed to read sentinel: {}",
+                e
+            );
+            return;
+        }
+    }
+
     let db_map = match db.get_all_settings(owner_id).await {
         Ok(m) => m,
         Err(e) => {
-            tracing::warn!("seed_tool_permissions: failed to load settings: {}", e);
+            tracing::warn!(
+                "cleanup_ghost_seeded_tool_permissions: failed to load settings: {}",
+                e
+            );
             return;
         }
     };
     let existing = crate::settings::Settings::from_db_map(&db_map).tool_permissions;
 
-    let registered_names = tools.list().await;
-    let mut seeded = 0u32;
-
-    for name in &registered_names {
-        if existing.contains_key(name.as_str()) {
-            // User has an explicit override — do not touch it.
+    let mut deleted = 0u32;
+    for (tool_name, state) in &existing {
+        let Some(seeded) = crate::tools::permissions::seeded_default_permission(tool_name) else {
+            continue;
+        };
+        if *state != seeded {
             continue;
         }
-
-        // Only insert if the tool appears in the static defaults table.
-        // Unknown/dynamic tools stay absent (they will fall back to AskEachTime
-        // at runtime via effective_permission) to avoid polluting the DB.
-        if TOOL_RISK_DEFAULTS.contains_key(name.as_str()) {
-            let default_state = effective_permission(name, &existing);
-            let json_value = match serde_json::to_value(default_state) {
-                Ok(v) => v,
-                Err(e) => {
-                    tracing::warn!(
-                        "seed_tool_permissions: failed to serialize state for '{}': {}",
-                        name,
-                        e
-                    );
-                    continue;
-                }
-            };
-            if let Err(e) = db
-                .set_setting(owner_id, &format!("tool_permissions.{}", name), &json_value)
-                .await
-            {
-                tracing::warn!("seed_tool_permissions: failed to set '{}': {}", name, e);
-            } else {
-                seeded += 1;
+        match db
+            .delete_setting(owner_id, &format!("tool_permissions.{}", tool_name))
+            .await
+        {
+            Ok(_) => deleted += 1,
+            Err(e) => {
+                tracing::warn!(
+                    "cleanup_ghost_seeded_tool_permissions: failed to delete '{}': {}",
+                    tool_name,
+                    e
+                );
             }
         }
     }
 
-    if seeded > 0 {
-        tracing::debug!(
-            count = seeded,
-            "Seeded tool permission defaults into database"
+    // Record the sentinel even on partial failures so we don't re-scan
+    // every startup. The deletes are idempotent if a future run does
+    // re-process the same row.
+    if let Err(e) = db
+        .set_setting(
+            owner_id,
+            TOOL_PERMISSION_CLEANUP_SENTINEL,
+            &serde_json::json!(true),
+        )
+        .await
+    {
+        tracing::warn!(
+            "cleanup_ghost_seeded_tool_permissions: failed to write sentinel: {}",
+            e
+        );
+    }
+
+    if deleted > 0 {
+        tracing::info!(
+            count = deleted,
+            "Cleaned up ghost-seeded tool permission rows for owner"
         );
     }
 }
@@ -1446,6 +1657,35 @@ mod tests {
     use crate::hooks::{
         Hook, HookContext, HookError, HookEvent, HookOutcome, HookPoint, HookRegistry,
     };
+
+    /// Regression for #1537 — WASM credential injection silently failed on
+    /// hosted TEE deployments because the ephemeral-store fallback was only
+    /// wired for `ExtensionManager`, not for `WasmToolLoader` or
+    /// `setup_wasm_channels`. `build_ephemeral_secrets_store` is the shared
+    /// construction path that `install_ephemeral_secrets_store` uses to
+    /// guarantee `AppBuilder::secrets_store` is always `Some` after
+    /// `init_secrets` — so every downstream consumer sees the same store.
+    #[tokio::test]
+    async fn ephemeral_secrets_store_is_constructible_and_usable() {
+        use crate::secrets::CreateSecretParams;
+
+        let store = super::build_ephemeral_secrets_store()
+            .expect("ephemeral store construction must not fail with a freshly generated key");
+
+        store
+            .create(
+                "user-1",
+                CreateSecretParams::new("matrix_access_token", "tok-abc"),
+            )
+            .await
+            .expect("storing a credential in the ephemeral store must succeed");
+
+        let decrypted = store
+            .get_decrypted("user-1", "matrix_access_token")
+            .await
+            .expect("reading the credential back from the ephemeral store must succeed");
+        assert_eq!(decrypted.expose(), "tok-abc");
+    }
 
     struct SessionStartHook {
         tx: mpsc::UnboundedSender<(String, String)>,
@@ -1500,55 +1740,88 @@ mod tests {
         assert!(!session_id.is_empty());
     }
 
-    /// Verify that `seed_tool_permissions` is idempotent: an existing user
-    /// override must survive a re-seed.
+    /// #3559 security review: ghost-seeded rows whose value matches the
+    /// code-level seeded default are deleted on first run. After cleanup,
+    /// the row no longer exists in DB and `effective_permission` falls
+    /// back to the code-level default at read time. Genuine user
+    /// overrides (value != seeded default) survive untouched. The
+    /// migration is idempotent — re-running after the sentinel is
+    /// written is a no-op.
     #[cfg(feature = "libsql")]
     #[tokio::test]
-    async fn seed_tool_permissions_preserves_user_overrides() {
+    async fn cleanup_ghost_seeded_tool_permissions_removes_seed_matching_rows() {
         use crate::db::Database;
         use crate::db::libsql::LibSqlBackend;
-        use crate::tools::ToolRegistry;
         use crate::tools::permissions::PermissionState;
 
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test_seed.db");
+        let db_path = dir.path().join("test_cleanup.db");
         let backend = LibSqlBackend::new_local(&db_path).await.unwrap();
         backend.run_migrations().await.unwrap();
         let db: Arc<dyn Database> = Arc::new(backend);
 
-        let registry = ToolRegistry::new();
-        registry.register_builtin_tools();
-
         let owner = "test-user";
 
-        // 1. Initial seed: creates defaults for all registered tools.
-        super::seed_tool_permissions(&registry, Some(&db), owner).await;
-
-        // Verify "echo" was seeded as AlwaysAllow.
-        let map = db.get_all_settings(owner).await.unwrap();
-        let settings = crate::settings::Settings::from_db_map(&map);
-        assert_eq!(
-            settings.tool_permissions.get("echo"),
-            Some(&PermissionState::AlwaysAllow),
-            "echo should be AlwaysAllow after initial seed"
-        );
-
-        // 2. User overrides echo → Disabled.
-        let disabled_json = serde_json::to_value(PermissionState::Disabled).unwrap();
-        db.set_setting(owner, "tool_permissions.echo", &disabled_json)
+        // 1. Simulate the old seeder's effect: write seeded-default rows
+        //    for `tool_install` (AskEachTime) and `echo` (AlwaysAllow),
+        //    plus a real user override for `shell` (AlwaysAllow, diverges
+        //    from the seeded AskEachTime).
+        let install_seed = serde_json::to_value(PermissionState::AskEachTime).unwrap();
+        let echo_seed = serde_json::to_value(PermissionState::AlwaysAllow).unwrap();
+        let shell_override = serde_json::to_value(PermissionState::AlwaysAllow).unwrap();
+        db.set_setting(owner, "tool_permissions.tool_install", &install_seed)
+            .await
+            .unwrap();
+        db.set_setting(owner, "tool_permissions.echo", &echo_seed)
+            .await
+            .unwrap();
+        db.set_setting(owner, "tool_permissions.shell", &shell_override)
             .await
             .unwrap();
 
-        // 3. Re-seed (e.g. after a restart).
-        super::seed_tool_permissions(&registry, Some(&db), owner).await;
+        // 2. Run the cleanup migration.
+        super::cleanup_ghost_seeded_tool_permissions(Some(&db), owner).await;
 
-        // 4. Assert the override survived.
+        let map = db.get_all_settings(owner).await.unwrap();
+        let settings = crate::settings::Settings::from_db_map(&map);
+
+        // Ghost-seeded rows are gone.
+        assert!(
+            !settings.tool_permissions.contains_key("tool_install"),
+            "tool_install row matching the seeded default must be removed"
+        );
+        assert!(
+            !settings.tool_permissions.contains_key("echo"),
+            "echo row matching the seeded default must be removed"
+        );
+
+        // Genuine user override survives.
+        assert_eq!(
+            settings.tool_permissions.get("shell"),
+            Some(&PermissionState::AlwaysAllow),
+            "shell override diverging from the seeded default must survive cleanup"
+        );
+
+        // Sentinel is set so subsequent runs are no-ops.
+        let sentinel = db
+            .get_setting(owner, super::TOOL_PERMISSION_CLEANUP_SENTINEL)
+            .await
+            .unwrap();
+        assert!(sentinel.is_some(), "cleanup sentinel must be written");
+
+        // 3. Re-running the migration after the sentinel is a no-op:
+        //    re-seed a ghost row and assert it survives the second pass.
+        db.set_setting(owner, "tool_permissions.tool_install", &install_seed)
+            .await
+            .unwrap();
+        super::cleanup_ghost_seeded_tool_permissions(Some(&db), owner).await;
         let map = db.get_all_settings(owner).await.unwrap();
         let settings = crate::settings::Settings::from_db_map(&map);
         assert_eq!(
-            settings.tool_permissions.get("echo"),
-            Some(&PermissionState::Disabled),
-            "user override to Disabled must survive re-seed"
+            settings.tool_permissions.get("tool_install"),
+            Some(&PermissionState::AskEachTime),
+            "after sentinel is written, a manually re-inserted row must NOT be cleaned up; \
+             the migration is one-shot per owner"
         );
     }
 }

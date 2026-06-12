@@ -37,7 +37,7 @@ cargo check --all-features                            # both
 | `libsql_migrations.rs` | Consolidated libSQL schema (CREATE IF NOT EXISTS, no ALTER TABLE) |
 | `tls.rs` | TLS connector factory for PostgreSQL (`rustls` + system root certs) |
 
-PostgreSQL schema: `migrations/V1__initial.sql` through `V9__flexible_embedding_dimension.sql` (managed by `refinery`). V1 is the base schema; later migrations add tables, columns, and rename `claude_code_events` → `job_events`.
+PostgreSQL schema: `migrations/V1__initial.sql` and later versioned migrations (managed by `refinery`). V1 is the base schema; later migrations add tables, columns, rename `claude_code_events` → `job_events`, and add feature-specific storage such as the consolidated Trace Commons schema.
 
 ## Trait Structure
 
@@ -131,7 +131,7 @@ The `Database` supertrait is composed of seven sub-traits. Leaf consumers can de
 
 ## libSQL Current Limitations
 
-- **Secrets store** — still requires `PostgresSecretsStore`; `LibSqlSecretsStore` exists but is not plumbed through the main startup path
+- **Secrets store** — `LibSqlSecretsStore` is wired through both startup paths: `AppBuilder::init_secrets` via `crate::secrets::create_secrets_store` (dispatches on `DatabaseHandles`) and the CLI helper `crate::cli::init_secrets_store` via `crate::db::create_secrets_store` (dispatches on `DatabaseBackend`). When the master key resolves but neither dispatch produces a store (e.g. no DB handle on a hosted TEE), `init_secrets` installs an ephemeral `InMemorySecretsStore` fallback so WASM tool credential injection stays wired — see #1537.
 - **Settings reload** — `Config::from_db` skipped (requires `Store`)
 - **No incremental migrations** — schema is idempotent CREATE IF NOT EXISTS; no ALTER TABLE support; column additions require a new versioned approach
 - **No encryption at rest** — only secrets (API tokens) are AES-256-GCM encrypted; all other data is plaintext SQLite

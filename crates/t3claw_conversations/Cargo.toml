@@ -1,0 +1,33 @@
+[package]
+name = "t3claw_conversations"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Conversation binding and session thread contracts for T3Claw Reborn"
+authors = ["NEAR AI <support@near.ai>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/Terminal-3/t3-claw"
+repository = "https://github.com/Terminal-3/t3-claw"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+t3claw_filesystem = { path = "../t3claw_filesystem", version = "0.1.0" }
+t3claw_host_api = { path = "../t3claw_host_api", version = "0.1.0" }
+t3claw_safety = { path = "../t3claw_safety" }
+t3claw_triggers = { path = "../t3claw_triggers", version = "0.1.0" }
+t3claw_turns = { path = "../t3claw_turns", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[features]
+default = []
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "sync"] }

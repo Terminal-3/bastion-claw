@@ -1,10 +1,10 @@
 ---
-title: "Github"
-description: "让智能体访问 Github"
+title: "GitHub"
+description: "让智能体访问 GitHub"
 icon: github
 ---
 
-Github 扩展允许智能体与 Github 仓库、议题、拉取请求等交互，非常适合自动化代码相关任务、管理项目或从 Github 收集信息。
+GitHub 扩展允许智能体与 GitHub 仓库、议题、拉取请求等交互，非常适合自动化代码相关任务、管理项目或从 GitHub 收集信息。
 
 ---
 
@@ -14,14 +14,14 @@ Github 扩展允许智能体与 Github 仓库、议题、拉取请求等交互�
 <Steps>
 
 <Step title="获取 API 密钥">
-要使用 Github 扩展，您需要从 Github 获取个人访问令牌。
+要使用 GitHub 扩展，您需要从 GitHub 获取个人访问令牌。
 
 
 </Step>
 
-<Step title="安装 Github 扩展">
+<Step title="安装 GitHub 扩展">
 
-在终端中运行以下命令安装 Github 扩展：
+在终端中运行以下命令安装 GitHub 扩展：
 
 ```bash
 t3claw registry install github
@@ -31,7 +31,7 @@ t3claw registry install github
 
 <Step title="配置 API 密钥">
 
-安装扩展后，需要在 T3Claw 中配置您的 Github API 密钥。运行：
+安装扩展后，需要在 T3Claw 中配置您的 GitHub API 密钥。运行：
 
 ```bash
 t3claw tool auth github
@@ -51,7 +51,7 @@ t3claw tool auth github
 
 ## 可用操作：
 
-以下是智能体使用 Github 扩展可以执行的一些操作：
+以下是智能体使用 GitHub 扩展可以执行的一些操作：
 
 - `get_repo`：获取仓库信息
 - `list_issues`：列出仓库中的所有议题
@@ -70,12 +70,12 @@ t3claw tool auth github
 
 ## 在公共仓库上工作
 
-让我们为智能体配置自己的 Github 账户，以便它可以在**公共仓库**中创建议题和评论拉取请求。
+让我们为智能体配置自己的 GitHub 账户，以便它可以在**公共仓库**中创建议题和评论拉取请求。
 
 
 <Steps>
 
-<Step title="创建新的 Github 账户">
+<Step title="创建新的 GitHub 账户">
 
 前往 https://github.com 为智能体创建新账户。如果您已使用个人账户登录，需要暂时登出以创建新账户，之后可以立即重新登录。
 
@@ -83,12 +83,12 @@ t3claw tool auth github
 
 <Step title="生成个人访问令牌">
 
-在智能体的 Github 账户上，前往 [Settings -> Developer settings -> Personal access tokens -> Tokens (classic)](https://github.com/settings/tokens) 并生成具有以下权限的新令牌（classic）：`repo` -> `public_repo`
+在智能体的 GitHub 账户上，前往 [Settings -> Developer settings -> Personal access tokens -> Tokens (classic)](https://github.com/settings/tokens) 并生成具有以下权限的新令牌（classic）：`repo` -> `public_repo`
 
 </Step>
 
-<Step title="认证 Github 扩展">
-获取令牌后，运行以下命令认证 Github 扩展：
+<Step title="认证 GitHub 扩展">
+获取令牌后，运行以下命令认证 GitHub 扩展：
 
 ```bash
 t3claw tool auth github
@@ -103,7 +103,7 @@ t3claw tool auth github
 让智能体在您的某个公共仓库中创建一个测试议题，检查议题是否创建成功。
 
 <Tip>
-让智能体阅读 [Github Markdown 指南](https://github.com/adam-p/markdown-here/wiki/markdown-cheatsheet) 并在创建议题和评论时记住这些格式规范，可以让格式更加美观！
+让智能体阅读 [GitHub Markdown 指南](https://github.com/adam-p/markdown-here/wiki/markdown-cheatsheet) 并在创建议题和评论时记住这些格式规范，可以让格式更加美观！
 </Tip>
 
 </Step>

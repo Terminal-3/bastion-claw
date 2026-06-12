@@ -61,15 +61,10 @@ function connectSSE(lastEventIdOverride) {
       setTimeout(() => { lostBanner.remove(); }, 2000);
     }
 
-    // If we were restarting, close the modal and reset button now that server is back
+    // If we were restarting, close the modal and reset button now that server is back.
+    // dismissRestartLoader() also clears the watchdog timer (#3082).
     if (isRestarting) {
-      const loaderEl = document.getElementById('restart-loader');
-      if (loaderEl) loaderEl.style.display = 'none';
-      const restartBtn = document.getElementById('restart-btn');
-      const restartIcon = document.getElementById('restart-icon');
-      if (restartBtn) restartBtn.disabled = false;
-      if (restartIcon) restartIcon.classList.remove('spinning');
-      isRestarting = false;
+      dismissRestartLoader();
     }
 
     if (sseHasConnectedBefore && currentThreadId) {
@@ -88,6 +83,12 @@ function connectSSE(lastEventIdOverride) {
     // Refresh sidebar so stale spinners are removed immediately.
     processingThreads.clear();
     debouncedLoadThreads();
+    // Retry any first-load loader (chat history, threads, missions) that
+    // raced engine init and failed silently. SSE-accept implies the
+    // backend has stabilized — see init-auth.js for the rationale (#3274).
+    if (typeof runInitialHydrationRetry === 'function') {
+      runInitialHydrationRetry();
+    }
     sseHasConnectedBefore = true;
   };
 
@@ -125,22 +126,22 @@ function connectSSE(lastEventIdOverride) {
   // NOTE: Only NAMED events (those dispatched via `addEventListener('foo', …)`
   // by the gateway, see `SseEvent` in `src/channels/web/types.rs`) are
   // forwarded. The generic `eventSource.onmessage` handler is intentionally
-  // NOT wrapped because the IronClaw gateway never emits SSE frames without
+  // NOT wrapped because the T3Claw gateway never emits SSE frames without
   // an `event:` field — every frame carries a typed name (`response`,
   // `tool_started`, `gate_required`, etc.). Widget authors should subscribe
-  // to those typed events via `IronClaw.api.on('<event_type>', handler)`
+  // to those typed events via `T3Claw.api.on('<event_type>', handler)`
   // rather than relying on the generic message channel; if a widget needs
   // an untyped stream it must open its own `EventSource`.
   var _origAddEventListener = eventSource.addEventListener.bind(eventSource);
   eventSource.addEventListener = function(type, listener, opts) {
     _origAddEventListener(type, function(e) {
       // Dispatch to widget handlers
-      if (IronClaw.api && e.data) {
+      if (T3Claw.api && e.data) {
         try {
           var parsed = JSON.parse(e.data);
-          IronClaw.api._dispatch(type, parsed);
+          T3Claw.api._dispatch(type, parsed);
         } catch (parseErr) {
-          console.warn('[IronClaw] SSE parse error for event', type, parseErr);
+          console.warn('[T3Claw] SSE parse error for event', type, parseErr);
         }
       }
       // Call original handler
@@ -177,7 +178,25 @@ function connectSSE(lastEventIdOverride) {
       _doneWithoutResponseTimer = null;
     }
     finalizeActivityGroup();
-    addMessage('assistant', data.content);
+
+    const messages = document.querySelectorAll('#chat-messages .message');
+    const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+    const lastAssistantAlreadyHasResponse = Boolean(
+      lastMessage
+        && lastMessage.classList.contains('assistant')
+        && (lastMessage.getAttribute('data-raw') || '') === data.content
+    );
+
+    // Streamed responses already accumulated `data.content` into the
+    // bubble we just finalized. Separately, a thread switch or history
+    // refresh can render the completed response from /history before the
+    // matching SSE response arrives. In both cases, adding another bubble
+    // would render the same final assistant message twice. Only create a
+    // new bubble when the final response is not already the latest chat
+    // message (the normal non-streaming path).
+    if (!streamingMsg && !lastAssistantAlreadyHasResponse) {
+      addMessage('assistant', data.content);
+    }
     pruneOldMessages();
     enableChatInput();
     // Refresh thread list so new titles appear after first message
@@ -390,8 +409,6 @@ function connectSSE(lastEventIdOverride) {
 
   addTrackedEventListener('approval_needed', (e) => {
     const data = JSON.parse(e.data);
-    const hasThread = !!data.thread_id;
-    const forCurrentThread = !hasThread || isCurrentThread(data.thread_id);
     if (data.thread_id) {
       activeWorkStore.updateThread(data.thread_id, {
         statusText: ActivityEntry.t('activity.waitingApproval', 'Waiting for approval'),
@@ -399,9 +416,9 @@ function connectSSE(lastEventIdOverride) {
       });
     }
 
-    if (forCurrentThread) {
+    if (isCurrentThread(data.thread_id)) {
       showApproval(data);
-    } else {
+    } else if (data.thread_id) {
       // Keep thread list fresh when approval is requested in a background thread.
       unreadThreads.set(data.thread_id, (unreadThreads.get(data.thread_id) || 0) + 1);
       debouncedLoadThreads();
@@ -545,7 +562,7 @@ function connectSSE(lastEventIdOverride) {
   // Plan progress checklist
   addTrackedEventListener('plan_update', (e) => {
     const data = JSON.parse(e.data);
-    if (data.thread_id && !isCurrentThread(data.thread_id)) return;
+    if (!isCurrentThread(data.thread_id)) return;
     renderPlanChecklist(data);
   });
 }

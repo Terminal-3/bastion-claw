@@ -76,7 +76,7 @@ pub trait SecretsStore: Send + Sync {
     /// Returns `true` if the store contains at least one secret across
     /// all users.
     ///
-    /// Used as a startup safety gate: if IronClaw auto-generated a
+    /// Used as a startup safety gate: if T3Claw auto-generated a
     /// fresh master key because neither `SECRETS_MASTER_KEY` nor a
     /// keychain entry was available, but the secrets table is already
     /// populated, those rows were encrypted with a different key and
@@ -1083,7 +1083,7 @@ mod tests {
         assert!(store.exists("user1", "my_secret").await.unwrap());
     }
 
-    /// `any_exist` backs the startup safety gate: if IronClaw
+    /// `any_exist` backs the startup safety gate: if T3Claw
     /// auto-generates a master key and the store is already populated,
     /// those rows were encrypted with a different key and startup must
     /// fail. The predicate must report the global store state, not

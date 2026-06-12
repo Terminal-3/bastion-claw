@@ -149,6 +149,15 @@
       <p class="restart-modal-info" data-i18n="restart.checkLogs">
         Check the Logs tab for details after the restart completes.
       </p>
+      <div id="restart-loader-error" class="restart-loader-error" style="display: none;" role="alert">
+        <p class="restart-loader-error-text" id="restart-loader-error-text"></p>
+        <div class="restart-loader-error-actions">
+          <button type="button" class="restart-modal-btn confirm" id="restart-refresh-btn"
+            data-i18n="restart.refreshPage">Refresh page</button>
+          <button type="button" class="restart-modal-btn cancel" id="restart-dismiss-btn"
+            data-i18n="restart.dismiss">Dismiss</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -229,10 +238,6 @@
     <!-- Chat Tab -->
     <div class="tab-panel active" id="tab-chat">
       <div class="thread-sidebar" id="thread-sidebar">
-        <div class="assistant-item" id="assistant-thread">
-          <span class="assistant-label" id="assistant-label" data-i18n="chat.assistant">Assistant</span>
-          <span class="assistant-meta" id="assistant-meta"></span>
-        </div>
         <div class="threads-section-header">
           <span data-i18n="chat.conversations">Conversations</span>
           <div class="spacer"></div>
@@ -334,6 +339,7 @@
           <input type="text" id="logs-target-filter" placeholder="Filter by target...">
           <label class="logs-checkbox"><input type="checkbox" id="logs-autoscroll" checked> <span data-i18n="logs.autoScroll">Auto-scroll</span></label>
           <button id="logs-pause-btn" data-i18n="logs.pause">Pause</button>
+          <button id="logs-download-btn" data-i18n="logs.download">Download</button>
           <button id="logs-clear-btn" data-i18n="logs.clear">Clear</button>
         </div>
         <div class="logs-output" id="logs-output"></div>
@@ -370,20 +376,10 @@
     <div class="tab-panel" id="tab-missions">
       <div class="missions-container">
         <div class="missions-summary" id="missions-summary"></div>
-        <table class="missions-table" id="missions-table">
-          <thead>
-            <tr>
-              <th data-i18n="missions.name">Name</th>
-              <th data-i18n="missions.goal">Goal</th>
-              <th data-i18n="missions.cadence">Cadence</th>
-              <th data-i18n="missions.threads">Threads</th>
-              <th data-i18n="missions.status">Status</th>
-              <th data-i18n="missions.progress">Progress</th>
-              <th data-i18n="missions.actions">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="missions-tbody"></tbody>
-        </table>
+        <div class="missions-body" id="missions-body">
+          <div class="missions-list-col" id="missions-list-col"></div>
+          <div class="missions-activity-col" id="missions-activity-col"></div>
+        </div>
         <div class="empty-state" id="missions-empty" style="display:none">
           <span data-i18n="missions.noConfigured">No missions found. Ask the assistant to create one.</span>
         </div>
@@ -450,10 +446,6 @@
                 <div class="config-section-header">
                   <h3 data-i18n="config.modelProviders">Model Providers</h3>
                   <button id="add-provider-btn" class="btn-add-provider" data-i18n="config.addProvider">+ Add Provider</button>
-                </div>
-                <div class="config-notice" id="config-restart-notice" style="display:none">
-                  <span>⚠</span>
-                  <span data-i18n="config.restartNotice">Changes take effect after restart.</span>
                 </div>
                 <div id="providers-list" class="providers-list">
                   <div class="empty-state" data-i18n="common.loading">Loading...</div>

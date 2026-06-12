@@ -135,7 +135,7 @@ ws.onclose = (event) => console.log('Closed:', event.code, event.reason);
 WebSocket connections can drop due to network interruptions or server restarts. Implement reconnection with exponential backoff to avoid hammering the server:
 
 ```javascript
-class IronclawSocket {
+class T3ClawSocket {
   constructor(url, token) {
     this.url = url;
     this.token = token;
@@ -191,7 +191,7 @@ class IronclawSocket {
 }
 
 // Usage
-const client = new IronclawSocket('ws://localhost:3000/ws', TOKEN);
+const client = new T3ClawSocket('ws://localhost:3000/ws', TOKEN);
 ```
 
 ---

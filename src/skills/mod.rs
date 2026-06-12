@@ -1,11 +1,13 @@
 //! Skills system for T3Claw.
 //!
-//! This module contains main-crate skill logic that depends on types from
-//! other `src/` modules (e.g. `crate::llm::ToolDefinition`, `crate::secrets`).
-//! For core skill types, parsing, and registry, import from `t3claw_skills` directly.
+//! This module contains main-crate skill logic that depends on types from the
+//! extracted `t3claw_llm` crate (e.g. `t3claw_llm::ToolDefinition`) and
+//! other `src/` modules (e.g. `crate::secrets`). For core skill types,
+//! parsing, and registry, import from `t3claw_skills` directly.
 //!
-//! The `attenuation` submodule remains here because it depends on
-//! `crate::llm::ToolDefinition` which is a main-crate type.
+//! The `attenuation` submodule lives here because it operates on
+//! `t3claw_llm::ToolDefinition` together with main-crate trust state, so it
+//! sits at the seam between the two.
 //!
 //! # V1 migration notes
 //!
@@ -66,6 +68,7 @@ pub fn credential_spec_to_mapping(spec: &SkillCredentialSpec) -> CredentialMappi
         secret_name: spec.name.clone(),
         location: convert_credential_location(&spec.location),
         host_patterns: spec.hosts.clone(),
+        path_patterns: spec.path_patterns.clone(),
         // Skill credentials are required by default; the spec doesn't yet
         // expose an `optional` field, so we conservatively mark required.
         optional: false,
@@ -312,6 +315,7 @@ mod tests {
             provider: "github".to_string(),
             location: t3claw_skills::SkillCredentialLocation::Bearer,
             hosts: vec!["api.github.com".to_string(), "*.github.com".to_string()],
+            path_patterns: Vec::new(),
             oauth: None,
             setup_instructions: None,
         };
@@ -341,6 +345,7 @@ mod tests {
                     provider: "test".to_string(),
                     location: SkillCredentialLocation::Bearer,
                     hosts: vec!["api.test.com".to_string()],
+                    path_patterns: Vec::new(),
                     oauth: None,
                     setup_instructions: None,
                 }],
@@ -379,6 +384,7 @@ mod tests {
                     provider: "google".to_string(),
                     location: SkillCredentialLocation::Bearer,
                     hosts: vec!["www.googleapis.com".to_string()],
+                    path_patterns: Vec::new(),
                     oauth: Some(SkillOAuthConfig {
                         authorization_url: "https://accounts.google.com/o/oauth2/v2/auth"
                             .to_string(),
@@ -435,6 +441,7 @@ mod tests {
                     provider: "test".to_string(),
                     location: SkillCredentialLocation::Bearer,
                     hosts: vec!["api.test.com".to_string()],
+                    path_patterns: Vec::new(),
                     oauth: None,
                     setup_instructions: None,
                 }],

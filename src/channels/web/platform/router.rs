@@ -6,7 +6,7 @@
 //! cross-cutting layers (CORS, body-size limit, panic catch, static
 //! security headers, CSP).
 //!
-//! Per ironclaw#ironclaw#2599: route composition is the single coupling point
+//! Per t3claw#2599: route composition is the single coupling point
 //! where platform meets features. Handlers themselves live in either
 //! `features/<slice>/` (migrated) or the transitional `handlers/*.rs`
 //! flat folder (not yet sliced). No feature handler lives in
@@ -54,7 +54,14 @@ use crate::channels::web::handlers::memory::{
     memory_write_handler,
 };
 use crate::channels::web::handlers::skills::{
-    skills_install_handler, skills_list_handler, skills_remove_handler, skills_search_handler,
+    skills_get_handler, skills_install_handler, skills_list_handler, skills_remove_handler,
+    skills_search_handler, skills_update_handler,
+};
+use crate::channels::web::handlers::traces::{
+    traces_credit_handler, traces_credit_notice_action_handler, traces_credit_notice_handler,
+    traces_flush_handler, traces_policy_get_handler, traces_policy_put_handler,
+    traces_preview_handler, traces_queue_status_handler, traces_revoke_handler,
+    traces_submissions_handler, traces_submit_handler,
 };
 use crate::channels::web::platform::state::GatewayState;
 use crate::channels::web::platform::static_files::{
@@ -65,7 +72,7 @@ use crate::channels::web::platform::static_files::{
     project_redirect_handler, theme_css_handler, theme_init_handler,
 };
 
-// Feature slices under `features/<slice>/`. As of ironclaw#ironclaw#2599 stage 4d,
+// Feature slices under `features/<slice>/`. As of t3claw#2599 stage 4d,
 // every route composed below comes from one of these or from a
 // transitional `handlers/*.rs` file (auth, engine, frontend, llm,
 // memory, secrets, skills, system_prompt, tokens, tool_policy, users,
@@ -78,8 +85,9 @@ use crate::channels::web::features::chat::{
 };
 use crate::channels::web::features::extensions::{
     extensions_activate_handler, extensions_install_handler, extensions_list_handler,
-    extensions_readiness_handler, extensions_registry_handler, extensions_remove_handler,
-    extensions_setup_handler, extensions_setup_submit_handler, extensions_tools_handler,
+    extensions_login_poll_handler, extensions_login_start_handler, extensions_readiness_handler,
+    extensions_registry_handler, extensions_remove_handler, extensions_setup_handler,
+    extensions_setup_submit_handler, extensions_tools_handler,
 };
 use crate::channels::web::features::logs::{
     logs_events_handler, logs_history_handler, logs_level_get_handler, logs_level_set_handler,
@@ -226,6 +234,14 @@ pub async fn start_server(
             "/api/extensions/{name}/setup",
             get(extensions_setup_handler).post(extensions_setup_submit_handler),
         )
+        .route(
+            "/api/extensions/{name}/login/start",
+            post(extensions_login_start_handler),
+        )
+        .route(
+            "/api/extensions/{name}/login/poll",
+            post(extensions_login_poll_handler),
+        )
         // Pairing
         .route("/api/pairing/{channel}", get(pairing_list_handler))
         .route(
@@ -297,7 +313,9 @@ pub async fn start_server(
         .route("/api/skills/install", post(skills_install_handler))
         .route(
             "/api/skills/{name}",
-            axum::routing::delete(skills_remove_handler),
+            get(skills_get_handler)
+                .put(skills_update_handler)
+                .delete(skills_remove_handler),
         )
         // Settings
         .route("/api/settings", get(settings_list_handler))
@@ -319,6 +337,25 @@ pub async fn start_server(
         .route(
             "/api/settings/{key}",
             axum::routing::delete(settings_delete_handler),
+        )
+        // Trace Commons client-local contribution surfaces
+        .route(
+            "/api/traces/policy",
+            get(traces_policy_get_handler).put(traces_policy_put_handler),
+        )
+        .route("/api/traces/preview", post(traces_preview_handler))
+        .route("/api/traces/submit", post(traces_submit_handler))
+        .route("/api/traces/flush", post(traces_flush_handler))
+        .route("/api/traces/credit", get(traces_credit_handler))
+        .route(
+            "/api/traces/credit-notice",
+            get(traces_credit_notice_handler).post(traces_credit_notice_action_handler),
+        )
+        .route("/api/traces/queue-status", get(traces_queue_status_handler))
+        .route("/api/traces/submissions", get(traces_submissions_handler))
+        .route(
+            "/api/traces/submissions/{submission_id}/revoke",
+            post(traces_revoke_handler),
         )
         // LLM utilities
         .route(
@@ -422,7 +459,23 @@ pub async fn start_server(
             "/v1/models",
             get(crate::channels::web::openai_compat::models_handler),
         )
-        // OpenAI Responses API (routes through the full agent loop)
+        // OpenAI Responses API (routes through the full agent loop).
+        //
+        // Canonical path is `/api/v1/responses` so the Responses API shares
+        // the `/api/...` prefix used by the rest of T3Claw's HTTP surface.
+        // The legacy `/v1/responses` path is kept as an alias for backward
+        // compatibility with OpenAI SDK clients that were configured against
+        // it directly (see t3claw#2201). Both paths dispatch to the same
+        // handlers — remove the legacy routes only after a deprecation
+        // window.
+        .route(
+            "/api/v1/responses",
+            post(crate::channels::web::responses_api::create_response_handler),
+        )
+        .route(
+            "/api/v1/responses/{id}",
+            get(crate::channels::web::responses_api::get_response_handler),
+        )
         .route(
             "/v1/responses",
             post(crate::channels::web::responses_api::create_response_handler),

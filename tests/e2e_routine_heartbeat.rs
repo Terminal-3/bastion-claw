@@ -28,13 +28,13 @@ mod tests {
     use t3claw::db::{Database, libsql::LibSqlBackend};
     use t3claw::extensions::ExtensionManager;
     use t3claw::hooks::HookRegistry;
-    use t3claw::llm::LlmProvider;
     use t3claw::secrets::{InMemorySecretsStore, SecretsCrypto, SecretsStore};
     use t3claw::tools::builtin::routine::RoutineUpdateTool;
     use t3claw::tools::mcp::{McpProcessManager, McpSessionManager};
     use t3claw::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput, ToolRegistry};
     use t3claw::workspace::Workspace;
     use t3claw::workspace::hygiene::HygieneConfig;
+    use t3claw_llm::LlmProvider;
     use t3claw_safety::SafetyLayer;
 
     use crate::support::trace_llm::{LlmTrace, TraceLlm, TraceResponse, TraceStep, TraceToolCall};
@@ -358,6 +358,7 @@ mod tests {
             registry,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ))
     }
 
@@ -489,6 +490,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         // Insert a cron routine with next_fire_at in the past.
@@ -568,6 +570,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         // Insert an event routine matching "deploy.*production".
@@ -648,6 +651,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         let routine = make_routine(
@@ -755,6 +759,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         let mut filters = std::collections::HashMap::new();
@@ -847,7 +852,7 @@ mod tests {
             .emit_system_event(
                 "github",
                 "issue.opened",
-                &serde_json::json!({"repository": "NearAI/T3Claw"}),
+                &serde_json::json!({"repository": "NearAI/IronClaw"}),
                 Some("default"),
             )
             .await;
@@ -898,6 +903,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         // Insert an event routine with 1-hour cooldown.
@@ -1073,6 +1079,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         (engine, db, dir)
@@ -1195,6 +1202,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         // Create a full_job routine with max_concurrent = 1
@@ -1303,6 +1311,7 @@ mod tests {
             tools,
             safety,
             t3claw::agent::routine_engine::SandboxReadiness::DisabledByConfig,
+            None,
         ));
 
         // Insert a due cron routine

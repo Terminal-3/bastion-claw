@@ -19,7 +19,7 @@ mod tests {
 
     use serde_json::json;
 
-    use t3claw::llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
+    use t3claw_llm::recording::{HttpExchange, HttpExchangeRequest, HttpExchangeResponse};
 
     use crate::support::test_rig::TestRigBuilder;
     use crate::support::trace_llm::{

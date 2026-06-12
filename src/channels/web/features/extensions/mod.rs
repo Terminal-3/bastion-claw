@@ -2,7 +2,7 @@
 //!
 //! Owns the browser-facing extension lifecycle surface: list / readiness /
 //! tools / install / activate / remove / registry / setup / setup-submit.
-//! Migrated from `server.rs` in ironclaw#ironclaw#2599 stage 4d (final feature
+//! Migrated from `server.rs` in t3claw#2599 stage 4d (final feature
 //! slice before the `server.rs` shim can be retired).
 //!
 //! # Identity boundary
@@ -42,7 +42,7 @@ use crate::channels::web::types::*;
 /// explicit owner_id in settings. Either is sufficient to upgrade an active
 /// channel from `Pairing` to `Active`.
 ///
-/// See nearai/ironclaw#ironclaw#1921 for the regression that motivated plumbing
+/// See nearai/ironclaw#1921 for the regression that motivated plumbing
 /// `has_paired` through here instead of hardcoding it to `false`.
 pub(crate) fn derive_activation_status(
     ext: &crate::extensions::InstalledExtension,
@@ -50,7 +50,7 @@ pub(crate) fn derive_activation_status(
     has_owner_binding: bool,
 ) -> Option<ExtensionActivationStatus> {
     if ext.kind == crate::extensions::ExtensionKind::WasmChannel {
-        classify_wasm_channel_activation(ext, has_paired, has_owner_binding)
+        classify_wasm_channel_activation(ext, has_paired, has_owner_binding, ext.requires_binding)
     } else if ext.kind == crate::extensions::ExtensionKind::ChannelRelay {
         Some(if ext.active {
             ExtensionActivationStatus::Active
@@ -230,6 +230,15 @@ pub(crate) async fn extensions_tools_handler(
         "Tool registry not available".to_string(),
     ))?;
 
+    // Observability listing — shows the *registered* tool surface, not the
+    // model-facing filtered surface. Action-time authorization in the
+    // dispatcher / capability host gates whether any user-driven invocation
+    // actually executes; the visibility filter that hides profile-impossible
+    // tools from the LLM is a separate concern. Threading the resolved
+    // `EffectiveRuntimePolicy` through `GatewayState` so this endpoint could
+    // also filter is a follow-up — left unfiltered here so the admin UI can
+    // surface "tool X is registered but profile-hidden" diagnostics if needed
+    // (#3243 HIGH iteration-2 gap follow-up).
     let definitions = registry.tool_definitions().await;
     let tools = definitions
         .into_iter()
@@ -536,9 +545,115 @@ pub(crate) async fn extensions_setup_handler(
         kind,
         secrets: setup.secrets,
         fields: setup.fields,
+        interactive_login: setup.interactive_login,
         onboarding_state: None,
         onboarding: None,
     }))
+}
+
+pub(crate) async fn extensions_login_start_handler(
+    State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(name): Path<String>,
+    Json(_req): Json<ExtensionInteractiveLoginStartRequest>,
+) -> Result<Json<ExtensionInteractiveLoginResponse>, (StatusCode, String)> {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid extension name: {e}"),
+        )
+    })?;
+    let ext_mgr = state.extension_manager.as_ref().ok_or((
+        StatusCode::NOT_IMPLEMENTED,
+        "Extension manager not available (secrets store required)".to_string(),
+    ))?;
+
+    match ext_mgr
+        .start_interactive_login(name.as_str(), &user.user_id)
+        .await
+    {
+        Ok(result) => Ok(Json(ExtensionInteractiveLoginResponse {
+            success: true,
+            status: result.status,
+            message: result.message,
+            session_id: Some(result.session_id),
+            qr_code_url: result.qr_code_url,
+            instructions: result.instructions,
+            activated: None,
+        })),
+        Err(e) => Ok(Json(ExtensionInteractiveLoginResponse {
+            success: false,
+            status: "failed".to_string(),
+            message: e.to_string(),
+            session_id: None,
+            qr_code_url: None,
+            instructions: None,
+            activated: Some(false),
+        })),
+    }
+}
+
+pub(crate) async fn extensions_login_poll_handler(
+    State(state): State<Arc<GatewayState>>,
+    AuthenticatedUser(user): AuthenticatedUser,
+    Path(name): Path<String>,
+    Json(req): Json<ExtensionInteractiveLoginPollRequest>,
+) -> Result<Json<ExtensionInteractiveLoginResponse>, (StatusCode, String)> {
+    let name = t3claw_common::ExtensionName::new(&name).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid extension name: {e}"),
+        )
+    })?;
+    let ext_mgr = state.extension_manager.as_ref().ok_or((
+        StatusCode::NOT_IMPLEMENTED,
+        "Extension manager not available (secrets store required)".to_string(),
+    ))?;
+
+    match ext_mgr
+        .poll_interactive_login(name.as_str(), &req.session_id, &user.user_id)
+        .await
+    {
+        Ok(result) => {
+            if result.activated == Some(true) {
+                crate::channels::web::platform::legacy_auth::clear_auth_mode(&state, &user.user_id)
+                    .await;
+                state.sse.broadcast_for_user(
+                    &user.user_id,
+                    AppEvent::OnboardingState {
+                        extension_name: name.clone(),
+                        state: OnboardingStateDto::Ready,
+                        request_id: None,
+                        message: Some(result.message.clone()),
+                        instructions: None,
+                        auth_url: None,
+                        setup_url: None,
+                        onboarding: None,
+                        thread_id: None,
+                    },
+                );
+            }
+
+            Ok(Json(ExtensionInteractiveLoginResponse {
+                success: result.status != "failed",
+                status: result.status,
+                message: result.message,
+                session_id: Some(result.session_id),
+                qr_code_url: result.qr_code_url,
+                instructions: None,
+                activated: result.activated,
+            }))
+        }
+        Err(e) => Ok(Json(ExtensionInteractiveLoginResponse {
+            success: false,
+            status: "failed".to_string(),
+            message: e.to_string(),
+            session_id: Some(req.session_id),
+            qr_code_url: None,
+            instructions: None,
+            activated: Some(false),
+        })),
+    }
 }
 
 pub(crate) async fn extensions_setup_submit_handler(
@@ -701,6 +816,7 @@ mod tests {
             needs_setup: false,
             has_auth: false,
             installed: true,
+            requires_binding: true,
             activation_error: None,
             version: None,
         }
@@ -710,7 +826,7 @@ mod tests {
     ///
     /// Either `has_paired` or `has_owner_binding` is sufficient to upgrade
     /// from `Pairing` to `Active`. Pinning the four-cell matrix here means a
-    /// regression that drops one axis (the bug shape behind nearai/ironclaw#ironclaw#1921)
+    /// regression that drops one axis (the bug shape behind nearai/ironclaw#1921)
     /// trips at least two cells, not zero.
     #[test]
     fn derive_activation_status_truth_table_for_active_wasm_channel() {
@@ -733,7 +849,7 @@ mod tests {
         }
     }
 
-    /// Regression for nearai/ironclaw#ironclaw#1921 — caller-level coverage.
+    /// Regression for nearai/ironclaw#1921 — caller-level coverage.
     ///
     /// Before this fix the wrapper hardcoded the underlying classifier's
     /// `has_paired` axis to `false`, so a paired-but-not-owner-bound
@@ -747,7 +863,7 @@ mod tests {
             derive_activation_status(&ext, true, false),
             Some(ExtensionActivationStatus::Active),
             "a WASM channel with paired senders must report Active even when \
-             no owner binding is set (nearai/ironclaw#ironclaw#1921)"
+             no owner binding is set (nearai/ironclaw#1921)"
         );
     }
 
@@ -786,11 +902,12 @@ mod tests {
             needs_setup: true,
             has_auth: false,
             installed: true,
+            requires_binding: true,
             activation_error: None,
             version: None,
         };
 
-        let owner_bound = classify_wasm_channel_activation(&ext, false, true);
+        let owner_bound = classify_wasm_channel_activation(&ext, false, true, ext.requires_binding);
         if owner_bound != Some(ExtensionActivationStatus::Active) {
             return Err(format!(
                 "owner-bound channel should be active, got {:?}",
@@ -798,7 +915,7 @@ mod tests {
             ));
         }
 
-        let unbound = classify_wasm_channel_activation(&ext, false, false);
+        let unbound = classify_wasm_channel_activation(&ext, false, false, ext.requires_binding);
         if unbound != Some(ExtensionActivationStatus::Pairing) {
             return Err(format!(
                 "unbound channel should be pairing, got {:?}",
@@ -823,12 +940,13 @@ mod tests {
             needs_setup: true,
             has_auth: false,
             installed: true,
+            requires_binding: false,
             activation_error: None,
             version: None,
         };
 
         let status = if relay.kind == crate::extensions::ExtensionKind::WasmChannel {
-            classify_wasm_channel_activation(&relay, false, false)
+            classify_wasm_channel_activation(&relay, false, false, relay.requires_binding)
         } else if relay.kind == crate::extensions::ExtensionKind::ChannelRelay {
             Some(if relay.active {
                 ExtensionActivationStatus::Active
@@ -1168,6 +1286,7 @@ mod tests {
             needs_setup: false,
             has_auth: true,
             installed: true,
+            requires_binding: false,
             activation_error: Some("boom".to_string()),
             version: None,
         };
@@ -1323,7 +1442,7 @@ mod tests {
         assert_eq!(telegram["activation_status"], "installed");
     }
 
-    /// Caller-level wire-contract regression for nearai/ironclaw#ironclaw#2235.
+    /// Caller-level wire-contract regression for nearai/ironclaw#2235.
     ///
     /// The Settings → Extensions UI picks the WASM-channel fallback button
     /// label ("Setup" vs "Reconfigure") from `ExtensionInfo.authenticated`

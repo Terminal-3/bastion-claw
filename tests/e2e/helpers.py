@@ -3,10 +3,16 @@
 import asyncio
 import hashlib
 import hmac
+import os
 import re
+import signal
+import socket
 import time
 import uuid
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+import pytest
 
 import aiohttp
 import httpx
@@ -181,6 +187,25 @@ SEL = {
     "activity_thinking_text":   ".activity-thinking-text",
     # Thread processing indicator
     "thread_processing":        ".thread-processing",
+    # Projects control-room
+    "projects_cards":           "#cr-cards",
+    "projects_card":            ".cr-card",
+    "projects_card_by_id":      '.cr-card[data-id="{id}"]',
+    "projects_drill":           "#cr-drill",
+    "projects_drill_name":      ".cr-drill-name",
+    "projects_detail":          "#cr-detail",
+    "projects_mission_card":    ".cr-mission-card",
+    "projects_activity_row":    ".cr-activity-row",
+    "projects_activity_row_by_id": '.cr-activity-row[data-id="{id}"]',
+    "projects_thread_title":    ".cr-thread-title",
+    "projects_thread_subtitle": ".cr-thread-subtitle",
+    "projects_thread_brief":    ".cr-thread-brief",
+    "projects_thread_meta":     ".cr-thread-meta-grid",
+    "projects_thread_timeline": ".cr-thread-timeline",
+    "projects_thread_message":  ".cr-thread-message",
+    # Canonical Missions detail surface
+    "missions_detail":          "#mission-detail",
+    "missions_detail_title":    ".ms-detail-title",
 }
 
 TABS = ["chat", "memory", "jobs", "routines", "settings"]
@@ -189,6 +214,22 @@ TABS = ["chat", "memory", "jobs", "routines", "settings"]
 AUTH_TOKEN = "e2e-test-token"
 OWNER_SCOPE_ID = "e2e-owner-scope"
 HTTP_WEBHOOK_SECRET = "e2e-http-webhook-secret"
+
+# Bearer token for the Reborn WebUI v2 surface (`t3claw-reborn serve`).
+# Must be >= 32 bytes: `serve` also uses this value as the SSO session-signing
+# key and refuses to bind with a shorter secret. Distinct from AUTH_TOKEN,
+# which targets the legacy `t3claw` web channel.
+REBORN_V2_AUTH_TOKEN = "e2e-reborn-v2-bearer-token-0123456789abcdef"
+
+# Selectors for the Reborn WebUI v2 React SPA (served under /v2/). The shell
+# DOM differs entirely from the legacy gateway in SEL, so keep these separate.
+SEL_V2 = {
+    "root":           "#v2-root",          # SPA mount point (index.html)
+    "login_token":    "#v2-token",         # token input on the login/connect view
+    "chat_composer":  "[data-testid='chat-composer']",  # message textarea on /chat
+    "msg_user":       "[data-testid='msg-user']",       # user message bubble
+    "msg_assistant":  "[data-testid='msg-assistant']",  # assistant message bubble
+}
 
 
 async def wait_for_ready(url: str, *, timeout: float = 60, interval: float = 0.5):
@@ -327,7 +368,7 @@ async def open_authed_page(browser, base_url: str, *, token: str = AUTH_TOKEN):
     """Open a fresh authenticated page using the given bearer token query param."""
     context = await browser.new_context(viewport={"width": 1280, "height": 720})
     page = await context.new_page()
-    await page.goto(f"{base_url}/?token={token}", wait_until="networkidle", timeout=15000)
+    await page.goto(f"{base_url}/?token={token}", timeout=15000)
     await page.locator(SEL["auth_screen"]).wait_for(state="hidden", timeout=10000)
     return context, page
 
@@ -354,14 +395,44 @@ async def send_chat_and_wait_for_terminal_message(
     message: str,
     *,
     timeout: int = 30000,
+    expected_text_contains: str | None = None,
 ) -> dict[str, str]:
     """Send a chat message and wait for the next terminal visible outcome.
 
     Returns a dict with:
     - ``role``: ``assistant`` or ``system``
     - ``text``: rendered text of the newest terminal message
+
+    The default predicate waits for the assistant message to fully settle —
+    ``data-streaming`` attribute cleared, input re-enabled, and this send's
+    optimistic pending marker removed. On slow CI runners under heavy
+    parallelism the streaming condition can race with SSE reconnects (chunks
+    arrive during the reconnect window, the attribute-clearing delta is lost,
+    predicate never flips). Callers that already assert on specific response
+    text can pass ``expected_text_contains=`` to short-circuit as soon as that
+    substring appears in the assistant bubble, but the helper still waits for
+    this send's pending marker to clear so late history renders from previous
+    turns cannot be mistaken for the new response.
     """
     chat_input = await ensure_writable_chat_input(page)
+
+    # The page fixture waits for auth/SSE readiness, but the first
+    # loadHistory() call may still be replacing the skeleton with older
+    # persisted messages. Count terminal bubbles only after that settles;
+    # otherwise a late history-rendered assistant from a previous turn can
+    # satisfy the "new assistant" predicate for the message we are about to
+    # send.
+    await page.wait_for_function(
+        """() => !document.querySelector('#chat-messages .skeleton-container')""",
+        timeout=timeout,
+    )
+
+    pending_marker = await page.evaluate(
+        """() => ({
+            threadId: typeof currentThreadId !== 'undefined' ? currentThreadId : null,
+            pendingId: typeof _nextPendingId !== 'undefined' ? _nextPendingId : null,
+        })"""
+    )
 
     assistant_sel = SEL["message_assistant"]
     system_sel = SEL["message_system"]
@@ -378,7 +449,17 @@ async def send_chat_and_wait_for_terminal_message(
             chatInputSelector,
             assistantCount,
             systemCount,
+            expectedContains,
+            pendingThreadId,
+            pendingId,
         }) => {
+            const pendingForThisSendCleared = () => {
+                if (!pendingThreadId || pendingId === null || pendingId === undefined) return true;
+                if (typeof _pendingUserMessages === 'undefined') return true;
+                const pending = _pendingUserMessages.get(pendingThreadId);
+                return !pending || !pending.some((p) => p.id === pendingId);
+            };
+
             const input = document.querySelector(chatInputSelector);
             const systems = document.querySelectorAll(systemSelector);
             if (systems.length > systemCount) {
@@ -391,15 +472,19 @@ async def send_chat_and_wait_for_terminal_message(
             }
 
             const assistants = document.querySelectorAll(assistantSelector);
-            if (assistants.length > assistantCount && input && !input.disabled) {
+            if (assistants.length > assistantCount) {
                 const last = assistants[assistants.length - 1];
                 const content = last.querySelector('.message-content');
                 const text = ((content && content.innerText) || last.innerText || '').trim();
-                if (text.length > 0 && !last.hasAttribute('data-streaming')) {
-                    return {
-                        role: 'assistant',
-                        text,
-                    };
+                if (text.length > 0 && pendingForThisSendCleared()) {
+                    if (expectedContains && text.includes(expectedContains)) {
+                        return { role: 'assistant', text };
+                    }
+                    if (!expectedContains
+                        && input && !input.disabled
+                        && !last.hasAttribute('data-streaming')) {
+                        return { role: 'assistant', text };
+                    }
                 }
             }
 
@@ -411,6 +496,9 @@ async def send_chat_and_wait_for_terminal_message(
             "chatInputSelector": SEL["chat_input"],
             "assistantCount": before_assistant,
             "systemCount": before_system,
+            "expectedContains": expected_text_contains,
+            "pendingThreadId": pending_marker["threadId"],
+            "pendingId": pending_marker["pendingId"],
         },
         timeout=timeout,
     )
@@ -428,3 +516,164 @@ def signed_http_webhook_headers(body: bytes) -> dict[str, str]:
         "Content-Type": "application/json",
         "X-Hub-Signature-256": f"sha256={digest}",
     }
+
+
+# ---------------------------------------------------------------------------
+# Process helpers (shared across v2 auth E2E scenario files)
+# ---------------------------------------------------------------------------
+
+def _forward_coverage_env(env: dict) -> None:
+    """Copy LLVM coverage env vars into *env* so coverage data is collected."""
+    for key in os.environ:
+        if key.startswith(
+            ("CARGO_LLVM_COV", "LLVM_", "CARGO_ENCODED_RUSTFLAGS", "CARGO_INCREMENTAL")
+        ):
+            env[key] = os.environ[key]
+
+
+async def stop_process(proc, sig: int = signal.SIGINT, timeout: float = 5) -> None:
+    """Gracefully stop *proc*, escalating to SIGKILL on timeout."""
+    async def _drain() -> None:
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=1)
+        except asyncio.TimeoutError:
+            # Release transports now rather than waiting for GC.
+            for pipe in (proc.stdout, proc.stderr):
+                if pipe is not None:
+                    try:
+                        pipe.feed_eof()
+                    except Exception:
+                        pass
+        except ValueError:
+            pass
+
+    try:
+        proc.send_signal(sig)
+    except ProcessLookupError:
+        await _drain()
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+    await _drain()
+
+
+async def wait_for_pending_auth_gate(
+    base_url: str,
+    thread_id: str,
+    *,
+    timeout: float = 45.0,
+) -> dict:
+    """Poll /api/chat/history until a pending *authentication* gate appears.
+
+    Returns the gate dict.  Raises ``AssertionError`` on timeout.
+    The gate kind is validated so that approval / confirmation gates do not
+    satisfy the check and produce false positives.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        r = await api_get(base_url, f"/api/chat/history?thread_id={thread_id}", timeout=15)
+        if r.status_code == 200:
+            gate = r.json().get("pending_gate")
+            if isinstance(gate, dict) and gate.get("request_id"):
+                resume = gate.get("resume_kind")
+                if not isinstance(resume, dict):
+                    resume = {}
+                if (
+                    resume.get("kind") == "authentication"
+                    or gate.get("gate_name") in ("auth", "authentication")
+                ):
+                    return gate
+        await asyncio.sleep(0.5)
+    raise AssertionError(
+        f"Timed out waiting for pending auth gate in thread {thread_id}"
+    )
+
+
+def _reserve_loopback_port() -> int:
+    """Return an available loopback port for a short-lived E2E server."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+_ENGINE_V2_BASE_ENV = {
+    "RUST_LOG": "t3claw=debug",
+    "RUST_BACKTRACE": "1",
+    "ENGINE_V2": "true",
+    "AGENT_AUTO_APPROVE_TOOLS": "true",
+    "HTTP_ALLOW_LOCALHOST": "true",
+    "SECRETS_MASTER_KEY": hashlib.sha256(b"t3claw-4112-e2e-master-key").hexdigest(),
+    "GATEWAY_ENABLED": "true",
+    "GATEWAY_HOST": "127.0.0.1",
+    "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
+    "CLI_ENABLED": "false",
+    "LLM_BACKEND": "openai_compatible",
+    "LLM_API_KEY": "mock-api-key",
+    "LLM_MODEL": "mock-model",
+    "DATABASE_BACKEND": "libsql",
+    "SANDBOX_ENABLED": "false",
+    "SKILLS_ENABLED": "true",
+    "ROUTINES_ENABLED": "false",
+    "HEARTBEAT_ENABLED": "false",
+    "EMBEDDING_ENABLED": "false",
+    "WASM_ENABLED": "false",
+    "ONBOARD_COMPLETED": "true",
+    "T3CLAW_DISABLE_OS_KEYCHAIN": "1",
+}
+
+
+@asynccontextmanager
+async def _start_engine_v2_server(
+    t3claw_binary: str,
+    *,
+    mock_llm_server: str,
+    port: int,
+    home_dir: str,
+    db_path: str,
+    user_id: str,
+    label: str,
+    env_overrides: dict[str, str] | None = None,
+) -> AsyncIterator[str]:
+    """Start an ENGINE_V2 t3claw process and yield its base URL.
+
+    Centralises the subprocess-lifecycle boilerplate shared across all three
+    v2 auth E2E server fixtures.
+    """
+    env: dict[str, str] = {
+        **_ENGINE_V2_BASE_ENV,
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": home_dir,
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "GATEWAY_PORT": str(port),
+        "GATEWAY_USER_ID": user_id,
+        "T3CLAW_OWNER_ID": user_id,
+        "LLM_BASE_URL": mock_llm_server,
+        "LIBSQL_PATH": db_path,
+    }
+    if env_overrides:
+        env.update(env_overrides)
+    _forward_coverage_env(env)
+
+    proc = await asyncio.create_subprocess_exec(
+        t3claw_binary, "--no-onboard",
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+        env=env,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        await wait_for_ready(f"{base_url}/api/health", timeout=60)
+        yield base_url
+    except TimeoutError:
+        if proc.returncode is None:
+            await stop_process(proc, timeout=2)
+        pytest.fail(f"{label} failed to start on port {port}")
+    finally:
+        if proc.returncode is None:
+            await stop_process(proc, sig=signal.SIGINT, timeout=10)
+            if proc.returncode is None:
+                await stop_process(proc, sig=signal.SIGTERM, timeout=5)

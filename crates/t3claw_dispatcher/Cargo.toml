@@ -1,0 +1,20 @@
+[package]
+name = "t3claw_dispatcher"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+t3claw_events = { path = "../t3claw_events" }
+t3claw_extensions = { path = "../t3claw_extensions" }
+t3claw_filesystem = { path = "../t3claw_filesystem" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_resources = { path = "../t3claw_resources" }
+serde_json = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt"] }
+tracing-test = { version = "0.2", features = ["no-env-filter"] }

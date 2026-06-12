@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VIDEO_DIR="$PROJECT_ROOT/docs/architecture-video"
-OUTPUT="${1:-$PROJECT_ROOT/t3claw-architecture.mp4}"
+OUTPUT="${1:-$PROJECT_ROOT/ironclaw-architecture.mp4}"
 case "$OUTPUT" in
   /*) ;;
   *) OUTPUT="$PROJECT_ROOT/$OUTPUT" ;;

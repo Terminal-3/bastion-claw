@@ -1419,6 +1419,10 @@ struct ThreadArchiveSummary {
     // continue to deserialize as zero rather than failing.
     #[serde(default)]
     total_cost_usd: f64,
+    // Short sidebar label. `#[serde(default)]` preserves backward
+    // compatibility with archive files written before this field existed.
+    #[serde(default)]
+    title: Option<String>,
 }
 
 fn compact_thread_summary(thread: &Thread) -> ThreadArchiveSummary {
@@ -1441,6 +1445,7 @@ fn compact_thread_summary(thread: &Thread) -> ThreadArchiveSummary {
         total_tokens: thread.total_tokens_used,
         outcome_preview: outcome,
         total_cost_usd: thread.total_cost_usd,
+        title: thread.title.clone(),
     }
 }
 
@@ -1464,6 +1469,7 @@ fn thread_from_archive(summary: &ThreadArchiveSummary) -> Option<Thread> {
     Some(Thread {
         id: ThreadId(id),
         goal: summary.goal.clone(),
+        title: summary.title.clone(),
         thread_type: t3claw_engine::ThreadType::Mission,
         state,
         project_id: t3claw_engine::ProjectId(uuid::Uuid::nil()),
@@ -1894,14 +1900,18 @@ impl Store for HybridStore {
         project_id: ProjectId,
         user_id: &str,
     ) -> Result<Vec<Mission>, EngineError> {
-        Ok(self
+        let mut missions: Vec<Mission> = self
             .missions
             .read()
             .await
             .values()
             .filter(|mission| mission.project_id == project_id && mission.user_id == user_id)
             .cloned()
-            .collect())
+            .collect();
+        // HashMap iteration is non-deterministic; sort by (name, id)
+        // so callers see a stable order across runs.
+        missions.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.0.cmp(&b.id.0)));
+        Ok(missions)
     }
 
     async fn list_all_threads(&self, project_id: ProjectId) -> Result<Vec<Thread>, EngineError> {
@@ -1916,14 +1926,16 @@ impl Store for HybridStore {
     }
 
     async fn list_all_missions(&self, project_id: ProjectId) -> Result<Vec<Mission>, EngineError> {
-        Ok(self
+        let mut missions: Vec<Mission> = self
             .missions
             .read()
             .await
             .values()
             .filter(|mission| mission.project_id == project_id)
             .cloned()
-            .collect())
+            .collect();
+        missions.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.0.cmp(&b.id.0)));
+        Ok(missions)
     }
 
     async fn update_mission_status(
@@ -2031,7 +2043,7 @@ mod tests {
     /// Parity test: the store adapter's `normalize_path` and the memory
     /// tool's `normalize_workspace_path` both sit on the orchestrator
     /// self-modify security boundary. They are independent copies of the
-    /// same normalization logic (one lives in the "t3claw" bridge layer,
+    /// same normalization logic (one lives in the `t3claw` bridge layer,
     /// the other in a tool module) — if they ever diverge, a path-traversal
     /// or dot-segment bypass reopens on one side.
     ///
@@ -2703,6 +2715,51 @@ mod tests {
         let rehydrated =
             thread_from_archive(&restored).expect("thread_from_archive should succeed");
         assert_eq!(rehydrated.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn archive_summary_preserves_title_through_round_trip() {
+        // Regression: `title` was introduced as a sibling of `goal` to
+        // give UI consumers a short label. Missing persistence through
+        // the archive round-trip would mean mission backfill
+        // (`backfill_archived_threads`) rehydrates threads with
+        // `title = None`, and frontends fall back to rendering a UUID
+        // prefix.
+        let mut thread = archive_thread_fixture(0.0);
+        thread.title = Some("Daily summary".to_string());
+
+        let summary = compact_thread_summary(&thread);
+        let json = serde_json::to_string(&summary).expect("serialize");
+        let restored: ThreadArchiveSummary = serde_json::from_str(&json).expect("deserialize");
+        let rehydrated =
+            thread_from_archive(&restored).expect("thread_from_archive should succeed");
+        assert_eq!(rehydrated.title.as_deref(), Some("Daily summary"));
+    }
+
+    #[test]
+    fn archive_summary_handles_legacy_json_without_title_field() {
+        // Archive files written before `title` existed must still
+        // deserialize — `#[serde(default)]` maps the missing key to
+        // `None`. Matches the `total_cost_usd` precedent.
+        let legacy = serde_json::json!({
+            "thread_id": uuid::Uuid::new_v4().to_string(),
+            "goal": "legacy archived mission",
+            "state": "Completed",
+            "created_at": chrono::Utc::now().to_rfc3339(),
+            "completed_at": chrono::Utc::now().to_rfc3339(),
+            "step_count": 1,
+            "total_tokens": 100,
+            // title deliberately omitted
+        })
+        .to_string();
+
+        let restored: ThreadArchiveSummary =
+            serde_json::from_str(&legacy).expect("legacy summary must still deserialize");
+        assert_eq!(restored.title, None);
+
+        let rehydrated =
+            thread_from_archive(&restored).expect("thread_from_archive should succeed");
+        assert_eq!(rehydrated.title, None);
     }
 }
 

@@ -18,6 +18,8 @@ pub mod payroll_audit;
 pub mod permissions;
 pub mod rate_limiter;
 pub mod redaction;
+pub mod runtime_filter;
+pub(crate) mod schema_metrics;
 pub mod schema_validator;
 pub mod wasm;
 
@@ -33,11 +35,13 @@ pub use builder::{
     LlmSoftwareBuilder, SoftwareBuilder, SoftwareType, Template, TemplateEngine, TemplateType,
     TestCase, TestHarness, TestResult, TestSuite, ValidationError, ValidationResult, WasmValidator,
 };
-pub(crate) use coercion::prepare_tool_params;
+pub(crate) use coercion::{prepare_params_for_schema, prepare_tool_params};
 pub use rate_limiter::RateLimiter;
 pub use registry::{ToolRegistry, is_protected_tool_name};
+pub use runtime_filter::is_visible_under;
 pub use tool::{
     ApprovalContext, ApprovalRequirement, EngineCompatibility, EngineVersion, RiskLevel, Tool,
-    ToolDomain, ToolError, ToolOutput, ToolRateLimitConfig, check_approval_in_context,
-    redact_params, validate_tool_schema,
+    ToolDiscoverySummary, ToolDomain, ToolError, ToolOutput, ToolRateLimitConfig,
+    ToolRuntimeAffordance, check_approval_in_context, redact_params, require_param, require_str,
+    validate_tool_schema,
 };

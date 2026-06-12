@@ -9,7 +9,7 @@ THRESHOLD.
 
 Meant to be called from the keeper mission or as a sub-mission of
 its own. Written in the Monty-friendly subset (no imports beyond
-what the IronClaw engine already exposes; no filesystem).
+what the T3Claw engine already exposes; no filesystem).
 
 Configure by editing THRESHOLD and PROJECT_ID at the top.
 """

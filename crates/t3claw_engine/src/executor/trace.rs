@@ -5,8 +5,8 @@
 //! self-improvement mission and surfaced in debug logs.
 //!
 //! **There is no separate engine trace file.** Live trace recording for the
-//! whole system is handled by `RecordingLlm` in the host crate
-//! (`src/llm/recording.rs`), gated by `T3CLAW_RECORD_TRACE`. Because the
+//! whole system is handled by `RecordingLlm` in `t3claw_llm`
+//! (`crates/t3claw_llm/src/recording.rs`), gated by `T3CLAW_RECORD_TRACE`. Because the
 //! engine's `LlmBackend` is wired to the same provider chain, engine LLM
 //! interactions are captured by that single recorder — no engine-side env var
 //! and no second JSON file.

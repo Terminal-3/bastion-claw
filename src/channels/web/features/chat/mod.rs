@@ -3,7 +3,7 @@
 //! Owns the browser-facing chat surface end-to-end: message ingress, gate
 //! resolution, thread management, history playback, SSE event stream, and
 //! the WebSocket upgrade. This is the biggest slice extracted so far
-//! (ironclaw#ironclaw#2599 stage 4c) — prior stages (oauth, pairing, status, logs)
+//! (t3claw#2599 stage 4c) — prior stages (oauth, pairing, status, logs)
 //! left chat in `server.rs` because the gate-flow and SSE/WS reconnect
 //! surfaces needed the widest review window.
 //!
@@ -187,6 +187,74 @@ pub(crate) async fn chat_approval_handler(
         )
     })?;
 
+    // Inline fast-path: when an Approval gate parks the live engine VM
+    // via `BridgeGateController::pause`, the per-user agent loop is
+    // blocked at `handle_message` awaiting the bridge call, so an
+    // ExecApproval submission posted to msg_tx would queue indefinitely
+    // behind the parked execution. Bypass the mpsc and call into the
+    // gate controller's in-memory delivery channel directly. On
+    // `NoLiveVm` we fall through to the legacy mpsc path so engine v1
+    // approvals (and any post-restart Approval gates without a parked
+    // future) still resolve correctly.
+    //
+    // The fast path looks the gate up by `request_id` rather than by
+    // the wire `thread_id`: web's `req.thread_id` is the channel-visible
+    // identifier (the per-conversation UUID returned by
+    // `/api/chat/thread/new`) and is recorded on the pending gate as
+    // `scope_thread_id`, not as the internal engine `ThreadId` that
+    // keys `PendingGateStore`. Mixing them up would miss every gate
+    // whose channel scope differs from its engine thread.
+    let resolution = if approved {
+        t3claw_engine::GateResolution::Approved { always }
+    } else {
+        t3claw_engine::GateResolution::Denied { reason: None }
+    };
+    // Match the legacy mpsc path's settings precedence (cache → raw DB)
+    // so an `action="always"` approval still persists
+    // `tool_permissions.<tool>=always_allow` whenever any DB-backed
+    // SettingsStore is configured. Falling back to the raw `state.store`
+    // covers gateways that wire a database without the cache layer.
+    let settings_store =
+        crate::channels::web::features::settings::resolve_settings_store(&state).ok();
+    match crate::bridge::try_resolve_inline_approval_gate(
+        &user.user_id,
+        "gateway",
+        request_id,
+        resolution,
+        settings_store,
+    )
+    .await
+    {
+        Ok(crate::bridge::InlineGateOutcome::Delivered) => {
+            return Ok((
+                StatusCode::ACCEPTED,
+                Json(SendMessageResponse {
+                    message_id: Uuid::new_v4(),
+                    status: "accepted",
+                }),
+            ));
+        }
+        Ok(crate::bridge::InlineGateOutcome::NoLiveVm) => {
+            // Fall through to the legacy mpsc dispatch below.
+        }
+        Err(e) => {
+            // Map typed verification failures to specific 4xx /
+            // 5xx codes. Matching on the variant — not a substring
+            // of the rendered message — keeps the HTTP contract
+            // tied to the typed surface so a future change to the
+            // error message can't silently flip a 403 → 500.
+            use crate::bridge::InlineGateError;
+            let status = match &e {
+                InlineGateError::ChannelMismatch { .. } | InlineGateError::Unauthorized => {
+                    StatusCode::FORBIDDEN
+                }
+                InlineGateError::Stale | InlineGateError::Expired => StatusCode::CONFLICT,
+                InlineGateError::Other(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            return Err((status, e.to_string()));
+        }
+    }
+
     // Build a structured ExecApproval submission as JSON, sent through the
     // existing message pipeline so the agent loop picks it up.
     let approval = crate::agent::submission::Submission::ExecApproval {
@@ -238,16 +306,48 @@ pub(crate) async fn chat_gate_resolve_handler(
     AuthenticatedUser(user): AuthenticatedUser,
     Json(req): Json<GateResolveRequest>,
 ) -> Result<Json<ActionResponse>, (StatusCode, String)> {
-    match req.resolution {
+    // Half-2 of #3133: a paused background mission may be waiting on
+    // this same `request_id`. After the foreground gate is resolved we
+    // fan the disposition out to the mission auto-resume path so a
+    // paused mission re-fires (Approved / CredentialProvided) or gets
+    // marked Failed (Denied / Cancelled). For OAuth flows the
+    // credential-write path also triggers
+    // `resume_paused_missions_for_credential` from the OAuth callback
+    // handler — both hooks landing on the same mission are idempotent
+    // since `resume_paused_for_request_id` and
+    // `resume_paused_for_credential` re-check `paused_gate` atomically.
+    // Best-effort dispatch — failures inside the helper are logged and
+    // never surfaced as a gate-resolve error.
+    // Validate the request id once up front so every arm — including
+    // the Approved / Denied paths that delegate to chat_approval_handler
+    // — surfaces a uniform 400 on malformed UUIDs, and the mission
+    // auto-resume hook below isn't silently skipped on bad input.
+    let gate_request_id = Uuid::parse_str(&req.request_id).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "Invalid request_id (expected UUID)".to_string(),
+        )
+    })?;
+    let mission_outcome = match req.resolution {
+        GateResolutionPayload::Approved { .. }
+        | GateResolutionPayload::CredentialProvided { .. } => {
+            Some(t3claw_engine::GateResolutionOutcome::Approved)
+        }
+        GateResolutionPayload::Denied => Some(t3claw_engine::GateResolutionOutcome::Denied),
+        GateResolutionPayload::Cancelled => Some(t3claw_engine::GateResolutionOutcome::Cancelled),
+    };
+    let mission_resume = mission_outcome.map(|outcome| (outcome, gate_request_id));
+
+    let response: Result<Json<ActionResponse>, (StatusCode, String)> = match req.resolution {
         GateResolutionPayload::Approved { always } => {
             let action = if always { "always" } else { "approve" }.to_string();
             let _ = chat_approval_handler(
-                State(state),
-                AuthenticatedUser(user),
+                State(state.clone()),
+                AuthenticatedUser(user.clone()),
                 Json(ApprovalRequest {
-                    request_id: req.request_id,
+                    request_id: req.request_id.clone(),
                     action,
-                    thread_id: req.thread_id,
+                    thread_id: req.thread_id.clone(),
                 }),
             )
             .await?;
@@ -255,12 +355,12 @@ pub(crate) async fn chat_gate_resolve_handler(
         }
         GateResolutionPayload::Denied => {
             let _ = chat_approval_handler(
-                State(state),
-                AuthenticatedUser(user),
+                State(state.clone()),
+                AuthenticatedUser(user.clone()),
                 Json(ApprovalRequest {
-                    request_id: req.request_id,
+                    request_id: req.request_id.clone(),
                     action: "deny".into(),
-                    thread_id: req.thread_id,
+                    thread_id: req.thread_id.clone(),
                 }),
             )
             .await?;
@@ -271,14 +371,8 @@ pub(crate) async fn chat_gate_resolve_handler(
                 StatusCode::BAD_REQUEST,
                 "thread_id is required for credential resolution".to_string(),
             ))?;
-            let request_id = Uuid::parse_str(&req.request_id).map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "Invalid request_id (expected UUID)".to_string(),
-                )
-            })?;
             let submission = crate::agent::submission::Submission::GateAuthResolution {
-                request_id,
+                request_id: gate_request_id,
                 resolution: crate::agent::submission::AuthGateResolution::CredentialProvided {
                     token,
                 },
@@ -296,30 +390,57 @@ pub(crate) async fn chat_gate_resolve_handler(
             Ok(Json(ActionResponse::ok("Credential submitted.")))
         }
         GateResolutionPayload::Cancelled => {
-            let thread_id = req.thread_id.ok_or((
-                StatusCode::BAD_REQUEST,
-                "thread_id is required for cancellation".to_string(),
-            ))?;
-            let request_id = Uuid::parse_str(&req.request_id).map_err(|_| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "Invalid request_id (expected UUID)".to_string(),
-                )
-            })?;
-            let submission = crate::agent::submission::Submission::GateAuthResolution {
-                request_id,
-                resolution: crate::agent::submission::AuthGateResolution::Cancelled,
+            // Mission-only gates have no foreground `thread_id` — the
+            // gate is owned by a background mission's child thread, and
+            // the gate-card UI doesn't surface a `thread_id` in the
+            // resolution payload. For foreground inline-await gates,
+            // dispatch the structured cancellation so the parked VM
+            // unwinds promptly. The mission auto-resume path
+            // (`resume_paused_missions_for_gate_request`, fired below)
+            // independently carries the Cancelled outcome to the
+            // mission state machine.
+            //
+            // If the client omits `thread_id` for a foreground gate
+            // (regression from PR #3366 review: gate-card UI without
+            // foreground thread context), recover the owning thread
+            // from `PendingGateStore` so the parked VM is not stranded.
+            // Lookup is scoped to the requesting user via the store's
+            // own ownership check.
+            let dispatch_thread_id = match req.thread_id.clone() {
+                Some(t) => Some(t),
+                None => {
+                    crate::bridge::get_pending_gate_by_request_id(&user.user_id, gate_request_id)
+                        .await
+                        .map(|gate| gate.thread_id)
+                }
             };
-            crate::channels::web::platform::engine_dispatch::dispatch_engine_submission(
-                &state,
-                &user.user_id,
-                &thread_id,
-                submission,
-            )
-            .await?;
+            if let Some(thread_id) = dispatch_thread_id {
+                let submission = crate::agent::submission::Submission::GateAuthResolution {
+                    request_id: gate_request_id,
+                    resolution: crate::agent::submission::AuthGateResolution::Cancelled,
+                };
+                crate::channels::web::platform::engine_dispatch::dispatch_engine_submission(
+                    &state,
+                    &user.user_id,
+                    &thread_id,
+                    submission,
+                )
+                .await?;
+            }
             Ok(Json(ActionResponse::ok("Gate cancelled.")))
         }
+    };
+
+    if let Some((outcome, gate_request_id)) = mission_resume {
+        let _ = crate::bridge::resume_paused_missions_for_gate_request(
+            &user.user_id,
+            gate_request_id,
+            outcome,
+        )
+        .await;
     }
+
+    response
 }
 
 pub(crate) async fn chat_auth_token_handler(
@@ -726,12 +847,14 @@ pub(crate) async fn chat_threads_handler(
                     });
                 }
 
-                // Keep the chat sidebar scoped to persisted chat conversations.
-                // Engine v2 foreground threads are assistant execution internals
-                // and can rotate per message, so surfacing them here makes
-                // ordinary prompts look like standalone `engine` threads.
-                // Explicit engine-thread history still works via
-                // `chat_history_handler` when the caller already has a thread id.
+                // Keep the chat sidebar scoped to persisted conversations.
+                // A conversation can span multiple foreground engine threads,
+                // so rendering each engine thread as its own row produces
+                // misleading per-turn labels like "try again" instead of a
+                // stable conversation label. Engine-thread history remains
+                // accessible when the caller already has a thread id via
+                // `chat_history_handler`.
+
                 let active_thread = session.lock().await.active_thread;
 
                 return Ok(Json(ThreadListResponse {
@@ -906,7 +1029,7 @@ pub(crate) async fn pending_gate_extension_name(
     // "one resolver" rule in `src/bridge/CLAUDE.md` exist to prevent
     // exactly that drift.
     Some(
-        crate::bridge::auth_manager::resolve_auth_flow_extension_name(
+        crate::auth::extension::resolve_auth_flow_extension_name(
             tool_name,
             &parsed_parameters,
             credential_name.as_str(),
@@ -1155,6 +1278,27 @@ fn completed_turn_is_newer_than_in_progress(
         .is_some_and(|last_turn_time| last_turn_time >= in_progress_started_at)
 }
 
+/// Whether the turn's *current* tool step has reached a terminal state.
+///
+/// Keyed off the most recent tool call, not the full turn history. An
+/// earlier failed tool call followed by a successful retry (and a final
+/// assistant response) is a legitimate recovery — the previous `all(...)`
+/// check would keep the turn pinned to `Processing` forever because the
+/// errored call still flipped `!has_error` to false. See serrrfirat's
+/// review on PR #2753.
+///
+/// A turn is considered "recovered" if the trailing tool call has a
+/// result and no error. A trailing unfinished (`!has_result && !has_error`)
+/// or errored (`has_error`) tool call keeps the turn visible as
+/// `Processing` so the user sees the stuck step instead of fabricated
+/// success — the original #1993 regression intent.
+fn turn_tool_calls_succeeded(turn: &TurnInfo) -> bool {
+    match turn.tool_calls.last() {
+        Some(last) => last.has_result && !last.has_error,
+        None => true,
+    }
+}
+
 fn reconcile_in_progress_with_turns(
     turns: &mut [TurnInfo],
     in_progress: Option<InProgressInfo>,
@@ -1170,7 +1314,14 @@ fn reconcile_in_progress_with_turns(
     };
 
     if in_progress_matches_turn(last_turn, &in_progress) {
-        if last_turn.response.is_some() {
+        // Only treat the matching turn as "already done" if the model wrote
+        // a final response AND the trailing tool call is in a successful
+        // terminal state (see `turn_tool_calls_succeeded`). Earlier failed
+        // attempts are allowed as long as a later retry succeeded — that's
+        // a legitimate recovery. A trailing unfinished / errored tool call
+        // keeps the processing affordance visible so the user sees the
+        // stuck step instead of fabricated success (#1993).
+        if last_turn.response.is_some() && turn_tool_calls_succeeded(last_turn) {
             None
         } else {
             last_turn.state = in_progress.state.clone();
@@ -1210,7 +1361,7 @@ fn summary_live_state(summary: &crate::history::ConversationSummary) -> Option<S
 // `test_gateway_state_with_store_and_session_manager`,
 // `test_gateway_state_with_dependencies`) now live in
 // `crate::channels::web::test_helpers` as `pub(crate)` functions, so
-// stage 6 of ironclaw#ironclaw#2599 can migrate the caller-level tests into this
+// stage 6 of t3claw#2599 can migrate the caller-level tests into this
 // module alongside the helpers without an API change.
 
 #[cfg(test)]
@@ -1325,6 +1476,125 @@ mod tests {
             info.tool_calls[0].result_preview.is_none(),
             "in-memory path has no separate preview — leave `result_preview` empty to match DB semantics"
         );
+    }
+
+    /// Regression for #1993 — after a 502 mid-turn the response text can
+    /// be persisted but the claimed tool call never completes. On chat
+    /// reopen, naive rehydration dropped the in-progress flag and showed
+    /// the fabricated "Done!" as if the action had succeeded. The fix
+    /// keeps the matching turn in-progress whenever any recorded tool
+    /// call errored or never produced a result.
+    #[test]
+    fn test_reconcile_retains_in_progress_when_tool_call_failed() {
+        use crate::channels::web::types::ToolCallInfo;
+
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let user_message_id = Uuid::new_v4();
+        let mut turns = vec![TurnInfo {
+            turn_number: 1,
+            user_message_id: Some(user_message_id),
+            user_input: "send 'hi' to telegram".to_string(),
+            // Model claimed success even though the tool call errored.
+            response: Some("Done! I've sent 'hi' to your Telegram.".to_string()),
+            state: "Completed".to_string(),
+            started_at: started_at.clone(),
+            completed_at: Some(started_at.clone()),
+            tool_calls: vec![ToolCallInfo {
+                name: "telegram_send".to_string(),
+                has_result: false,
+                has_error: true,
+                call_id: None,
+                result_preview: None,
+                result: None,
+                error: Some("HTTP 502".to_string()),
+                rationale: None,
+            }],
+            generated_images: Vec::new(),
+            narrative: None,
+        }];
+
+        let reconciled = reconcile_in_progress_with_turns(
+            &mut turns,
+            Some(InProgressInfo {
+                turn_number: 1,
+                user_message_id: Some(user_message_id),
+                state: "Processing".to_string(),
+                user_input: "send 'hi' to telegram".to_string(),
+                started_at,
+            }),
+        );
+
+        assert!(
+            reconciled.is_some(),
+            "a turn with a failed tool call must stay in-progress so the UI \
+             does not show the fabricated success"
+        );
+        assert_eq!(turns[0].state, "Processing");
+    }
+
+    /// Regression for serrrfirat's review on PR #2753 — the original
+    /// `all(tool_calls succeeded)` rule was too strict: a turn that
+    /// recovered from an earlier tool-call error by retrying and then
+    /// produced a final response would stay pinned to `Processing`
+    /// forever. The fix keys off the *trailing* tool call instead.
+    #[test]
+    fn test_reconcile_allows_recovery_from_earlier_tool_error() {
+        use crate::channels::web::types::ToolCallInfo;
+
+        let started_at = chrono::Utc::now().to_rfc3339();
+        let user_message_id = Uuid::new_v4();
+        let mut turns = vec![TurnInfo {
+            turn_number: 1,
+            user_message_id: Some(user_message_id),
+            user_input: "send 'hi' to telegram".to_string(),
+            response: Some("Sent 'hi' to your Telegram.".to_string()),
+            state: "Completed".to_string(),
+            started_at: started_at.clone(),
+            completed_at: Some(started_at.clone()),
+            // Earlier errored call + successful retry = recovered.
+            tool_calls: vec![
+                ToolCallInfo {
+                    name: "telegram_send".to_string(),
+                    has_result: false,
+                    has_error: true,
+                    call_id: None,
+                    result_preview: None,
+                    result: None,
+                    error: Some("HTTP 502 on first attempt".to_string()),
+                    rationale: None,
+                },
+                ToolCallInfo {
+                    name: "telegram_send".to_string(),
+                    has_result: true,
+                    has_error: false,
+                    call_id: None,
+                    result_preview: Some("message_id=42".to_string()),
+                    result: Some("{\"message_id\":42}".to_string()),
+                    error: None,
+                    rationale: None,
+                },
+            ],
+            generated_images: Vec::new(),
+            narrative: None,
+        }];
+
+        let reconciled = reconcile_in_progress_with_turns(
+            &mut turns,
+            Some(InProgressInfo {
+                turn_number: 1,
+                user_message_id: Some(user_message_id),
+                state: "Processing".to_string(),
+                user_input: "send 'hi' to telegram".to_string(),
+                started_at,
+            }),
+        );
+
+        assert!(
+            reconciled.is_none(),
+            "a turn whose trailing tool call succeeded after an earlier \
+             error represents a recovery and must clear in-progress state"
+        );
+        assert_eq!(turns[0].state, "Completed");
     }
 
     #[test]
@@ -1871,7 +2141,7 @@ mod tests {
 
     #[cfg(feature = "libsql")]
     #[tokio::test]
-    async fn test_chat_threads_handler_hides_engine_threads_from_sidebar() {
+    async fn test_chat_threads_handler_hides_engine_threads_and_keeps_conversation_titles() {
         let _lock = crate::bridge::test_support::ENGINE_STATE_TEST_LOCK
             .lock()
             .await;
@@ -1879,22 +2149,42 @@ mod tests {
 
         let project_id =
             crate::bridge::test_support::install_engine_state_with_threads(Vec::new()).await;
-        let mut thread = t3claw_engine::Thread::new(
+
+        let mut foreground_thread = t3claw_engine::Thread::new(
             "assistant hello",
             t3claw_engine::ThreadType::Foreground,
             project_id,
             "alice",
             t3claw_engine::ThreadConfig::default(),
         );
-        thread
+        foreground_thread
             .messages
             .push(t3claw_engine::ThreadMessage::user("hello"));
-        let engine_thread_id = thread.id.0;
-        crate::bridge::test_support::install_engine_state_with_threads(vec![thread]).await;
+        let foreground_thread_id = foreground_thread.id.0;
+
+        crate::bridge::test_support::install_engine_state_with_threads(vec![foreground_thread])
+            .await;
 
         let (db, _tmp) = crate::testing::test_db().await;
+        let assistant_id = db
+            .get_or_create_assistant_conversation("alice", "gateway")
+            .await
+            .expect("assistant conversation");
+        db.add_conversation_message(assistant_id, "user", "first assistant ask")
+            .await
+            .expect("seed assistant conversation");
+
+        let channel_thread_id = db
+            .create_conversation("telegram", "alice", None)
+            .await
+            .expect("create telegram conversation");
+        db.add_conversation_message(channel_thread_id, "user", "ping")
+            .await
+            .expect("seed telegram conversation");
+
         let session_manager = Arc::new(SessionManager::new());
-        let state = test_gateway_state_with_store_and_session_manager(db, session_manager);
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
 
         let response = chat_threads_handler(
             axum::extract::State(state),
@@ -1907,20 +2197,35 @@ mod tests {
         .await
         .expect("handler ok");
 
-        assert!(response.assistant_thread.is_some());
+        assert_eq!(
+            response
+                .assistant_thread
+                .as_ref()
+                .and_then(|thread| thread.title.as_deref()),
+            Some("first assistant ask"),
+            "assistant conversation should carry the first user message as its title"
+        );
+        assert!(
+            response.threads.iter().any(|thread| {
+                thread.id == channel_thread_id
+                    && thread.channel.as_deref() == Some("telegram")
+                    && thread.title.as_deref() == Some("ping")
+            }),
+            "chat sidebar must keep persisted channel conversations"
+        );
         assert!(
             response
                 .threads
                 .iter()
-                .all(|thread| thread.id != engine_thread_id),
-            "chat sidebar must not surface engine execution threads"
+                .all(|thread| thread.id != foreground_thread_id),
+            "chat sidebar must not surface separate engine execution threads"
         );
         assert!(
             response
                 .threads
                 .iter()
                 .all(|thread| thread.channel.as_deref() != Some("engine")),
-            "chat sidebar must stay scoped to chat conversations"
+            "chat sidebar rows should stay conversation-based rather than engine-thread-based"
         );
 
         crate::bridge::test_support::clear_engine_state().await;
@@ -2411,7 +2716,7 @@ mod tests {
 
     fn test_auth_manager(
         tool_registry: Option<Arc<ToolRegistry>>,
-    ) -> Arc<crate::bridge::auth_manager::AuthManager> {
+    ) -> Arc<crate::auth::extension::AuthManager> {
         let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
             Arc::new(crate::secrets::InMemorySecretsStore::new(Arc::new(
                 crate::secrets::SecretsCrypto::new(secrecy::SecretString::from(
@@ -2419,7 +2724,7 @@ mod tests {
                 ))
                 .expect("crypto"),
             )));
-        Arc::new(crate::bridge::auth_manager::AuthManager::new(
+        Arc::new(crate::auth::extension::AuthManager::new(
             secrets,
             None,
             None,
@@ -2455,13 +2760,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pending_gate_extension_name_uses_install_parameters_for_hyphenated_activate_tool() {
+    async fn pending_gate_extension_name_uses_install_parameters_for_hyphenated_install_tool() {
         let state = test_gateway_state(None);
 
         let extension_name = pending_gate_extension_name(
             &state,
             "test-user",
-            "tool-activate",
+            "tool-install",
             r#"{"name":"telegram"}"#,
             &t3claw_engine::ResumeKind::Authentication {
                 credential_name: t3claw_common::CredentialName::from_trusted(

@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use tokio::sync::Mutex;
 
 use t3claw::error::LlmError;
-use t3claw::llm::{
+use t3claw_llm::{
     CompletionRequest, CompletionResponse, LlmProvider, ModelMetadata, ToolCompletionRequest,
     ToolCompletionResponse,
 };

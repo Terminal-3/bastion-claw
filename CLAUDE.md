@@ -26,7 +26,7 @@ E2E tests: see `tests/e2e/CLAUDE.md`.
 - Comments for non-obvious logic only
 - **Prompt templates live in files, not Rust code**: Multi-line prompt strings (mission goals, system prompts, CodeAct preambles) go in `crates/t3claw_engine/prompts/*.md` and are loaded via `include_str!()`. Never inline large prompt templates as Rust string constants — they're hard to read, review, and iterate on. Single-line format strings are fine inline.
 - **Logging levels matter for REPL/TUI**: `info!` and `warn!` output appears in the REPL and corrupts the terminal UI. Use `debug!` for internal diagnostics (trace analysis, reflection results, engine internals). Reserve `info!` for user-facing status that the REPL intentionally renders. Background tasks (reflection, trace analysis) must NEVER use `info!` — it breaks the interactive display.
-- **Test through the caller, not just the helper**: When a predicate/classifier/transform helper gates a side effect (HTTP, DB write, OAuth, UI mutation, tool execution) and has any wrapper or computed input between it and that side effect, a unit test on the helper alone is _not_ sufficient regression coverage. Add a test that drives the call site — typically a `*_handler`, `factory::create_*`, or `manager::*` — at the integration tier (`cargo test --features integration`) or higher. The same applies to test mocks: if you mock a multi-arg runtime API like `window.open(url, target, features)`, the mock must capture every argument the production caller passes. See `.claude/rules/testing.md` ("Test Through the Caller, Not Just the Helper") for the full rule and the bug examples that motivated it.
+- **Test through the caller, not just the helper**: When a predicate/classifier/transform helper gates a side effect (HTTP, DB write, OAuth, UI mutation, tool execution) and has any wrapper or computed input between it and that side effect, a unit test on the helper alone is *not* sufficient regression coverage. Add a test that drives the call site — typically a `*_handler`, `factory::create_*`, or `manager::*` — at the integration tier (`cargo test --features integration`) or higher. The same applies to test mocks: if you mock a multi-arg runtime API like `window.open(url, target, features)`, the mock must capture every argument the production caller passes. See `.claude/rules/testing.md` ("Test Through the Caller, Not Just the Helper") for the full rule and the bug examples that motivated it.
 
 ## Architecture
 
@@ -78,13 +78,14 @@ All I/O is async with tokio. Use `Arc<T>` for shared state, `RwLock` for concurr
 
 ## Extracted Crates
 
-Safety logic lives in `crates/t3claw_safety/`, skills in `crates/t3claw_skills/`. **Import directly from the extracted crate** (e.g. `use t3claw_safety::SafetyLayer`, `use t3claw_skills::SkillRegistry`). Do not use `crate::safety::` or `crate::skills::` for types that originate in extracted crates — `src/safety/mod.rs` and `src/skills/mod.rs` no longer glob-re-export. Local items defined in those modules (e.g. `crate::skills::attenuate_tools`) are fine.
+Safety logic lives in `crates/t3claw_safety/`, skills in `crates/t3claw_skills/`, multi-provider LLM integration in `crates/t3claw_llm/`. **Import directly from the extracted crate** (e.g. `use t3claw_safety::SafetyLayer`, `use t3claw_skills::SkillRegistry`, `use t3claw_llm::{LlmProvider, LlmError}`). Do not use `crate::safety::`, `crate::skills::`, or `crate::llm::` for types that originate in extracted crates — `src/llm/` was deleted in the LLM extraction, and `src/safety/mod.rs` / `src/skills/mod.rs` no longer glob-re-export. Local items defined in those modules (e.g. `crate::skills::attenuate_tools`) are fine. The `crate::error::LlmError` alias and `crate::config::*Config` re-exports are kept as a thin convenience: they forward to `t3claw_llm::*` so existing call sites compile, but new code should import from the extracted crate.
 
 ## Project Structure
 
 ```
 crates/
-└── t3claw_safety/    # Extracted: prompt injection, validation, leak detection, policy
+├── t3claw_safety/    # Extracted: prompt injection, validation, leak detection, policy
+└── t3claw_llm/       # Extracted: multi-provider LLM integration (rig-core, OpenAI, Anthropic, NEAR AI, Bedrock, …)
 
 src/
 ├── lib.rs              # Library root, module declarations
@@ -156,7 +157,7 @@ src/
 │
 ├── safety/             # Re-export shim for crates/t3claw_safety (see Extracted Crates)
 │
-├── llm/                # Multi-provider LLM integration — see src/llm/CLAUDE.md
+├── (llm/  was extracted to crates/t3claw_llm/ — see Extracted Crates)
 │
 ├── tools/              # Extensible tool system
 │   ├── tool.rs         # Tool trait, ToolOutput, ToolError
@@ -225,17 +226,19 @@ When modifying a module with a spec, read the spec first. Code follows spec; spe
 
 **Module-owned initialization:** Module-specific initialization logic (database connection, transport creation, channel setup) must live in the owning module as a public factory function — not in `main.rs` or `app.rs`. These entry-point files orchestrate calls to module factories. Feature-flag branching (`#[cfg(feature = ...)]`) must be confined to the module that owns the abstraction.
 
-| Module                       | Spec                                  |
-| ---------------------------- | ------------------------------------- |
-| `src/agent/`                 | `src/agent/CLAUDE.md`                 |
-| `src/channels/web/`          | `src/channels/web/CLAUDE.md`          |
-| `src/db/`                    | `src/db/CLAUDE.md`                    |
-| `src/llm/`                   | `src/llm/CLAUDE.md`                   |
-| `src/setup/`                 | `src/setup/README.md`                 |
-| `src/tools/`                 | `src/tools/README.md`                 |
-| `src/workspace/`             | `src/workspace/README.md`             |
+| Module | Spec |
+|--------|------|
+| `src/agent/` | `src/agent/CLAUDE.md` |
+| `src/channels/web/` | `src/channels/web/CLAUDE.md` |
+| `src/db/` | `src/db/CLAUDE.md` |
+| `crates/t3claw_llm/` | `crates/t3claw_llm/CLAUDE.md` |
+| `crates/t3claw_embeddings/` | `crates/t3claw_embeddings/AGENTS.md` |
+| `src/setup/` | `src/setup/README.md` |
+| `src/tools/` | `src/tools/README.md` |
+| `src/workspace/` | `src/workspace/README.md` |
 | `crates/t3claw_engine/` | `crates/t3claw_engine/CLAUDE.md` |
-| `tests/e2e/`                 | `tests/e2e/CLAUDE.md`                 |
+| `crates/t3claw_reborn_webui_ingress/` | `crates/t3claw_reborn_webui_ingress/CLAUDE.md` |
+| `tests/e2e/` | `tests/e2e/CLAUDE.md` |
 
 ## Job State Machine
 
@@ -256,7 +259,7 @@ SKILL.md files extend the agent's prompt with domain-specific instructions. See 
 
 ## Configuration
 
-See `.env.example` for all environment variables. LLM backends (`openai`, `anthropic`, `ollama`, `openai_compatible`, `tinfoil`, `bedrock`) documented in `src/llm/CLAUDE.md`.
+See `.env.example` for all environment variables. LLM backends (`nearai`, `openai`, `anthropic`, `ollama`, `openai_compatible`, `tinfoil`, `bedrock`) documented in `crates/t3claw_llm/CLAUDE.md`.
 
 ## Pinning the trinity tool surface
 

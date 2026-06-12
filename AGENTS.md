@@ -9,7 +9,7 @@ Start with these deeper docs as needed:
 - `src/agent/CLAUDE.md`
 - `src/channels/web/CLAUDE.md`
 - `src/db/CLAUDE.md`
-- `src/llm/CLAUDE.md`
+- `crates/t3claw_llm/CLAUDE.md`
 - `src/setup/README.md`
 - `src/tools/README.md`
 - `src/workspace/README.md`
@@ -29,7 +29,7 @@ Start with these deeper docs as needed:
 - Web gateway/API/SSE/WebSocket: `src/channels/web/`
 - Persistence and DB abstractions: `src/db/`
 - Setup/onboarding/configuration flow: `src/setup/`
-- LLM providers and routing: `src/llm/`
+- LLM providers and routing: `crates/t3claw_llm/`
 - Workspace, memory, embeddings, search: `src/workspace/`
 - Extensions, tools, channels, MCP, WASM: `src/extensions/`, `src/tools/`, `src/channels/`
 
@@ -39,6 +39,8 @@ Start with these deeper docs as needed:
 - Module-specific initialization should live in the owning module behind a public factory/helper, not be reimplemented ad hoc.
 - Keep feature-flag branching inside the module that owns the abstraction whenever possible.
 - Prefer extending existing traits and registries over hardcoding one-off integration paths.
+- Subagent spawn creates and wires child runs only. It must not implement a second agent loop: child planning, execution, capability calls, checkpointing, gates, retries, and completion must go through the existing Reborn runner/driver/executor path.
+- Host-trusted trigger ingress is sealed by trigger-worker-owned request minting plus private conversation-owned trusted inbound construction. Product adapters, product workflow, first-party capabilities, and host-runtime handlers must use untrusted inbound requests and must not mint `TrustedInboundTurnRequest` or call trusted trigger submitter factories.
 
 ## Repo-Wide Coding Rules
 

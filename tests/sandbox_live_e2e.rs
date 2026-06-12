@@ -96,7 +96,7 @@ mod sandbox_e2e_tests {
                  colima, or set DOCKER_HOST to a running daemon."
             );
         }
-        let image = std::env::var("IRONCLAW_SANDBOX_IMAGE")
+        let image = std::env::var("T3CLAW_SANDBOX_IMAGE")
             .unwrap_or_else(|_| "t3claw/sandbox:dev".to_string());
         if !sandbox_image_present(&image).await {
             skip!(

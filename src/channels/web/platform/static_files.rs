@@ -185,7 +185,7 @@ async fn compute_frontend_cache_key(workspace: &crate::workspace::Workspace) -> 
 /// `/api/frontend/layout`, which is authenticated and routes through
 /// `resolve_workspace(&state, &user)` so it returns the right workspace.
 /// See `crates/t3claw_gateway/static/js/core/widgets.js` — the
-/// layout-config IIFE already reads `window.__IRONCLAW_LAYOUT__`, which
+/// layout-config IIFE already reads `window.__T3CLAW_LAYOUT__`, which
 /// a future change can populate from a `fetch('/api/frontend/layout')`
 /// after auth.
 ///
@@ -516,14 +516,14 @@ pub(crate) async fn load_resolved_widgets(
 /// assembled HTML embeds widget JavaScript inline (so a CSP-protected
 /// `<script src>` doesn't need to authenticate against `/api/frontend/widget/...`).
 /// A widget author has every right to write the literal string
-/// `__IRONCLAW_CSP_NONCE__` inside their own source — in a comment, a log
+/// `__T3CLAW_CSP_NONCE__` inside their own source — in a comment, a log
 /// line, a test fixture, or just as a constant they happen to define. A
 /// naive `html.replace(NONCE_PLACEHOLDER, nonce)` would silently rewrite
 /// every such occurrence into a per-request nonce, mutating widget code
 /// in a way the author didn't ask for.
 ///
 /// The substitution here targets the full attribute form
-/// `nonce="__IRONCLAW_CSP_NONCE__"`, which is the exact shape
+/// `nonce="__T3CLAW_CSP_NONCE__"`, which is the exact shape
 /// `assemble_index` emits when stamping nonces onto `<script>` tags. The
 /// double-quoted sentinel is unambiguous in HTML context — it can never
 /// accidentally match free text in a JS module body, a comment, or a
@@ -954,7 +954,7 @@ async fn serve_project_file(project_id: &str, path: &str) -> axum::response::Res
 // Tests for these helpers live alongside the route-level handler tests in
 // `src/channels/web/server.rs` (for now), where the full `GatewayState`
 // fixture is already in scope. They will migrate here once `server.rs` is
-// further trimmed in the next ironclaw#ironclaw#2599 increment.
+// further trimmed in the next t3claw#2599 increment.
 
 #[cfg(test)]
 mod tests {
@@ -1211,7 +1211,7 @@ mod tests {
         use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
         use crate::db::Database as _;
         use crate::db::libsql::LibSqlBackend;
-        use crate::workspace::EmbeddingCacheConfig;
+        use t3claw_embeddings::EmbeddingCacheConfig;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("multi_tenant_css.db"))
@@ -1312,7 +1312,7 @@ mod tests {
         // Regression for the PR #1725 Copilot finding: a bare-string
         // replace would also rewrite any *body content* that happens to
         // contain the literal sentinel — e.g. a widget JS module that
-        // mentions `__IRONCLAW_CSP_NONCE__` in a comment, log line, or
+        // mentions `__T3CLAW_CSP_NONCE__` in a comment, log line, or
         // string constant. The attribute-targeted replace must leave
         // those untouched.
         //
@@ -1360,7 +1360,7 @@ mod tests {
         use crate::config::{WorkspaceConfig, WorkspaceSearchConfig};
         use crate::db::Database as _;
         use crate::db::libsql::LibSqlBackend;
-        use crate::workspace::EmbeddingCacheConfig;
+        use t3claw_embeddings::EmbeddingCacheConfig;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let backend = LibSqlBackend::new_local(&dir.path().join("multi_tenant_index.db"))

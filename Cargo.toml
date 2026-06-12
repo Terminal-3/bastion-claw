@@ -1,10 +1,13 @@
 [workspace]
-members = [".", "crates/t3claw_common", "crates/t3claw_safety", "crates/t3claw_skills", "crates/t3claw_engine", "crates/t3claw_gateway", "crates/t3claw_tui"]
+members = [".", "crates/t3claw_common", "crates/t3claw_host_api", "crates/t3claw_filesystem", "crates/t3claw_memory", "crates/t3claw_events", "crates/t3claw_event_projections", "crates/t3claw_event_streams", "crates/t3claw_reborn_event_store", "crates/t3claw_extensions", "crates/t3claw_processes", "crates/t3claw_dispatcher", "crates/t3claw_scripts", "crates/t3claw_process_sandbox", "crates/t3claw_mcp", "crates/t3claw_wasm", "crates/t3claw_wasm_sandbox_core", "crates/t3claw_wasm_limiter", "crates/t3claw_capabilities", "crates/t3claw_secrets", "crates/t3claw_network", "crates/t3claw_host_runtime", "crates/t3claw_runtime_policy", "crates/t3claw_authorization", "crates/t3claw_run_state", "crates/t3claw_approvals", "crates/t3claw_resources", "crates/t3claw_auth", "crates/t3claw_trust", "crates/t3claw_turns", "crates/t3claw_agent_loop", "crates/t3claw_threads", "crates/t3claw_prompt_envelope", "crates/t3claw_hooks", "crates/t3claw_hooks_postgres", "crates/t3claw_hooks_libsql", "crates/t3claw_hooks_parity", "crates/t3claw_loop_support", "crates/t3claw_reborn", "crates/t3claw_reborn_config", "crates/t3claw_reborn_composition", "crates/t3claw_reborn_identity", "crates/t3claw_first_party_extensions", "crates/t3claw_reborn_cli", "crates/t3claw_reborn_traces", "crates/t3claw_reborn_webui_ingress", "crates/t3claw_reborn_openai_compat", "crates/t3claw_reborn_openai_compat_storage", "crates/t3claw_conversations", "crates/t3claw_product_adapters", "crates/t3claw_product_workflow", "crates/t3claw_product_workflow_storage", "crates/t3claw_product_adapter_registry", "crates/t3claw_wasm_product_adapters", "crates/t3claw_telegram_v2_adapter", "crates/t3claw_slack_v2_adapter", "crates/t3claw_outbound", "crates/t3claw_triggers", "crates/t3claw_architecture", "crates/t3claw_safety", "crates/t3claw_skills", "crates/t3claw_oauth", "crates/t3claw_llm", "crates/t3claw_embeddings", "crates/t3claw_engine", "crates/t3claw_gateway", "crates/t3claw_tui", "crates/t3claw_webui_v2", "crates/t3claw_webui_v2_static"]
 exclude = [
     "channels-src/discord",
+    "channels-src/feishu",
     "channels-src/telegram",
     "channels-src/slack",
+    "channels-src/wechat",
     "channels-src/whatsapp",
+    "crates/t3claw_silk_decoder",
     "tools-src/composio",
     "tools-src/github",
     "tools-src/gmail",
@@ -19,9 +22,25 @@ exclude = [
     "crates/t3claw_safety/fuzz",
 ]
 
+# Maintainability guardrails against dead/speculative public API
+# (the "Theme 1" anti-pattern from the maintainability audit: accessors,
+# `_dyn` variants, and getters with zero callers that needlessly expand the
+# stable surface). These are `warn`, not `deny`, and are *opted into*
+# per-crate via `[lints] workspace = true` so they do not flood the build
+# with pre-existing noise across the whole workspace. Currently scoped to the
+# hook/reborn crates.
+#
+# - `unreachable_pub`: flags `pub` items that are not reachable outside their
+#   crate — the classic "this should be `pub(crate)`" smell.
+# - `dead_code`: warn on never-used items (this is the rustc default, declared
+#   here so it survives any future `#![allow(dead_code)]` creep at the crate root).
+[workspace.lints.rust]
+unreachable_pub = "warn"
+dead_code = "warn"
+
 [package]
 name = "t3claw"
-version = "0.26.0"
+version = "0.29.1"
 edition = "2024"
 rust-version = "1.92"
 description = "Secure personal AI assistant that protects your data and expands its capabilities on the fly"
@@ -113,13 +132,23 @@ cron = "0.13"
 jsonschema = { version = "0.45", default-features = false }
 
 # Shared types
-t3claw_common = { path = "crates/t3claw_common", version = "0.3.0" }
+t3claw_common = { path = "crates/t3claw_common", version = "0.4.2" }
+t3claw_host_api = { path = "crates/t3claw_host_api", version = "0.1.0" }
+t3claw_loop_support = { path = "crates/t3claw_loop_support", version = "0.1.0" }
+t3claw_memory = { path = "crates/t3claw_memory", version = "0.1.0" }
+t3claw_resources = { path = "crates/t3claw_resources", version = "0.1.0" }
+t3claw_runtime_policy = { path = "crates/t3claw_runtime_policy", version = "0.1.0" }
+t3claw_turns = { path = "crates/t3claw_turns", version = "0.1.0" }
 
 # Safety/sanitization
 t3claw_engine = { path = "crates/t3claw_engine", version = "0.1.0" }
 t3claw_gateway = { path = "crates/t3claw_gateway", version = "0.1.0" }
-t3claw_safety = { path = "crates/t3claw_safety", version = "0.2.1" }
-t3claw_skills = { path = "crates/t3claw_skills", version = "0.2.0" }
+t3claw_llm = { path = "crates/t3claw_llm", version = "0.1.0" }
+t3claw_embeddings = { path = "crates/t3claw_embeddings", version = "0.1.0" }
+t3claw_oauth = { path = "crates/t3claw_oauth", version = "0.1.0" }
+t3claw_reborn_traces = { path = "crates/t3claw_reborn_traces", version = "0.1.0" }
+t3claw_safety = { path = "crates/t3claw_safety", version = "0.2.2" }
+t3claw_skills = { path = "crates/t3claw_skills", version = "0.3.0" }
 t3claw_tui = { path = "crates/t3claw_tui", optional = true, version = "0.1.0" }
 regex = "1"
 aho-corasick = "1"
@@ -150,14 +179,19 @@ open = "5"
 pgvector = { version = "0.4", features = ["postgres"], optional = true }
 
 # WASM sandbox for untrusted tool execution
-wasmtime = { version = "43.0.1", features = ["component-model"] }
-wasmtime-wasi = "43.0.1"  # WASI support for component model
-wasmparser = "0.245.1"  # WASM binary parsing for validation
+# Pinned to 44.0.2: minimum patch that contains the fix for
+# RUSTSEC-2026-0149 (path_open(TRUNCATE) bypassing FilePerms::WRITE
+# host restriction). 43.x is end-of-life for this advisory.
+wasmtime = { version = "44.0.2", features = ["component-model"] }
+wasmtime-wasi = "44.0.2"  # WASI support for component model
+wasmparser = "0.246.2"  # WASM binary parsing for validation
 
 # Cryptography for secrets management
+aes = "0.8"
 aes-gcm = "0.10"
 hkdf = "0.12"
 hmac = "0.12"
+md-5 = "0.10"
 sha2 = "0.10"
 blake3 = "1"
 rand = "0.8"
@@ -166,10 +200,9 @@ subtle = "2"  # Constant-time comparisons for token validation
 # Multi-provider LLM support
 rig-core = { version = "0.30", default-features = false, features = ["reqwest-rustls"] }
 
-# AWS Bedrock (native Converse API, opt-in via --features bedrock)
-aws-config = { version = "1", features = ["behavior-version-latest"], optional = true }
-aws-sdk-bedrockruntime = { version = "1", optional = true }
-aws-smithy-types = { version = "1", optional = true }
+# AWS Bedrock: deps now live in `t3claw_llm` (LLM provider) and
+# `t3claw_embeddings` (Titan embeddings); the top-level `bedrock` feature
+# (below) re-exposes both via crate-feature forwarding.
 
 # Docker sandbox
 bollard = "0.18"
@@ -227,6 +260,29 @@ testcontainers-modules = { version = "0.11", features = ["postgres"] }
 pretty_assertions = "1"
 tempfile = "3"
 insta = { version = "1.46.3", features = ["yaml"] }
+# Pull the LLM crate's `testing` feature in only for tests so `StubLlm` and
+# fault-injection helpers don't ship in release binaries.
+t3claw_llm = { path = "crates/t3claw_llm", version = "0.1.0", features = ["testing"] }
+t3claw_approvals = { path = "crates/t3claw_approvals", version = "0.1.0" }
+t3claw_authorization = { path = "crates/t3claw_authorization", version = "0.1.0" }
+t3claw_extensions = { path = "crates/t3claw_extensions", version = "0.1.0" }
+t3claw_filesystem = { path = "crates/t3claw_filesystem", version = "0.1.0" }
+t3claw_host_runtime = { path = "crates/t3claw_host_runtime", version = "0.1.0" }
+t3claw_network = { path = "crates/t3claw_network", version = "0.1.0" }
+t3claw_processes = { path = "crates/t3claw_processes", version = "0.1.0" }
+t3claw_resources = { path = "crates/t3claw_resources", version = "0.1.0" }
+t3claw_secrets = { path = "crates/t3claw_secrets", version = "0.1.0" }
+t3claw_product_adapters = { path = "crates/t3claw_product_adapters", version = "0.1.0", features = ["test-support"] }
+t3claw_product_workflow = { path = "crates/t3claw_product_workflow", version = "0.1.0", features = ["test-support"] }
+t3claw_reborn = { path = "crates/t3claw_reborn", version = "0.1.0" }
+t3claw_reborn_composition = { path = "crates/t3claw_reborn_composition", version = "0.1.0", features = ["test-support"] }
+t3claw_run_state = { path = "crates/t3claw_run_state", version = "0.1.0" }
+t3claw_threads = { path = "crates/t3claw_threads", version = "0.1.0" }
+t3claw_triggers = { path = "crates/t3claw_triggers", version = "0.1.0" }
+t3claw_trust = { path = "crates/t3claw_trust", version = "0.1.0" }
+t3claw_wasm = { path = "crates/t3claw_wasm", version = "0.1.0" }
+# Same idea for embeddings: `MockEmbeddings` is only reachable in dev builds.
+t3claw_embeddings = { path = "crates/t3claw_embeddings", version = "0.1.0", features = ["testing"] }
 
 [features]
 default = ["postgres", "libsql", "html-to-markdown", "tui"]
@@ -251,9 +307,32 @@ integration = []
 # test rig can spin up its embedded database.
 replay = ["libsql"]
 html-to-markdown = ["dep:html-to-markdown-rs", "dep:readabilityrs"]
-bedrock = ["dep:aws-config", "dep:aws-sdk-bedrockruntime", "dep:aws-smithy-types"]
+bedrock = ["t3claw_llm/bedrock", "t3claw_embeddings/bedrock"]
 tui = ["dep:t3claw_tui"]
 import = ["dep:json5", "libsql"]
+# Conditional gate for memory-substrate regression tests that anticipate
+# specific guards: `ensure_path_matches_context`/`ensure_scope_matches_context`
+# fail-closed checks, deterministic tie-breaking by path ascending,
+# `.system/engine/orchestrator/*` protected-path registration, and
+# min_score-after-normalization. #3180 as merged delivers the substrate
+# skeleton but NOT these specific behaviors — the followup PR(s) that
+# implement them must enable this feature in their merge commit so the
+# gated tests fire in CI. Mirrors the same-named feature on
+# `t3claw_memory`.
+#
+# Empirical note (2026-05-12): enabling `pr3180-ready` on the current
+# `reborn-integration` HEAD surfaces 7 gated tests as failing, because
+# the anticipated APIs do not exist in the merged substrate yet. Do not
+# enable in CI until the followup landings.
+pr3180-ready = []
+# Conditional gate for caller-tier (tool-dispatcher → substrate) tests.
+# Distinct from `pr3180-ready` because the substrate-level guards and
+# the tool-routing migration are separate landings: PR 7 routes
+# `memory_write` through `t3claw_memory`'s `PromptWriteSafetyPolicy`,
+# so until PR 7 lands, tool-layer rejection tests run against the
+# legacy host-workspace path which doesn't consult the substrate.
+# PR 7 must enable this feature in its merge commit.
+pr7-ready = []
 
 [[test]]
 name = "e2e_thread_scheduling"
@@ -274,7 +353,7 @@ lto = "thin"
 # Config for 'dist'
 [workspace.metadata.dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.30.3"
+cargo-dist-version = "0.31.0"
 # Ignore out-of-date generated CI so custom release.yml jobs are allowed
 allow-dirty = ["ci"]
 # CI backends to support

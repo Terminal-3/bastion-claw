@@ -89,7 +89,8 @@ def _write_skill(skills_dir, mock_api_host):
         f.write(f"""---
 name: github
 version: "1.0.0"
-keywords: [github, issues]
+activation:
+  keywords: [github, issues]
 credentials:
   - name: github_token
     provider: github
@@ -140,7 +141,7 @@ async def cancel_server(t3claw_binary, mock_llm_server, cancel_mock_api):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
@@ -152,12 +153,14 @@ async def cancel_server(t3claw_binary, mock_llm_server, cancel_mock_api):
         "GATEWAY_PORT": str(gw_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": "e2e-cancel-tester",
-        "IRONCLAW_OWNER_ID": "e2e-cancel-tester",
+        "T3CLAW_OWNER_ID": "e2e-cancel-tester",
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
         "LLM_BACKEND": "openai_compatible",
         "LLM_BASE_URL": mock_llm_server,
+        # Dummy key: mock LLM ignores it, but openai_compatible config requires auth.
+        "LLM_API_KEY": "mock-api-key",
         "LLM_MODEL": "mock-model",
         "DATABASE_BACKEND": "libsql",
         "LIBSQL_PATH": os.path.join(_CANCEL_DB_TMPDIR.name, "cancel-e2e.db"),

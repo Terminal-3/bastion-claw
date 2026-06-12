@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
+use t3claw_llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
 
 #[derive(Debug)]
 pub struct CompositeHttpInterceptor {

@@ -19,7 +19,7 @@ mod tests {
     use t3claw::config::Config;
     use t3claw::db::{Database, libsql::LibSqlBackend};
     use t3claw::error::ChannelError;
-    use t3claw::llm::{LlmProvider, SessionConfig, SessionManager};
+    use t3claw_llm::{LlmProvider, SessionConfig, SessionManager};
     use tokio::sync::{Mutex, mpsc};
     use tokio_stream::wrappers::ReceiverStream;
 
@@ -204,6 +204,7 @@ mod tests {
             builder: None,
             llm_backend: "nearai".to_string(),
             tenant_rates: std::sync::Arc::new(t3claw::tenant::TenantRateRegistry::new(4, 3)),
+            runtime_policy: None,
         };
 
         let gateway = Arc::new(TestChannel::new());

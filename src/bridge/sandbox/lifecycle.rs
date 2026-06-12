@@ -19,7 +19,7 @@ use bollard::models::{HostConfig, Mount, MountTypeEnum};
 use t3claw_engine::{MountError, ProjectId};
 use tracing::{debug, warn};
 
-/// Default image. Override with `IRONCLAW_SANDBOX_IMAGE`.
+/// Default image. Override with `T3CLAW_SANDBOX_IMAGE`.
 pub const DEFAULT_IMAGE: &str = "t3claw/sandbox:dev";
 
 /// Stop timeout in seconds before SIGKILL.
@@ -28,7 +28,7 @@ const STOP_TIMEOUT_SECS: i64 = 10;
 
 /// Resolve the configured sandbox image, falling back to the default.
 pub fn sandbox_image() -> String {
-    std::env::var("IRONCLAW_SANDBOX_IMAGE").unwrap_or_else(|_| DEFAULT_IMAGE.to_string())
+    std::env::var("T3CLAW_SANDBOX_IMAGE").unwrap_or_else(|_| DEFAULT_IMAGE.to_string())
 }
 
 /// Build the deterministic container name for a project.

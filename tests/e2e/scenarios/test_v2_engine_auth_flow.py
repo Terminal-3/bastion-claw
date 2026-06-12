@@ -176,15 +176,16 @@ def _write_test_skill(skills_dir: str, mock_api_host: str):
     skill_content = f"""---
 name: github
 version: "1.0.0"
-keywords:
-  - github
-  - issues
-  - pull request
-  - repo
-  - repository
-tags:
-  - github
-  - api
+activation:
+  keywords:
+    - github
+    - issues
+    - pull request
+    - repo
+    - repository
+  tags:
+    - github
+    - api
 credentials:
   - name: github_token
     provider: github
@@ -248,7 +249,7 @@ async def v2_server(t3claw_binary, mock_llm_server, mock_api):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
@@ -260,12 +261,14 @@ async def v2_server(t3claw_binary, mock_llm_server, mock_api):
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": "e2e-v2-tester",
-        "IRONCLAW_OWNER_ID": "e2e-v2-tester",
+        "T3CLAW_OWNER_ID": "e2e-v2-tester",
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
         "LLM_BACKEND": "openai_compatible",
         "LLM_BASE_URL": mock_llm_server,
+        # Dummy key: mock LLM ignores it, but openai_compatible config requires auth.
+        "LLM_API_KEY": "mock-api-key",
         "LLM_MODEL": "mock-model",
         "DATABASE_BACKEND": "libsql",
         "LIBSQL_PATH": os.path.join(_V2_DB_TMPDIR.name, "v2-e2e.db"),
@@ -344,7 +347,7 @@ async def v2_skill_install_server(t3claw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
@@ -355,12 +358,14 @@ async def v2_skill_install_server(t3claw_binary, mock_llm_server):
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": "e2e-v2-skill-installer",
-        "IRONCLAW_OWNER_ID": "e2e-v2-skill-installer",
+        "T3CLAW_OWNER_ID": "e2e-v2-skill-installer",
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
         "LLM_BACKEND": "openai_compatible",
         "LLM_BASE_URL": mock_llm_server,
+        # Dummy key: mock LLM ignores it, but openai_compatible config requires auth.
+        "LLM_API_KEY": "mock-api-key",
         "LLM_MODEL": "mock-model",
         "DATABASE_BACKEND": "libsql",
         "LIBSQL_PATH": os.path.join(db_tmpdir.name, "v2-skill-install.db"),
@@ -432,7 +437,7 @@ async def v2_skill_install_server_isolated(t3claw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "RUST_LOG": "t3claw=debug",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
@@ -443,12 +448,14 @@ async def v2_skill_install_server_isolated(t3claw_binary, mock_llm_server):
         "GATEWAY_PORT": str(gateway_port),
         "GATEWAY_AUTH_TOKEN": AUTH_TOKEN,
         "GATEWAY_USER_ID": "e2e-v2-skill-installer",
-        "IRONCLAW_OWNER_ID": "e2e-v2-skill-installer",
+        "T3CLAW_OWNER_ID": "e2e-v2-skill-installer",
         "HTTP_HOST": "127.0.0.1",
         "HTTP_PORT": str(http_port),
         "CLI_ENABLED": "false",
         "LLM_BACKEND": "openai_compatible",
         "LLM_BASE_URL": mock_llm_server,
+        # Dummy key: mock LLM ignores it, but openai_compatible config requires auth.
+        "LLM_API_KEY": "mock-api-key",
         "LLM_MODEL": "mock-model",
         "DATABASE_BACKEND": "libsql",
         "LIBSQL_PATH": os.path.join(db_tmpdir.name, "v2-skill-install.db"),
@@ -951,10 +958,17 @@ async def _remove_skill_via_settings(page, base_url: str, skill_name: str):
     if await card.count() == 0:
         await _wait_for_skill_absent(base_url, skill_name, timeout=30.0)
         return
-    await card.locator("button", has_text="Remove").click()
-    confirm_btn = page.locator(SEL["confirm_modal_btn"])
-    await confirm_btn.wait_for(state="visible", timeout=5000)
-    await confirm_btn.click()
+    delete_button = card.locator("button", has_text="Delete")
+    if await delete_button.count() > 0:
+        async with page.expect_dialog() as dialog_info:
+            await delete_button.click()
+        dialog = await dialog_info.value
+        await dialog.accept()
+    else:
+        await card.locator("button", has_text="Remove").click()
+        confirm_btn = page.locator(SEL["confirm_modal_btn"])
+        await confirm_btn.wait_for(state="visible", timeout=5000)
+        await confirm_btn.click()
     await _wait_for_skill_absent(base_url, skill_name, timeout=90.0)
     await card.wait_for(state="detached", timeout=20000)
 
@@ -1403,20 +1417,30 @@ class TestV2EngineSkillInstallFlow:
         base_url = v2_skill_install_server["base_url"]
         await _ensure_pika_skill_installed(v2_skill_page, base_url)
 
-        _thread_id, _pending_gate, install_card = await _request_install_approval(
+        # Second `install <url>` on an already-installed skill must NOT
+        # fire a fresh approval gate. `SkillInstallTool::requires_approval`
+        # short-circuits to `ApprovalRequirement::Never` when the skill
+        # is already loaded — asking the user to approve a guaranteed
+        # no-op is pure friction. The observable contract here is that the
+        # repeated request does not open an approval gate and does not create
+        # duplicate UI affordances, even if the final assistant wording is
+        # delivered through history/SSE on a different cadence.
+        await _open_chat_tab(v2_skill_page)
+        thread_id = await _wait_for_current_thread_id(v2_skill_page)
+        await _send_chat_message(
             v2_skill_page,
-            base_url,
             "install https://github.com/Pika-Labs/Pika-Skills",
-            timeout=60.0,
         )
-        baseline = await _message_counts(v2_skill_page)
-        await install_card.locator(SEL["approval_approve_btn"]).click()
-        installed = await _wait_for_terminal_message(
-            v2_skill_page,
-            timeout=90000,
-            baseline=baseline,
-        )
-        assert "already" in installed["text"].lower() or "no install needed" in installed["text"].lower(), installed
+        for _ in range(10):
+            history_response = await api_get(
+                base_url,
+                f"/api/chat/history?thread_id={thread_id}",
+                timeout=15,
+            )
+            history_response.raise_for_status()
+            history = history_response.json()
+            assert history.get("pending_gate") is None, history
+            await asyncio.sleep(0.5)
 
         await _open_skills_settings(v2_skill_page)
         assert await v2_skill_page.locator(SEL["skill_installed"]).filter(

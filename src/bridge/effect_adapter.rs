@@ -8,28 +8,36 @@
 //! - Sensitive parameter redaction
 //! - Rate limiting (per-user, per-tool)
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
-
 use tokio::sync::RwLock;
 use tracing::debug;
 
+#[cfg(test)]
+use t3claw_engine::ModelToolSurface;
 use t3claw_engine::{
-    ActionDef, ActionResult, CapabilityLease, CapabilityRegistry, EffectExecutor, EngineError,
-    MountError, Store, ThreadExecutionContext, WorkspaceMounts,
+    ActionDef, ActionInventory, ActionResult, CapabilityLease, CapabilityRegistry,
+    CapabilitySummary, EffectExecutor, EngineError, MountError, Store, ThreadExecutionContext,
+    WorkspaceMounts,
 };
 use t3claw_skills::SkillRegistry;
 
+use crate::auth::extension::{AuthCheckResult, AuthManager, LatentActionExecution, ToolReadiness};
 use crate::auth::oauth::sanitize_auth_url;
-use crate::bridge::auth_manager::{AuthCheckResult, AuthManager};
+use crate::bridge::action_discovery::ActionDiscovery;
+use crate::bridge::action_projector::ActionProjector;
+use crate::bridge::capability_projector::CapabilityProjector;
 use crate::bridge::router::synthetic_action_call_id;
 use crate::bridge::sandbox::{InterceptOutcome, maybe_intercept};
+use crate::bridge::tool_permissions::{ToolPermissionResolution, ToolPermissionSnapshot};
 use crate::context::JobContext;
+use crate::extensions::InstalledExtension;
 use crate::hooks::{HookEvent, HookOutcome, HookRegistry};
-use crate::tools::permissions::{PermissionState, effective_permission};
+use crate::tools::ToolRegistry;
+use crate::tools::permissions::PermissionState;
 use crate::tools::rate_limiter::RateLimiter;
-use crate::tools::{ApprovalRequirement, ToolRegistry};
+use crate::tools::{ApprovalRequirement, Tool};
 use t3claw_safety::SafetyLayer;
 
 /// Wraps the existing tool pipeline to implement the engine's `EffectExecutor`.
@@ -58,7 +66,7 @@ pub struct EffectBridgeAdapter {
     /// outbound requests through the interceptor. Without this, engine v2 tool
     /// calls bypass the recorder entirely — recorded traces end up with zero
     /// `http_exchanges` and replay can't substitute responses.
-    http_interceptor: RwLock<Option<Arc<dyn crate::llm::recording::HttpInterceptor>>>,
+    http_interceptor: RwLock<Option<Arc<dyn t3claw_llm::recording::HttpInterceptor>>>,
     /// Engine v2 store used to mirror live-installed v1 skills into `DocType::Skill`.
     engine_store: RwLock<Option<Arc<dyn Store>>>,
     /// V1 skill registry used to load the just-installed skill for v2 sync.
@@ -75,6 +83,32 @@ pub struct EffectBridgeAdapter {
     /// capabilities like `missions` are registered here in `router.rs` and
     /// would otherwise be invisible to the LLM despite having active leases.
     capability_registry: RwLock<Option<Arc<CapabilityRegistry>>>,
+    /// Per-thread catalog of caller-supplied external tools (Responses
+    /// API). When set, `execute_action` short-circuits to a
+    /// `GatePaused { resume_kind: External { ext_tool: <call_id> } }`
+    /// for any action name in the catalog, and `available_actions`
+    /// merges the catalog into the LLM-visible action surface.
+    external_tool_catalog: RwLock<Option<Arc<crate::bridge::ExternalToolCatalog>>>,
+}
+
+struct ToolApprovalContext<'a> {
+    action_name: &'a str,
+    lookup_name: &'a str,
+    parameters: &'a serde_json::Value,
+    lease: &'a CapabilityLease,
+    context: &'a ThreadExecutionContext,
+    approval_already_granted: bool,
+}
+
+struct ToolInfoSnapshotContext<'a> {
+    action_name: &'a str,
+    canonical_action_name: &'a str,
+    lookup_name: &'a str,
+    parameters: &'a serde_json::Value,
+    lease: &'a CapabilityLease,
+    context: &'a ThreadExecutionContext,
+    approval_already_granted: bool,
+    started_at: &'a Instant,
 }
 
 impl EffectBridgeAdapter {
@@ -98,7 +132,40 @@ impl EffectBridgeAdapter {
             skill_registry: RwLock::new(None),
             workspace_mounts: RwLock::new(None),
             capability_registry: RwLock::new(None),
+            external_tool_catalog: RwLock::new(None),
         }
+    }
+
+    /// Install the per-thread external-tool catalog. Set once at bridge
+    /// init; the Responses API handler registers tools onto the same
+    /// catalog instance via its own `Arc` clone.
+    pub async fn set_external_tool_catalog(
+        &self,
+        catalog: Arc<crate::bridge::ExternalToolCatalog>,
+    ) {
+        *self.external_tool_catalog.write().await = Some(catalog);
+    }
+
+    /// Look up the catalog (if installed) for read-only use.
+    async fn external_tool_catalog(&self) -> Option<Arc<crate::bridge::ExternalToolCatalog>> {
+        self.external_tool_catalog.read().await.clone()
+    }
+
+    /// Resolve all catalog keys this `ThreadExecutionContext` may have
+    /// caller-supplied tools registered under. The engine `thread_id`
+    /// is the canonical key after the bridge's post-spawn `transfer`,
+    /// but the executor task can run before that transfer completes —
+    /// `conversation_scope` (stamped into thread metadata by the
+    /// bridge) is the original caller-side key the catalog was
+    /// registered under, used as a race-window fallback.
+    fn external_tool_catalog_keys(
+        context: &ThreadExecutionContext,
+    ) -> impl Iterator<Item = t3claw_engine::ThreadId> {
+        let scope = context
+            .conversation_scope
+            .filter(|uuid| *uuid != context.thread_id.0)
+            .map(t3claw_engine::ThreadId);
+        std::iter::once(context.thread_id).chain(scope)
     }
 
     /// Install a per-project workspace mount table on this adapter. When set,
@@ -125,7 +192,7 @@ impl EffectBridgeAdapter {
     /// interceptor, so http-aware tools will record/replay through it.
     pub async fn set_http_interceptor(
         &self,
-        interceptor: Arc<dyn crate::llm::recording::HttpInterceptor>,
+        interceptor: Arc<dyn t3claw_llm::recording::HttpInterceptor>,
     ) {
         *self.http_interceptor.write().await = Some(interceptor);
     }
@@ -166,6 +233,17 @@ impl EffectBridgeAdapter {
         &self.tools
     }
 
+    /// Access the underlying safety layer.
+    ///
+    /// The bridge router uses this to redact verbose-only observability
+    /// events (notably `CodeExecuted`) through the leak detector before
+    /// broadcasting them on SSE. The engine crate emits those events
+    /// raw because it has no dependency on `t3claw_safety`; the
+    /// scrubbing therefore happens at this adapter boundary.
+    pub fn safety(&self) -> &Arc<SafetyLayer> {
+        &self.safety
+    }
+
     /// Set the auth manager for pre-flight credential checks.
     pub async fn set_auth_manager(&self, mgr: Arc<AuthManager>) {
         *self.auth_manager.write().await = Some(mgr);
@@ -179,6 +257,248 @@ impl EffectBridgeAdapter {
     /// Get the mission manager if available.
     pub async fn mission_manager(&self) -> Option<Arc<t3claw_engine::MissionManager>> {
         self.mission_manager.read().await.clone()
+    }
+
+    /// Fetch the extension list as a `Vec`, using the short-lived cache when
+    /// available. Returns `Some(vec)` when an auth_manager is present, `None`
+    /// otherwise.
+    async fn fetch_extension_list(
+        &self,
+        auth_manager: Option<&AuthManager>,
+        context: &ThreadExecutionContext,
+    ) -> Option<Vec<InstalledExtension>> {
+        let auth_manager = auth_manager?;
+        let extensions = match auth_manager
+            .list_capability_extensions(&context.user_id)
+            .await
+        {
+            Ok(exts) => exts,
+            Err(error) => {
+                debug!(
+                    user_id = %context.user_id,
+                    error = %error,
+                    "failed to load extension inventory; returning empty list"
+                );
+                Vec::new()
+            }
+        };
+        Some(extensions)
+    }
+
+    /// Fetch the extension list as a `HashMap<name, InstalledExtension>`, using
+    /// the short-lived cache when available. Returns `Some(map)` when an
+    /// auth_manager is present, `None` otherwise.
+    async fn fetch_extension_map(
+        &self,
+        auth_manager: Option<&AuthManager>,
+        context: &ThreadExecutionContext,
+    ) -> Option<HashMap<String, InstalledExtension>> {
+        let extensions = self.fetch_extension_list(auth_manager, context).await?;
+        Some(
+            extensions
+                .into_iter()
+                .map(|ext| (ext.name.clone(), ext))
+                .collect(),
+        )
+    }
+
+    async fn resolved_user_permission_for_tool(
+        &self,
+        lookup_name: &str,
+        context: &ThreadExecutionContext,
+    ) -> ToolPermissionResolution {
+        ToolPermissionSnapshot::load(self.tools.as_ref(), &context.user_id)
+            .await
+            .resolve_permission(lookup_name)
+    }
+
+    fn ensure_tool_not_disabled(
+        action_name: &str,
+        user_permission: ToolPermissionResolution,
+    ) -> Result<(), EngineError> {
+        if matches!(user_permission.effective, PermissionState::Disabled) {
+            return Err(EngineError::LeaseDenied {
+                reason: format!("Tool '{}' is disabled for this user.", action_name),
+            });
+        }
+        Ok(())
+    }
+
+    async fn enforce_tool_permission(
+        &self,
+        approval: &ToolApprovalContext<'_>,
+        tool: &dyn Tool,
+        user_permission: ToolPermissionResolution,
+    ) -> Result<(), EngineError> {
+        match user_permission.effective {
+            PermissionState::Disabled => {
+                Self::ensure_tool_not_disabled(approval.action_name, user_permission)?
+            }
+            PermissionState::AlwaysAllow | PermissionState::AskEachTime => {}
+        }
+
+        if approval.approval_already_granted {
+            return Ok(());
+        }
+
+        let approval_requirement = tool.requires_approval(approval.parameters);
+        // `skill_install` is parameter-sensitive: duplicate installs are a
+        // guaranteed no-op and deliberately return `ApprovalRequirement::Never`.
+        // Preserve that v1 contract even though the tool's default permission is
+        // ask-each-time for real installs.
+        if matches!(approval.lookup_name, "skill_install" | "skill-install")
+            && matches!(approval_requirement, ApprovalRequirement::Never)
+        {
+            return Ok(());
+        }
+
+        if matches!(approval_requirement, ApprovalRequirement::Always) {
+            return Err(Self::gate_paused(
+                "approval",
+                approval.action_name,
+                approval.context.current_call_id.as_deref(),
+                approval.parameters.clone(),
+                t3claw_engine::ResumeKind::Approval {
+                    allow_always: false,
+                },
+                None,
+                Some(approval.lease.clone()),
+            ));
+        }
+
+        if matches!(user_permission.effective, PermissionState::AlwaysAllow) {
+            return Ok(());
+        }
+
+        if matches!(user_permission.effective, PermissionState::AskEachTime) {
+            let is_explicit_ask =
+                matches!(user_permission.explicit, Some(PermissionState::AskEachTime));
+            let is_approved = !is_explicit_ask
+                && (self.auto_approve_tools
+                    || self
+                        .auto_approved
+                        .read()
+                        .await
+                        .contains(approval.lookup_name));
+            if is_approved {
+                return Ok(());
+            }
+            return Err(Self::gate_paused(
+                "approval",
+                approval.action_name,
+                approval.context.current_call_id.as_deref(),
+                approval.parameters.clone(),
+                t3claw_engine::ResumeKind::Approval { allow_always: true },
+                None,
+                Some(approval.lease.clone()),
+            ));
+        }
+        Ok(())
+    }
+
+    fn snapshot_action_result(
+        context: &ThreadExecutionContext,
+        action_name: &str,
+        output: serde_json::Value,
+        is_error: bool,
+        started_at: &Instant,
+    ) -> ActionResult {
+        ActionResult {
+            call_id: context
+                .current_call_id
+                .clone()
+                .unwrap_or_else(|| synthetic_action_call_id(action_name)),
+            action_name: action_name.to_string(),
+            output,
+            is_error,
+            duration: started_at.elapsed(),
+        }
+    }
+
+    async fn execute_tool_info_from_snapshot(
+        &self,
+        tool_info: &ToolInfoSnapshotContext<'_>,
+    ) -> Result<ActionResult, EngineError> {
+        let resolved_tool = self.tools.get_resolved(tool_info.lookup_name).await;
+        let user_permission = self
+            .resolved_user_permission_for_tool(tool_info.lookup_name, tool_info.context)
+            .await;
+        Self::ensure_tool_not_disabled(tool_info.action_name, user_permission)?;
+
+        if let Some((_, tool)) = resolved_tool.as_ref() {
+            self.enforce_tool_permission(
+                &ToolApprovalContext {
+                    action_name: tool_info.action_name,
+                    lookup_name: tool_info.lookup_name,
+                    parameters: tool_info.parameters,
+                    lease: tool_info.lease,
+                    context: tool_info.context,
+                    approval_already_granted: tool_info.approval_already_granted,
+                },
+                tool.as_ref(),
+                user_permission,
+            )
+            .await?;
+        }
+
+        let snapshot_result = if let Some(inventory) = tool_info
+            .context
+            .available_action_inventory_snapshot
+            .as_deref()
+        {
+            ActionDiscovery::tool_info(tool_info.parameters, inventory)
+        } else if let Some(actions) = tool_info.context.available_actions_snapshot.as_deref() {
+            ActionDiscovery::tool_info_from_actions(tool_info.parameters, actions)
+        } else {
+            let error_msg = "tool_info: action inventory unavailable in this execution context";
+            let sanitized = self.safety.sanitize_tool_output("tool_info", error_msg);
+            return Ok(Self::snapshot_action_result(
+                tool_info.context,
+                tool_info.canonical_action_name,
+                serde_json::json!({"error": sanitized.content}),
+                true,
+                tool_info.started_at,
+            ));
+        };
+
+        match snapshot_result {
+            Ok(Some(output)) => Ok(Self::snapshot_action_result(
+                tool_info.context,
+                tool_info.canonical_action_name,
+                output.result,
+                false,
+                tool_info.started_at,
+            )),
+            Ok(None) => {
+                let requested = tool_info
+                    .parameters
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("<missing>");
+                let error_msg = format!(
+                    "tool_info: no callable or discoverable action named '{requested}' in this execution context"
+                );
+                let sanitized = self.safety.sanitize_tool_output("tool_info", &error_msg);
+                Ok(Self::snapshot_action_result(
+                    tool_info.context,
+                    tool_info.canonical_action_name,
+                    serde_json::json!({"error": sanitized.content}),
+                    true,
+                    tool_info.started_at,
+                ))
+            }
+            Err(error) => {
+                let error_msg = format!("Tool {} failed: {}", "tool_info", error);
+                let sanitized = self.safety.sanitize_tool_output("tool_info", &error_msg);
+                Ok(Self::snapshot_action_result(
+                    tool_info.context,
+                    tool_info.canonical_action_name,
+                    serde_json::json!({"error": sanitized.content}),
+                    true,
+                    tool_info.started_at,
+                ))
+            }
+        }
     }
 
     async fn sync_skill_install_result(
@@ -331,7 +651,12 @@ impl EffectBridgeAdapter {
                         output_value.get("auth_url").and_then(|v| v.as_str()),
                     ),
                 },
-                None,
+                // Carry the install/auth tool's already-computed output
+                // through the gate so the inline-await retry can return
+                // it directly instead of re-running `tool_install` (which
+                // would re-download the WASM and re-raise approval).
+                // Tracked by #3533.
+                Some(output_value.clone()),
                 Some(lease.clone()),
             )),
             _ => None,
@@ -576,25 +901,30 @@ impl EffectBridgeAdapter {
                 Err(e) => Err(e),
             },
             "mission_get" => {
-                let id_str = params
-                    .get("id")
-                    .or_else(|| params.get("name"))
-                    .or_else(|| params.get("_args").and_then(|a| a.get(0)))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let id = uuid::Uuid::parse_str(id_str)
-                    .map(t3claw_engine::MissionId)
-                    .map_err(|e| EngineError::Effect {
-                        reason: format!("invalid mission id: {e}"),
-                    });
+                let id =
+                    resolve_mission_id(mgr.as_ref(), context.project_id, &context.user_id, params)
+                        .await;
                 match id {
                     Ok(id) => match mgr.get_mission(id).await {
                         Ok(Some(mission)) => {
                             // Ownership check: only the mission owner can
                             // retrieve its details (mirrors fire/pause/resume).
+                            //
+                            // Don't echo the foreign mission's id back to the
+                            // LLM — that would confirm the existence of a
+                            // mission the caller has no claim to, and the LLM
+                            // can't act on a UUID it doesn't own. Internal
+                            // diagnostics still get the id via tracing.
                             if mission.user_id != context.user_id {
+                                tracing::debug!(
+                                    target = "bridge::effect_adapter",
+                                    mission_id = %mission.id,
+                                    user_id = %context.user_id,
+                                    owner = %mission.user_id,
+                                    "rejected mission_get for foreign mission",
+                                );
                                 return Some(Err(EngineError::Effect {
-                                    reason: format!("mission {id_str} belongs to another user"),
+                                    reason: "mission belongs to another user".to_string(),
                                 }));
                             }
                             // Load recent threads (last 5) to show results
@@ -637,7 +967,14 @@ impl EffectBridgeAdapter {
                             }))
                         }
                         Ok(None) => Err(EngineError::Effect {
-                            reason: format!("mission not found: {id_str}"),
+                            // Reachable when the caller passed an explicit
+                            // UUID `id` for a mission that was deleted, never
+                            // existed, or belongs to another project. Names
+                            // that didn't match are caught earlier by
+                            // `resolve_mission_id` with a more useful error;
+                            // by the time we hit this arm we have a parsed
+                            // UUID that the store doesn't recognise.
+                            reason: format!("mission not found: {id}"),
                         }),
                         Err(e) => Err(e),
                     },
@@ -645,16 +982,9 @@ impl EffectBridgeAdapter {
                 }
             }
             "mission_fire" => {
-                let id_str = params
-                    .get("id")
-                    .or_else(|| params.get("_args").and_then(|a| a.get(0)))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let id = uuid::Uuid::parse_str(id_str)
-                    .map(t3claw_engine::MissionId)
-                    .map_err(|e| EngineError::Effect {
-                        reason: format!("invalid mission id: {e}"),
-                    });
+                let id =
+                    resolve_mission_id(mgr.as_ref(), context.project_id, &context.user_id, params)
+                        .await;
                 match id {
                     Ok(id) => match mgr.fire_mission(id, &context.user_id, None).await {
                         Ok(Some(tid)) => {
@@ -669,16 +999,9 @@ impl EffectBridgeAdapter {
                 }
             }
             "mission_pause" | "mission_resume" => {
-                let id_str = params
-                    .get("id")
-                    .or_else(|| params.get("_args").and_then(|a| a.get(0)))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let id = uuid::Uuid::parse_str(id_str)
-                    .map(t3claw_engine::MissionId)
-                    .map_err(|e| EngineError::Effect {
-                        reason: format!("invalid mission id: {e}"),
-                    });
+                let id =
+                    resolve_mission_id(mgr.as_ref(), context.project_id, &context.user_id, params)
+                        .await;
                 match id {
                     Ok(id) => {
                         let res = if action_name == "mission_pause" {
@@ -695,17 +1018,9 @@ impl EffectBridgeAdapter {
                 }
             }
             "mission_complete" => {
-                let id_str = params
-                    .get("id")
-                    .or_else(|| params.get("name")) // routine_delete uses "name" param
-                    .or_else(|| params.get("_args").and_then(|a| a.get(0)))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let id = uuid::Uuid::parse_str(id_str)
-                    .map(t3claw_engine::MissionId)
-                    .map_err(|e| EngineError::Effect {
-                        reason: format!("invalid mission id: {e}"),
-                    });
+                let id =
+                    resolve_mission_id(mgr.as_ref(), context.project_id, &context.user_id, params)
+                        .await;
                 match id {
                     Ok(id) => match mgr.complete_mission(id).await {
                         Ok(()) => Ok(serde_json::json!({"status": "completed"})),
@@ -715,21 +1030,54 @@ impl EffectBridgeAdapter {
                 }
             }
             "mission_update" => {
-                let id_str = params
+                // `mission_update` is the only handler where `name` can
+                // legitimately mean the *new* name rather than the lookup
+                // key. Pre-PR callers used `{id: <uuid>, name: <new>}` to
+                // rename. To keep that shape working without confusing
+                // the resolver's id/name conflict guard, detect the
+                // legacy shape up front and pass the resolver a params
+                // view that only contains the id — the resolver then
+                // never sees the would-be-rename `name` and never
+                // mistakes it for a lookup target.
+                let new_name_param = params.get("new_name").and_then(|v| v.as_str());
+                let id_uuid = params
                     .get("id")
-                    .or_else(|| params.get("_args").and_then(|a| a.get(0)))
                     .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let id = uuid::Uuid::parse_str(id_str)
-                    .map(t3claw_engine::MissionId)
-                    .map_err(|e| EngineError::Effect {
-                        reason: format!("invalid mission id: {e}"),
-                    });
+                    .filter(|s| !s.is_empty())
+                    .and_then(|s| uuid::Uuid::parse_str(s).ok());
+                let legacy_name_for_rename = match (new_name_param, id_uuid) {
+                    (None, Some(_)) => params.get("name").and_then(|v| v.as_str()),
+                    _ => None,
+                };
+                let resolver_params = if legacy_name_for_rename.is_some()
+                    && let Some(obj) = params.as_object()
+                {
+                    let mut view = obj.clone();
+                    view.remove("name");
+                    serde_json::Value::Object(view)
+                } else {
+                    params.clone()
+                };
+
+                let id = resolve_mission_id(
+                    mgr.as_ref(),
+                    context.project_id,
+                    &context.user_id,
+                    &resolver_params,
+                )
+                .await;
                 match id {
                     Ok(id) => {
                         let mut updates = t3claw_engine::MissionUpdate::default();
-                        if let Some(name) = params.get("name").and_then(|v| v.as_str()) {
-                            updates.name = Some(name.to_string());
+                        // Rename target priority:
+                        //   1. `new_name` (canonical post-PR field).
+                        //   2. Legacy `{id, name}` shape — `name` was the
+                        //      pre-PR rename target. Preserved only when
+                        //      `id` is a valid UUID and `new_name` is
+                        //      absent (handled above by removing `name`
+                        //      from the resolver view).
+                        if let Some(rename_target) = new_name_param.or(legacy_name_for_rename) {
+                            updates.name = Some(rename_target.to_string());
                         }
                         if let Some(goal) = params.get("goal").and_then(|v| v.as_str()) {
                             updates.goal = Some(goal.to_string());
@@ -852,9 +1200,47 @@ impl EffectBridgeAdapter {
         approval_already_granted: bool,
     ) -> Result<ActionResult, EngineError> {
         let start = Instant::now();
+        let canonical_action_name = context
+            .available_actions_snapshot
+            .as_ref()
+            .and_then(|actions| ActionDiscovery::resolve(actions.as_ref(), action_name))
+            .map(|action| action.name.as_str())
+            .unwrap_or(action_name);
 
-        let resolved_name = self.tools.resolve_name(action_name).await;
-        let mut lookup_name = resolved_name.as_deref().unwrap_or(action_name).to_string();
+        let resolved_name = self.tools.resolve_name(canonical_action_name).await;
+        let mut lookup_name = resolved_name
+            .as_deref()
+            .unwrap_or(canonical_action_name)
+            .to_string();
+
+        // ── Schema-guided parameter coercion ──
+        //
+        // Engine actions (`mission_*`, routine aliases, `tool_info`) and
+        // host tools both declare JSON Schemas for their parameters. Run
+        // both kinds through the same coercion that `prepare_tool_params`
+        // applies for the v1 path so the LLM can pass stringified scalars
+        // (`"120"` for an integer field) without breaking the handler.
+        // Schema sources, in order: orchestrator-populated action
+        // snapshot, bridge-known engine action defs, host tool registry
+        // (via `discovery_schema()` to match `prepare_tool_params`).
+        // Once this runs, downstream sites in this method (sandbox-path
+        // validator, `execute_tool_with_safety`'s second `prepare_tool_params`)
+        // see already-coerced input — the second pass is idempotent.
+        let action_schema = context
+            .available_actions_snapshot
+            .as_ref()
+            .and_then(|snapshot| {
+                ActionDiscovery::resolve(snapshot.as_ref(), canonical_action_name)
+                    .map(|action| action.discovery_schema().clone())
+            })
+            .or_else(|| engine_action_schema(canonical_action_name));
+        let parameters = if let Some(schema) = action_schema {
+            crate::tools::prepare_params_for_schema(&parameters, &schema)
+        } else if let Some(tool) = self.tools.get(&lookup_name).await {
+            crate::tools::prepare_params_for_schema(&parameters, &tool.discovery_schema())
+        } else {
+            parameters
+        };
 
         // ── Per-step call limit (prevent amplification loops) ──
         const MAX_CALLS_PER_STEP: u32 = 50;
@@ -871,13 +1257,28 @@ impl EffectBridgeAdapter {
         }
 
         if let Some(result) = self
-            .handle_mission_call(action_name, &parameters, context)
+            .handle_mission_call(canonical_action_name, &parameters, context)
             .await
         {
             return result.map(|mut r| {
                 r.duration = start.elapsed();
                 r
             });
+        }
+
+        if canonical_action_name == "tool_info" {
+            return self
+                .execute_tool_info_from_snapshot(&ToolInfoSnapshotContext {
+                    action_name,
+                    canonical_action_name,
+                    lookup_name: &lookup_name,
+                    parameters: &parameters,
+                    lease,
+                    context,
+                    approval_already_granted,
+                    started_at: &start,
+                })
+                .await;
         }
 
         if is_v1_only_tool(&lookup_name) {
@@ -903,16 +1304,14 @@ impl EffectBridgeAdapter {
         if resolved_name.is_none()
             && let Some(auth_mgr) = self.auth_manager.read().await.as_ref()
             && let Some(latent_execution) = auth_mgr
-                .execute_latent_extension_action(action_name, &context.user_id)
+                .execute_latent_extension_action(canonical_action_name, &context.user_id)
                 .await
         {
             match latent_execution {
-                Ok(crate::bridge::auth_manager::LatentActionExecution::RetryRegisteredAction {
-                    resolved_action,
-                }) => {
+                Ok(LatentActionExecution::RetryRegisteredAction { resolved_action }) => {
                     lookup_name = resolved_action;
                 }
-                Ok(crate::bridge::auth_manager::LatentActionExecution::ProviderReady {
+                Ok(LatentActionExecution::ProviderReady {
                     provider_extension,
                     available_actions,
                 }) => {
@@ -931,7 +1330,7 @@ impl EffectBridgeAdapter {
                         duration: start.elapsed(),
                     });
                 }
-                Ok(crate::bridge::auth_manager::LatentActionExecution::NeedsAuth {
+                Ok(LatentActionExecution::NeedsAuth {
                     credential_name,
                     instructions,
                     auth_url,
@@ -950,7 +1349,7 @@ impl EffectBridgeAdapter {
                         Some(lease.clone()),
                     ));
                 }
-                Ok(crate::bridge::auth_manager::LatentActionExecution::NeedsSetup { message }) => {
+                Ok(LatentActionExecution::NeedsSetup { message }) => {
                     return Err(EngineError::Effect { reason: message });
                 }
                 Err(err) => {
@@ -960,6 +1359,12 @@ impl EffectBridgeAdapter {
                 }
             }
         }
+
+        let resolved_tool = self.tools.get_resolved(&lookup_name).await;
+        let user_permission = self
+            .resolved_user_permission_for_tool(&lookup_name, context)
+            .await;
+        Self::ensure_tool_not_disabled(action_name, user_permission)?;
 
         if let Some(tool) = self.tools.get(&lookup_name).await
             && let Some(rl_config) = tool.rate_limit_config()
@@ -1005,7 +1410,7 @@ impl EffectBridgeAdapter {
                         credential = %cred.credential_name,
                         tool = %lookup_name,
                         user = %context.user_id,
-                        "Pre-flight auth: credential missing — blocking tool call"
+                        "Pre-flight auth: credential missing — raising Authentication gate"
                     );
                     return Err(Self::gate_paused(
                         "authentication",
@@ -1033,7 +1438,6 @@ impl EffectBridgeAdapter {
         if let Some(provider_extension) = self.tools.provider_extension_for_tool(&lookup_name).await
             && let Some(auth_mgr) = self.auth_manager.read().await.as_ref()
         {
-            use crate::bridge::auth_manager::ToolReadiness;
             match auth_mgr
                 .check_tool_readiness(&provider_extension, &context.user_id)
                 .await
@@ -1077,71 +1481,20 @@ impl EffectBridgeAdapter {
             }
         }
 
-        if let Some((_, tool)) = self.tools.get_resolved(&lookup_name).await {
-            let user_permission = if let Some(db) = self.tools.database() {
-                match db.get_all_settings(&context.user_id).await {
-                    Ok(db_map) => {
-                        let settings = crate::settings::Settings::from_db_map(&db_map);
-                        Some(effective_permission(
-                            &lookup_name,
-                            &settings.tool_permissions,
-                        ))
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            user_id = %context.user_id,
-                            tool = %lookup_name,
-                            error = %error,
-                            "Failed to load tool permission overrides for engine v2"
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            if matches!(user_permission, Some(PermissionState::Disabled)) {
-                return Err(EngineError::LeaseDenied {
-                    reason: format!("Tool '{}' is disabled for this user.", action_name),
-                });
-            }
-
-            let requirement = tool.requires_approval(&parameters);
-            match requirement {
-                ApprovalRequirement::Always => {
-                    if !approval_already_granted {
-                        return Err(Self::gate_paused(
-                            "approval",
-                            action_name,
-                            context.current_call_id.as_deref(),
-                            parameters,
-                            t3claw_engine::ResumeKind::Approval {
-                                allow_always: false,
-                            },
-                            None,
-                            Some(lease.clone()),
-                        ));
-                    }
-                }
-                ApprovalRequirement::UnlessAutoApproved => {
-                    let is_approved = self.auto_approve_tools
-                        || self.auto_approved.read().await.contains(&lookup_name)
-                        || matches!(user_permission, Some(PermissionState::AlwaysAllow));
-                    if !is_approved && !approval_already_granted {
-                        return Err(Self::gate_paused(
-                            "approval",
-                            action_name,
-                            context.current_call_id.as_deref(),
-                            parameters,
-                            t3claw_engine::ResumeKind::Approval { allow_always: true },
-                            None,
-                            Some(lease.clone()),
-                        ));
-                    }
-                }
-                ApprovalRequirement::Never => {}
-            }
+        if let Some((_, tool)) = resolved_tool.as_ref() {
+            self.enforce_tool_permission(
+                &ToolApprovalContext {
+                    action_name,
+                    lookup_name: &lookup_name,
+                    parameters: &parameters,
+                    lease,
+                    context,
+                    approval_already_granted,
+                },
+                tool.as_ref(),
+                user_permission,
+            )
+            .await?;
         }
 
         let redacted_params = if let Some(tool) = self.tools.get(&lookup_name).await {
@@ -1201,15 +1554,10 @@ impl EffectBridgeAdapter {
         // prompt-injection / param validation must run).
         let mounts_snapshot = self.workspace_mounts.read().await.as_ref().map(Arc::clone);
         let sandbox_result = if let Some(mounts) = mounts_snapshot {
-            // Normalize parameters the same way the host path does
-            // (`execute_tool_with_safety` → `prepare_tool_params`) so
-            // validation sees consistent types (e.g. string "true" → bool).
-            let normalized = if let Some(tool) = self.tools.get(&lookup_name).await {
-                crate::tools::prepare_tool_params(tool.as_ref(), &parameters)
-            } else {
-                parameters.clone()
-            };
-            let validation = self.safety.validator().validate_tool_params(&normalized);
+            // `parameters` was already coerced by the schema-guided
+            // pre-amble above; both the validator and the mount backend
+            // see the same shape that `execute_tool_with_safety` would.
+            let validation = self.safety.validator().validate_tool_params(&parameters);
             if !validation.is_valid {
                 let details = validation
                     .errors
@@ -1224,7 +1572,7 @@ impl EffectBridgeAdapter {
                     },
                 )))
             } else {
-                match maybe_intercept(&lookup_name, &normalized, context.project_id, &mounts).await
+                match maybe_intercept(&lookup_name, &parameters, context.project_id, &mounts).await
                 {
                     Ok(InterceptOutcome::Handled(s)) => Some(Ok(s)),
                     Ok(InterceptOutcome::FellThrough) => None,
@@ -1280,8 +1628,7 @@ impl EffectBridgeAdapter {
                 let output_value = serde_json::from_str::<serde_json::Value>(&output)
                     .unwrap_or(serde_json::Value::String(wrapped));
 
-                if (lookup_name == "tool_activate"
-                    || lookup_name == "tool_auth"
+                if (lookup_name == "tool_auth"
                     || lookup_name == "tool_install"
                     || lookup_name == "tool-install")
                     && let Some(err) = Self::auth_gate_from_extension_result(
@@ -1299,7 +1646,6 @@ impl EffectBridgeAdapter {
                     && let Some(auth_mgr) = self.auth_manager.read().await.as_ref()
                     && let Some(ext_name) = output_value.get("name").and_then(|v| v.as_str())
                 {
-                    use crate::bridge::auth_manager::ToolReadiness;
                     match auth_mgr
                         .check_tool_readiness(ext_name, &context.user_id)
                         .await
@@ -1477,104 +1823,155 @@ impl EffectExecutor for EffectBridgeAdapter {
         lease: &CapabilityLease,
         context: &ThreadExecutionContext,
     ) -> Result<ActionResult, EngineError> {
-        self.execute_action_internal(action_name, parameters, lease, context, false)
-            .await
+        // External-tool short-circuit. If the per-thread catalog claims
+        // this action name, the caller will execute it; we pause the
+        // thread with `ResumeKind::External { ext_tool:<call_id> }` and
+        // wait for the resume payload.
+        //
+        // Parameters skip dispatch-time validation (the caller's tool
+        // schema isn't registered with the host), but the resume
+        // payload is run through `SafetyLayer::sanitize_tool_output`
+        // in `bridge::router` before reaching the LLM — see the
+        // `is_external_tool_callback` branch in `resolve_gate`.
+        //
+        // Known limitation (multi-call batching): the engine pauses on
+        // the first external-tool invocation in an assistant turn. If
+        // the LLM emits N caller-tool calls together, only the first
+        // surfaces as `AppEvent::ExternalToolCall`; subsequent calls
+        // re-emit on the next assistant turn after the caller posts
+        // back the first result. The OpenAI Responses contract allows
+        // "post all N results together"; matching that needs an engine
+        // change to collect N pauses before unwinding (tracked as a
+        // follow-up to PR #3122).
+        if let Some(catalog) = self.external_tool_catalog().await {
+            let mut hit = false;
+            for key in Self::external_tool_catalog_keys(context) {
+                if catalog.contains(key, action_name).await {
+                    hit = true;
+                    break;
+                }
+            }
+            if hit {
+                // Synthesize a call_id when the executor didn't stamp
+                // one (Tier 1 / CodeAct paths can reach here without a
+                // structured call envelope). Without a stable id, the
+                // resume payload can't be correlated back to the
+                // originating action — the `function_call_output` would
+                // arrive with the caller's id but the gate would carry
+                // `ext_tool:` with no suffix.
+                let call_id = match context.current_call_id.as_deref() {
+                    Some(id) if !id.is_empty() => id.to_string(),
+                    _ => format!("call_ext_{}", uuid::Uuid::new_v4().simple()),
+                };
+                return Err(Self::gate_paused(
+                    "external_tool",
+                    action_name,
+                    Some(call_id.as_str()),
+                    parameters,
+                    t3claw_engine::ResumeKind::External {
+                        callback_id: crate::bridge::external_tool_callback_id(&call_id),
+                    },
+                    None,
+                    Some(lease.clone()),
+                ));
+            }
+        }
+
+        // Honor the engine's one-shot approval flag. Set by inline
+        // gate-await retry paths after the user resolves the gate;
+        // mirrors the legacy `execute_resolved_pending_action` path
+        // that passes `approval_already_granted=true` to skip the
+        // per-call approval check that would otherwise re-fire.
+        let approval_already_granted = context.call_approval_granted;
+        self.execute_action_internal(
+            action_name,
+            parameters,
+            lease,
+            context,
+            approval_already_granted,
+        )
+        .await
     }
 
     async fn available_actions(
         &self,
         leases: &[CapabilityLease],
+        context: &ThreadExecutionContext,
     ) -> Result<Vec<ActionDef>, EngineError> {
-        let tool_defs = self.tools.tool_definitions().await;
+        Ok(self
+            .available_action_inventory(leases, context)
+            .await?
+            .inline)
+    }
 
-        // Build action defs, excluding v1-only tools and v1 auth tools
-        let mut actions = Vec::with_capacity(tool_defs.len());
-        for td in tool_defs {
-            // Skip tools that can't work in engine v2
-            if is_v1_only_tool(&td.name) {
-                continue;
-            }
+    async fn available_action_inventory(
+        &self,
+        leases: &[CapabilityLease],
+        context: &ThreadExecutionContext,
+    ) -> Result<ActionInventory, EngineError> {
+        let auth_manager = self.auth_manager.read().await.clone();
+        let capability_registry = self.capability_registry.read().await.clone();
+        let extensions = self
+            .fetch_extension_map(auth_manager.as_deref(), context)
+            .await;
+        let mut inventory = ActionProjector::project_inventory(
+            self.tools.as_ref(),
+            auth_manager.as_deref(),
+            capability_registry,
+            leases,
+            context,
+            extensions.as_ref(),
+        )
+        .await?;
 
-            // Skip v1 auth management tools — auth is kernel-level in v2
-            if is_v1_auth_tool(&td.name) {
-                continue;
-            }
-
-            let python_name = td.name.replace('-', "_");
-
-            actions.push(ActionDef {
-                name: python_name,
-                description: td.description,
-                parameters_schema: td.parameters,
-                effects: vec![],
-                // Approval is enforced at execute-time inside this adapter so
-                // thread-scoped one-shot approvals and auth-aware bypasses can
-                // participate. Advertising approval here would cause the engine
-                // policy preflight to interrupt before the adapter can apply
-                // those runtime checks.
-                requires_approval: false,
-            });
-        }
-
-        if let Some(auth_mgr) = self.auth_manager.read().await.as_ref() {
-            for latent in auth_mgr.latent_extension_actions().await {
-                if actions
-                    .iter()
-                    .any(|action| action.name == latent.action_name)
-                {
-                    continue;
+        // Merge per-thread external tools (Responses API caller-supplied
+        // `tools[]`) into the inline action surface so the LLM sees them
+        // as callable. Caller tools are not gated by leases or admin
+        // policy: they're owned by the caller end-to-end. Names are
+        // de-duplicated against the existing inline set; collisions are
+        // rejected up-front by the Responses API handler, but the
+        // dedup keeps a defensive ordering invariant: internal beats
+        // external if they ever collide.
+        //
+        // The lookup walks both the engine `thread_id` and the
+        // caller-side `conversation_scope` because the responses_api
+        // handler registers under the latter and the bridge re-keys
+        // post-spawn. The executor task can poll
+        // `available_action_inventory` before the re-key lands, so we
+        // need both keys to close the race.
+        if let Some(catalog) = self.external_tool_catalog().await {
+            let mut external: Vec<ActionDef> = Vec::new();
+            for key in Self::external_tool_catalog_keys(context) {
+                let entries = catalog.list(key).await;
+                if !entries.is_empty() {
+                    external = entries;
+                    break;
                 }
-                actions.push(ActionDef {
-                    name: latent.action_name,
-                    description: latent.description,
-                    parameters_schema: latent.parameters_schema,
-                    effects: vec![],
-                    requires_approval: false,
-                });
             }
-        }
-
-        // Surface actions from engine-native capabilities (e.g. `missions`).
-        // The v1 `ToolRegistry` path above only covers built-in + extension
-        // tools; capabilities registered directly against the engine
-        // (`CapabilityRegistry`) would otherwise be invisible to the LLM
-        // even though the thread holds active leases for them. Iterate
-        // leases so we only advertise what the current thread actually has
-        // access to, and skip the `"tools"` capability — that lease is
-        // reconciled dynamically from the v1 path already covered above.
-        if let Some(registry) = self.capability_registry.read().await.as_ref() {
-            let mut seen: HashSet<String> = actions.iter().map(|a| a.name.clone()).collect();
-            for lease in leases {
-                if lease.capability_name == "tools" {
-                    continue;
-                }
-                let Some(cap) = registry.get(&lease.capability_name) else {
-                    continue;
-                };
-                for action in &cap.actions {
-                    if !lease.granted_actions.covers(&action.name) {
-                        continue;
-                    }
-                    // Defensive: apply the same v1-isolation filters we run
-                    // on v1 tools. If a future engine capability registers
-                    // an action under a v1-denylisted name (`create_job`,
-                    // `tool_auth`, ...), the v1 filters above would have
-                    // hidden it — the engine path must not become a
-                    // silent bypass.
-                    if is_v1_only_tool(&action.name) || is_v1_auth_tool(&action.name) {
-                        continue;
-                    }
-                    if !seen.insert(action.name.clone()) {
-                        continue;
-                    }
-                    actions.push(action.clone());
-                }
+            if !external.is_empty() {
+                let existing: std::collections::HashSet<&str> =
+                    inventory.inline.iter().map(|a| a.name.as_str()).collect();
+                let extras: Vec<ActionDef> = external
+                    .into_iter()
+                    .filter(|a| !existing.contains(a.name.as_str()))
+                    .collect();
+                inventory.inline.extend(extras);
             }
         }
 
-        actions.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(inventory)
+    }
 
-        Ok(actions)
+    async fn available_capabilities(
+        &self,
+        leases: &[CapabilityLease],
+        context: &ThreadExecutionContext,
+    ) -> Result<Vec<CapabilitySummary>, EngineError> {
+        let auth_manager = self.auth_manager.read().await.clone();
+        let extensions = self
+            .fetch_extension_list(auth_manager.as_deref(), context)
+            .await;
+        CapabilityProjector::project(auth_manager.as_deref(), leases, context, extensions).await
     }
 }
 
@@ -1871,6 +2268,144 @@ fn parse_cadence(
              (e.g. '0 9 * * *'), 'event:<channel>:<pattern>' \
              (e.g. 'event:telegram:.*'), or 'webhook:<path>'"
         ))
+    }
+}
+
+/// Resolve a mission identifier from action params.
+///
+/// Mission/routine actions accept either an explicit `id` (a UUID, kept
+/// for backward compatibility and for callers that already hold one) or
+/// a human-readable `name`. The LLM-facing surface is name-first because
+/// the agent rarely has a UUID at hand — forcing it to guess one was the
+/// root cause of #2583, where `routine_fire(name=...)` translated to
+/// `mission_fire` with a `name` field the handler never read, then the
+/// handler parsed an empty `id` as UUID and rejected with
+/// "invalid length 0".
+///
+/// Resolution order (first match wins, then conflict-checked):
+///   1. `params.id` — if present and a valid UUID, the canonical id.
+///   2. `params.name` — looked up via [`MissionManager::find_by_name`]
+///      (typed, indexed lookup; same identifier used at create time).
+///   3. `params.id` *as a name* — backward compat for legacy
+///      `mission_complete({id: "<routine-name>"})` callers that
+///      conflated the slots.
+///   4. `params._args[0]` — Tier-0 positional fallback. Tried as a name
+///      *only*; positional UUIDs aren't honoured here because they
+///      can't carry a typed contract and would silently override an
+///      explicit `name` field. (This was the inversion serrrfirat
+///      flagged on PR #3155.)
+///
+/// **Conflict guard.** If both `id` (UUID) and a `name` are supplied
+/// AND the name resolves to a *different* mission than the id
+/// identifies, this returns an error. Silently preferring the UUID
+/// (the previous behaviour) was a foot-gun: a mistyped name would
+/// rename the wrong mission.
+async fn resolve_mission_id(
+    mgr: &t3claw_engine::MissionManager,
+    project_id: t3claw_engine::ProjectId,
+    user_id: &str,
+    params: &serde_json::Value,
+) -> Result<t3claw_engine::MissionId, EngineError> {
+    // Pull out the explicit id (only if it parses as a UUID).
+    let id_uuid: Option<t3claw_engine::MissionId> = params
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .and_then(|s| uuid::Uuid::parse_str(s).ok())
+        .map(t3claw_engine::MissionId);
+
+    // Collect candidate name strings in resolution order. We retain
+    // each candidate so we can emit a useful "tried these names" error
+    // and so the conflict guard knows which name was supplied.
+    let mut name_candidates: Vec<String> = Vec::new();
+    for key in &["name", "id"] {
+        if let Some(s) = params
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            // Skip the `id` slot when it's already been consumed as a
+            // UUID by the typed branch above — otherwise we'd double-
+            // try the same UUID-shaped string as a name.
+            if *key == "id" && uuid::Uuid::parse_str(s).is_ok() {
+                continue;
+            }
+            if !name_candidates.iter().any(|c| c == s) {
+                name_candidates.push(s.to_string());
+            }
+        }
+    }
+    if let Some(s) = params
+        .get("_args")
+        .and_then(|a| a.get(0))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        && !name_candidates.iter().any(|c| c == s)
+    {
+        // Positional `_args[0]` is treated as a name — never as a
+        // UUID. A positional UUID would silently override an explicit
+        // `name` field if we honoured it, which is the worst-of-both
+        // ordering serrrfirat flagged.
+        name_candidates.push(s.to_string());
+    }
+
+    // (1) Only id provided.
+    if let Some(id) = id_uuid
+        && name_candidates.is_empty()
+    {
+        return Ok(id);
+    }
+
+    // (2/3/4) Name(s) provided. Resolve via the typed helper.
+    let mut resolved_by_name: Option<t3claw_engine::MissionId> = None;
+    for candidate in &name_candidates {
+        if let Some(m) = mgr.find_by_name(project_id, user_id, candidate).await? {
+            resolved_by_name = Some(m.id);
+            break;
+        }
+    }
+
+    match (id_uuid, resolved_by_name) {
+        (Some(id), Some(by_name)) if id == by_name => Ok(id),
+        (Some(id), Some(by_name)) => Err(EngineError::Effect {
+            reason: format!(
+                "both id and name provided but they identify different \
+                 missions: id={id} vs name={name_candidates:?} → {by_name}. \
+                 Provide only one — or fix the name to match the id."
+            ),
+        }),
+        (Some(id), None) => {
+            // Name(s) supplied but none resolved. The id is still
+            // valid; warn through the error if name was clearly
+            // intended (non-empty candidate list).
+            if !name_candidates.is_empty() {
+                return Err(EngineError::Effect {
+                    reason: format!(
+                        "name {name_candidates:?} did not match any mission \
+                         (id was also provided as {id}). Remove the stale \
+                         name, or fix it to match the id."
+                    ),
+                });
+            }
+            Ok(id)
+        }
+        (None, Some(by_name)) => Ok(by_name),
+        (None, None) => {
+            if name_candidates.is_empty() {
+                Err(EngineError::Effect {
+                    reason: "mission identifier missing: provide 'name' \
+                             (preferred) or 'id' (UUID)"
+                        .to_string(),
+                })
+            } else {
+                Err(EngineError::Effect {
+                    reason: format!(
+                        "mission not found by name: tried {name_candidates:?}. \
+                         Use mission_list to see available missions."
+                    ),
+                })
+            }
+        }
     }
 }
 
@@ -2262,7 +2797,32 @@ fn extract_credential_name(error_msg: &str) -> Option<String> {
     None
 }
 
-fn is_v1_only_tool(name: &str) -> bool {
+/// Look up the bridge-canonical schema for `mission_*` actions, the only
+/// engine-native action category that has no corresponding host `Tool`
+/// registration. `routine_*` (legacy v1 host tools, intercepted by the
+/// alias path before they execute) and `tool_info` (a v1/v2 host tool)
+/// are present in the host `ToolRegistry`, so they reach
+/// `execute_action_internal`'s registry branch directly and don't need
+/// this helper. Used in two places:
+///
+/// 1. As a fallback in `execute_action_internal` when the orchestrator
+///    has not populated `available_actions_snapshot` — primarily tests
+///    that drive `execute_action` without setting up the snapshot.
+/// 2. To stay coupled to the `mission_capability_actions()` definitions
+///    so coercion in #1 always uses the same JSON Schema the engine
+///    advertises to the LLM.
+///
+/// In production paths the orchestrator always populates the snapshot,
+/// so the snapshot branch wins and this helper is a defense-in-depth
+/// fallback.
+fn engine_action_schema(action_name: &str) -> Option<serde_json::Value> {
+    crate::bridge::engine_actions::mission_capability_actions()
+        .into_iter()
+        .find(|action| action.matches_name(action_name))
+        .map(|action| action.parameters_schema)
+}
+
+pub(crate) fn is_v1_only_tool(name: &str) -> bool {
     // routine_* tools are surfaced in v2 too, but are intercepted by
     // `handle_mission_call`'s routine alias path *before* this check fires —
     // they get translated into mission_* dispatches via the existing
@@ -2283,7 +2843,7 @@ fn is_v1_only_tool(name: &str) -> bool {
 
 /// Auth management tools from v1 that are now kernel-internal in v2.
 /// The LLM should not see or call these — auth is handled automatically.
-fn is_v1_auth_tool(name: &str) -> bool {
+pub(crate) fn is_v1_auth_tool(name: &str) -> bool {
     matches!(name, "tool_auth" | "tool-auth")
 }
 
@@ -2291,7 +2851,7 @@ fn is_v1_auth_tool(name: &str) -> bool {
 mod tests {
     use super::*;
     use crate::context::JobContext;
-    use crate::tools::{Tool, ToolError, ToolOutput};
+    use crate::tools::{ApprovalRequirement, Tool, ToolError, ToolOutput};
     use async_trait::async_trait;
 
     fn make_adapter() -> EffectBridgeAdapter {
@@ -2435,6 +2995,17 @@ mod tests {
 
     struct AlwaysApprovalTestTool;
 
+    struct DefaultAllowNamedApprovalTestTool;
+
+    /// Stand-in for `tool_install`. Its `name()` matches the canonical
+    /// seeded-`AskEachTime` baseline so the explicit-equals-seeded
+    /// regression in `explicit_ask_each_time_for_seeded_default_tool_still_gates`
+    /// actually exercises the value-equality codepath. Mirrors the real
+    /// `tool_install`'s `UnlessAutoApproved` approval requirement so the
+    /// `enforce_tool_permission` branch under test (AskEachTime →
+    /// is_explicit_ask check) is reached.
+    struct SeededAskEachTimeTestTool;
+
     #[async_trait]
     impl Tool for ApprovalTestTool {
         fn name(&self) -> &str {
@@ -2505,6 +3076,76 @@ mod tests {
         }
     }
 
+    #[async_trait]
+    impl Tool for DefaultAllowNamedApprovalTestTool {
+        fn name(&self) -> &str {
+            "message"
+        }
+
+        fn description(&self) -> &str {
+            "Test tool named like a default-always-allow builtin"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "value": { "type": "string" }
+                }
+            })
+        }
+
+        async fn execute(
+            &self,
+            params: serde_json::Value,
+            _ctx: &JobContext,
+        ) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::success(
+                serde_json::json!({ "echo": params }),
+                std::time::Duration::from_millis(1),
+            ))
+        }
+
+        fn requires_approval(&self, _params: &serde_json::Value) -> ApprovalRequirement {
+            ApprovalRequirement::UnlessAutoApproved
+        }
+    }
+
+    #[async_trait]
+    impl Tool for SeededAskEachTimeTestTool {
+        fn name(&self) -> &str {
+            "tool_install"
+        }
+
+        fn description(&self) -> &str {
+            "Test stand-in for tool_install; name matches a seeded-AskEachTime baseline"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" }
+                }
+            })
+        }
+
+        async fn execute(
+            &self,
+            params: serde_json::Value,
+            _ctx: &JobContext,
+        ) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::success(
+                serde_json::json!({ "installed": params }),
+                std::time::Duration::from_millis(1),
+            ))
+        }
+
+        fn requires_approval(&self, _params: &serde_json::Value) -> ApprovalRequirement {
+            ApprovalRequirement::UnlessAutoApproved
+        }
+    }
+
     fn lease() -> t3claw_engine::CapabilityLease {
         t3claw_engine::CapabilityLease {
             id: t3claw_engine::types::capability::LeaseId::new(),
@@ -2534,7 +3175,980 @@ mod tests {
             source_channel: None,
             user_timezone: None,
             thread_goal: Some("test goal".to_string()),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         }
+    }
+
+    async fn make_tool_info_adapter_with_permission(
+        permission: crate::tools::permissions::PermissionState,
+    ) -> EffectBridgeAdapter {
+        let db_path = std::env::temp_dir().join(format!(
+            "t3claw-tool-info-permissions-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
+            db_path.to_str().expect("db path"),
+            None,
+            None,
+        ))
+        .await
+        .expect("db");
+        db.set_setting(
+            "test_user",
+            "tool_permissions.tool_info",
+            &serde_json::to_value(permission).expect("serialize permission"),
+        )
+        .await
+        .expect("save tool permission");
+
+        let tools = Arc::new(ToolRegistry::new().with_database(db));
+        tools.register_tool_info();
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    async fn make_approval_test_adapter_with_permission(
+        permission: Option<crate::tools::permissions::PermissionState>,
+    ) -> EffectBridgeAdapter {
+        let db_path = std::env::temp_dir().join(format!(
+            "t3claw-approval-test-permissions-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
+            db_path.to_str().expect("db path"),
+            None,
+            None,
+        ))
+        .await
+        .expect("db");
+        if let Some(permission) = permission {
+            db.set_setting(
+                "test_user",
+                "tool_permissions.approval_test",
+                &serde_json::to_value(permission).expect("serialize permission"),
+            )
+            .await
+            .expect("save tool permission");
+        }
+
+        let tools = Arc::new(ToolRegistry::new().with_database(db));
+        tools.register(Arc::new(ApprovalTestTool)).await;
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    async fn make_always_approval_test_adapter_with_permission(
+        permission: Option<crate::tools::permissions::PermissionState>,
+    ) -> EffectBridgeAdapter {
+        let db_path = std::env::temp_dir().join(format!(
+            "t3claw-always-approval-test-permissions-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
+            db_path.to_str().expect("db path"),
+            None,
+            None,
+        ))
+        .await
+        .expect("db");
+        if let Some(permission) = permission {
+            db.set_setting(
+                "test_user",
+                "tool_permissions.always_approval_test",
+                &serde_json::to_value(permission).expect("serialize permission"),
+            )
+            .await
+            .expect("save tool permission");
+        }
+
+        let tools = Arc::new(ToolRegistry::new().with_database(db));
+        tools.register(Arc::new(AlwaysApprovalTestTool)).await;
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    async fn make_tool_info_registry_adapter() -> EffectBridgeAdapter {
+        let tools = Arc::new(ToolRegistry::new());
+        tools.register_tool_info();
+        tools.register(Arc::new(ApprovalTestTool)).await;
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    async fn make_default_allow_named_adapter() -> EffectBridgeAdapter {
+        let tools = Arc::new(ToolRegistry::new());
+        tools
+            .register(Arc::new(DefaultAllowNamedApprovalTestTool))
+            .await;
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    async fn make_restart_adapter_with_permission(
+        permission: Option<crate::tools::permissions::PermissionState>,
+    ) -> EffectBridgeAdapter {
+        let db_path = std::env::temp_dir().join(format!(
+            "t3claw-restart-permissions-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
+            db_path.to_str().expect("db path"),
+            None,
+            None,
+        ))
+        .await
+        .expect("db");
+        if let Some(permission) = permission {
+            db.set_setting(
+                "test_user",
+                "tool_permissions.restart",
+                &serde_json::to_value(permission).expect("serialize permission"),
+            )
+            .await
+            .expect("save tool permission");
+        }
+
+        let tools = Arc::new(ToolRegistry::new().with_database(db));
+        tools
+            .register(Arc::new(crate::tools::builtin::RestartTool))
+            .await;
+        EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+    }
+
+    #[tokio::test]
+    async fn tool_info_reads_callable_action_snapshot_for_engine_native_actions() {
+        let adapter = make_adapter();
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
+        ctx.available_actions_snapshot = Some(
+            vec![ActionDef {
+                name: "mission_create".to_string(),
+                description: "Create a mission".to_string(),
+                parameters_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "goal": {"type": "string"},
+                        "cadence": {"type": "string"}
+                    },
+                    "required": ["name", "goal", "cadence"]
+                }),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
+                    name: "mission_create".to_string(),
+                    summary: Some(t3claw_engine::ActionDiscoverySummary {
+                        always_required: vec![
+                            "name".to_string(),
+                            "goal".to_string(),
+                            "cadence".to_string(),
+                        ],
+                        conditional_requirements: vec![
+                            "Use this only for recurring or scheduled work".to_string(),
+                        ],
+                        notes: vec![],
+                        examples: vec![],
+                    }),
+                    schema_override: None,
+                }),
+            }]
+            .into(),
+        );
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "mission_create", "detail": "summary"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should succeed through callable action discovery");
+
+        assert!(!result.is_error);
+        assert_eq!(result.output["name"], serde_json::json!("mission_create"));
+        assert_eq!(
+            result.output["summary"]["always_required"],
+            serde_json::json!(["name", "goal", "cadence"])
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_schema_reads_action_inventory_for_engine_native_actions() {
+        let adapter = make_adapter();
+        let mut ctx = exec_ctx(
+            t3claw_engine::ThreadId::new(),
+            Some("call_tool_info_schema"),
+        );
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![
+                ActionDef {
+                    name: "tool_info".to_string(),
+                    description: "Inspect actions".to_string(),
+                    parameters_schema: serde_json::json!({"type": "object"}),
+                    effects: vec![],
+                    requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
+                },
+                ActionDef {
+                    name: "mission_create".to_string(),
+                    description: "Create a mission".to_string(),
+                    parameters_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "goal": {"type": "string"},
+                            "cadence": {"type": "string"}
+                        },
+                        "required": ["name", "goal", "cadence"]
+                    }),
+                    effects: vec![],
+                    requires_approval: false,
+                    model_tool_surface: ModelToolSurface::CompactToolInfo,
+                    discovery: None,
+                },
+            ],
+            discoverable: Vec::new(),
+        }));
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "mission-create", "detail": "schema"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should succeed through action inventory discovery");
+
+        assert!(!result.is_error);
+        assert_eq!(result.output["name"], serde_json::json!("mission_create"));
+        assert_eq!(
+            result.output["schema"]["required"],
+            serde_json::json!(["name", "goal", "cadence"])
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_reads_non_registry_action_from_current_inventory() {
+        let adapter = make_adapter();
+        let mut ctx = exec_ctx(
+            t3claw_engine::ThreadId::new(),
+            Some("call_tool_info_custom_action"),
+        );
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![
+                ActionDef {
+                    name: "tool_info".to_string(),
+                    description: "Inspect actions".to_string(),
+                    parameters_schema: serde_json::json!({"type": "object"}),
+                    effects: vec![],
+                    requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
+                },
+                ActionDef {
+                    name: "custom_provider_send".to_string(),
+                    description: "Send through a provider action".to_string(),
+                    parameters_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "recipient": {"type": "string"},
+                            "message": {"type": "string"}
+                        },
+                        "required": ["recipient", "message"]
+                    }),
+                    effects: vec![],
+                    requires_approval: false,
+                    model_tool_surface: ModelToolSurface::CompactToolInfo,
+                    discovery: None,
+                },
+            ],
+            discoverable: Vec::new(),
+        }));
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "custom-provider-send", "detail": "schema"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should resolve non-registry action from inventory");
+
+        assert!(!result.is_error);
+        assert_eq!(
+            result.output["name"],
+            serde_json::json!("custom_provider_send")
+        );
+        assert_eq!(
+            result.output["schema"]["required"],
+            serde_json::json!(["recipient", "message"])
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_rejects_actions_outside_callable_snapshot() {
+        let adapter = make_adapter();
+        let mut ctx = exec_ctx(
+            t3claw_engine::ThreadId::new(),
+            Some("call_tool_info_registry"),
+        );
+        ctx.available_actions_snapshot = Some(
+            vec![ActionDef {
+                name: "mission_create".to_string(),
+                description: "Create a mission".to_string(),
+                parameters_schema: serde_json::json!({"type": "object"}),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
+            }]
+            .into(),
+        );
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "echo", "detail": "summary"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should return an error result for out-of-snapshot actions");
+
+        assert!(result.is_error);
+        assert_eq!(result.action_name, "tool_info");
+        assert!(
+            result.output["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("no callable or discoverable action named 'echo'"),
+            "unexpected error output: {:?}",
+            result.output
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_does_not_fall_back_to_registry_when_snapshot_omits_tool() {
+        let adapter = make_tool_info_registry_adapter().await;
+        let mut ctx = exec_ctx(
+            t3claw_engine::ThreadId::new(),
+            Some("call_tool_info_registry_fallback_guard"),
+        );
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![ActionDef {
+                name: "tool_info".to_string(),
+                description: "Inspect actions".to_string(),
+                parameters_schema: serde_json::json!({"type": "object"}),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
+            }],
+            discoverable: Vec::new(),
+        }));
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "approval_test", "detail": "schema"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should return an error result for out-of-snapshot action");
+
+        assert!(result.is_error);
+        let error = result.output["error"].as_str().unwrap_or_default();
+        assert!(
+            error.contains("no callable or discoverable action named 'approval_test'"),
+            "unexpected error output: {:?}",
+            result.output
+        );
+        assert!(
+            !error.contains("No tool named 'approval_test' is registered"),
+            "registry-backed tool_info leaked through: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_rejects_registered_tools_when_snapshots_are_missing() {
+        let adapter = make_tool_info_registry_adapter().await;
+        let ctx = exec_ctx(
+            t3claw_engine::ThreadId::new(),
+            Some("call_tool_info_without_snapshot"),
+        );
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "approval_test", "detail": "summary"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should return an error result without snapshots");
+
+        assert!(result.is_error);
+        assert_eq!(result.action_name, "tool_info");
+        assert!(
+            result.output["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("action inventory unavailable in this execution context"),
+            "unexpected error output: {:?}",
+            result.output
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_reads_action_inventory_snapshot() {
+        let adapter = make_adapter();
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![ActionDef {
+                name: "github_search".to_string(),
+                description: "Search GitHub".to_string(),
+                parameters_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"}
+                    },
+                    "required": ["query"]
+                }),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: Some(t3claw_engine::ActionDiscoveryMetadata {
+                    name: "github_search".to_string(),
+                    summary: Some(t3claw_engine::ActionDiscoverySummary {
+                        always_required: vec!["query".to_string()],
+                        conditional_requirements: vec![],
+                        notes: vec!["Schema available through tool_info".to_string()],
+                        examples: vec![],
+                    }),
+                    schema_override: None,
+                }),
+            }],
+            discoverable: Vec::new(),
+        }));
+
+        let result = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "github_search", "detail": "summary"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("tool_info should resolve action inventory discovery");
+
+        assert!(!result.is_error);
+        assert_eq!(result.output["name"], serde_json::json!("github_search"));
+        assert_eq!(
+            result.output["summary"]["always_required"],
+            serde_json::json!(["query"])
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_info_respects_disabled_permission_override() {
+        let adapter = make_tool_info_adapter_with_permission(
+            crate::tools::permissions::PermissionState::Disabled,
+        )
+        .await;
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![ActionDef {
+                name: "github_search".to_string(),
+                description: "Search GitHub".to_string(),
+                parameters_schema: serde_json::json!({"type": "object"}),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
+            }],
+            discoverable: Vec::new(),
+        }));
+
+        let err = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "github_search"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect_err("disabled tool_info should be denied");
+
+        match err {
+            EngineError::LeaseDenied { reason } => {
+                assert!(reason.contains("Tool 'tool_info' is disabled"));
+            }
+            other => panic!("expected LeaseDenied, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_info_respects_ask_each_time_permission_override() {
+        let adapter = make_tool_info_adapter_with_permission(
+            crate::tools::permissions::PermissionState::AskEachTime,
+        )
+        .await;
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_tool_info"));
+        ctx.available_action_inventory_snapshot = Some(Arc::new(ActionInventory {
+            inline: vec![ActionDef {
+                name: "github_search".to_string(),
+                description: "Search GitHub".to_string(),
+                parameters_schema: serde_json::json!({"type": "object"}),
+                effects: vec![],
+                requires_approval: false,
+                model_tool_surface: ModelToolSurface::FullSchema,
+                discovery: None,
+            }],
+            discoverable: Vec::new(),
+        }));
+
+        let err = adapter
+            .execute_action(
+                "tool_info",
+                serde_json::json!({"name": "github_search"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect_err("ask_each_time tool_info should gate for approval");
+
+        match err {
+            EngineError::GatePaused { gate_name, .. } => {
+                assert_eq!(gate_name, "approval");
+            }
+            other => panic!("expected GatePaused, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_ask_each_time_does_not_override_unless_auto_approved_tools() {
+        let adapter = make_approval_test_adapter_with_permission(None)
+            .await
+            .with_global_auto_approve(true);
+
+        let result = adapter
+            .execute_action(
+                "approval_test",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_global_auto_approve_db_default"),
+                ),
+            )
+            .await
+            .expect("fallback ask_each_time should not override an unless_auto_approved tool");
+
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn always_allow_default_skips_unless_auto_approved_gates_without_override() {
+        let adapter = make_default_allow_named_adapter()
+            .await
+            .with_global_auto_approve(true);
+
+        let result = adapter
+            .execute_action(
+                "message",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_global_auto_approve_default_allow"),
+                ),
+            )
+            .await
+            .expect("always_allow default should bypass normal approval gate");
+
+        assert!(!result.is_error);
+    }
+
+    // This test intentionally serializes process-global env mutation across the
+    // async restart path to avoid cross-test leakage from restart env toggles.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn restart_uses_default_permission_floor_without_explicit_override() {
+        let _guard = crate::config::helpers::lock_env();
+        let original_in_docker = std::env::var_os("T3CLAW_IN_DOCKER");
+        let original_disable_restart = std::env::var_os("T3CLAW_DISABLE_RESTART");
+        // SAFETY: This test serializes env access with lock_env().
+        unsafe {
+            std::env::set_var("T3CLAW_IN_DOCKER", "true");
+            std::env::set_var("T3CLAW_DISABLE_RESTART", "true");
+        }
+
+        let adapter = make_restart_adapter_with_permission(None).await;
+
+        let err = adapter
+            .execute_action(
+                "restart",
+                serde_json::json!({"delay_secs": 1}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_restart_default_floor"),
+                ),
+            )
+            .await
+            .expect_err("restart should still pause for approval by default");
+
+        // SAFETY: This test serializes env access with lock_env().
+        unsafe {
+            if let Some(value) = original_in_docker {
+                std::env::set_var("T3CLAW_IN_DOCKER", value);
+            } else {
+                std::env::remove_var("T3CLAW_IN_DOCKER");
+            }
+            if let Some(value) = original_disable_restart {
+                std::env::set_var("T3CLAW_DISABLE_RESTART", value);
+            } else {
+                std::env::remove_var("T3CLAW_DISABLE_RESTART");
+            }
+        }
+
+        match err {
+            EngineError::GatePaused { gate_name, .. } => {
+                assert_eq!(gate_name, "approval");
+            }
+            other => panic!("expected GatePaused, got {other:?}"),
+        }
+    }
+
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn restart_explicit_always_allow_override_bypasses_default_gate() {
+        let _guard = crate::config::helpers::lock_env();
+        let original_in_docker = std::env::var_os("T3CLAW_IN_DOCKER");
+        let original_disable_restart = std::env::var_os("T3CLAW_DISABLE_RESTART");
+        // SAFETY: This test serializes env access with lock_env().
+        unsafe {
+            std::env::set_var("T3CLAW_IN_DOCKER", "true");
+            std::env::set_var("T3CLAW_DISABLE_RESTART", "true");
+        }
+
+        let adapter = make_restart_adapter_with_permission(Some(
+            crate::tools::permissions::PermissionState::AlwaysAllow,
+        ))
+        .await;
+
+        let result = adapter
+            .execute_action(
+                "restart",
+                serde_json::json!({"delay_secs": 1}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_restart_explicit_allow_floor"),
+                ),
+            )
+            .await
+            .expect("explicit always_allow should bypass the default approval gate");
+
+        // SAFETY: This test serializes env access with lock_env().
+        unsafe {
+            if let Some(value) = original_in_docker {
+                std::env::set_var("T3CLAW_IN_DOCKER", value);
+            } else {
+                std::env::remove_var("T3CLAW_IN_DOCKER");
+            }
+            if let Some(value) = original_disable_restart {
+                std::env::set_var("T3CLAW_DISABLE_RESTART", value);
+            } else {
+                std::env::remove_var("T3CLAW_DISABLE_RESTART");
+            }
+        }
+
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn explicit_always_allow_override_preserves_intrinsic_always_approval() {
+        let adapter = make_always_approval_test_adapter_with_permission(Some(
+            crate::tools::permissions::PermissionState::AlwaysAllow,
+        ))
+        .await;
+
+        let err = adapter
+            .execute_action(
+                "always_approval_test",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_explicit_always_allow_intrinsic_always"),
+                ),
+            )
+            .await
+            .expect_err("explicit always_allow must not bypass intrinsic Always approval");
+
+        match err {
+            EngineError::GatePaused {
+                gate_name,
+                action_name,
+                resume_kind,
+                ..
+            } => {
+                assert_eq!(gate_name, "approval");
+                assert_eq!(action_name, "always_approval_test");
+                match *resume_kind {
+                    t3claw_engine::ResumeKind::Approval { allow_always } => {
+                        assert!(!allow_always);
+                    }
+                    other => panic!("expected approval resume kind, got {other:?}"),
+                }
+            }
+            other => panic!("expected approval gate pause, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_always_allow_override_beats_ask_each_time_fallback() {
+        let adapter = make_approval_test_adapter_with_permission(Some(
+            crate::tools::permissions::PermissionState::AlwaysAllow,
+        ))
+        .await
+        .with_global_auto_approve(true);
+
+        let result = adapter
+            .execute_action(
+                "approval_test",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_global_auto_approve_db_always_allow"),
+                ),
+            )
+            .await
+            .expect("explicit always_allow should bypass ask_each_time fallback");
+
+        assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn explicit_ask_each_time_override_beats_global_auto_approve() {
+        let adapter = make_approval_test_adapter_with_permission(Some(
+            crate::tools::permissions::PermissionState::AskEachTime,
+        ))
+        .await
+        .with_global_auto_approve(true);
+
+        let err = adapter
+            .execute_action(
+                "approval_test",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_global_auto_approve_db_override"),
+                ),
+            )
+            .await
+            .expect_err("explicit ask_each_time should still gate for approval");
+
+        match err {
+            EngineError::GatePaused { gate_name, .. } => {
+                assert_eq!(gate_name, "approval");
+            }
+            other => panic!("expected GatePaused, got {other:?}"),
+        }
+    }
+
+    /// #3559 security review (finding 1): when a user explicitly sets a
+    /// tool's permission to a value that happens to match the code-level
+    /// seeded default (e.g. `tool_install` → `AskEachTime`, which is also
+    /// the seeded baseline), pre-#3559's `ToolPermissionSnapshot::resolve_permission`
+    /// collapsed the DB row to `explicit = None`, then this function's
+    /// `is_explicit_ask` check failed, and `auto_approve_tools` bypassed
+    /// the gate — silently dropping the user's explicit choice.
+    ///
+    /// The companion regression at `bridge::tool_permissions::tests::user_explicit_value_matching_seeded_default_stays_explicit`
+    /// covers the resolver in isolation. Per `.claude/rules/testing.md`
+    /// "Test Through the Caller", this test additionally drives the
+    /// side-effecting call site (`execute_action` → `enforce_tool_permission`)
+    /// with a tool whose name matches a seeded default in `seeded_default_permission`,
+    /// so the value-equality bug would surface here if it were ever
+    /// reintroduced in the resolver.
+    #[tokio::test]
+    async fn explicit_ask_each_time_for_seeded_default_tool_still_gates() {
+        let db_path = std::env::temp_dir().join(format!(
+            "t3claw-seeded-ask-each-time-{}.db",
+            uuid::Uuid::new_v4()
+        ));
+        let db = crate::db::connect_from_config(&crate::config::DatabaseConfig::from_libsql_path(
+            db_path.to_str().expect("db path"),
+            None,
+            None,
+        ))
+        .await
+        .expect("db");
+        // Write a user-explicit `AskEachTime` for `tool_install`. Confirm
+        // that `seeded_default_permission("tool_install") == AskEachTime`
+        // — if the seeded baseline ever changes, this test must be
+        // updated to keep its value-equality coverage meaningful.
+        assert_eq!(
+            crate::tools::permissions::seeded_default_permission("tool_install"),
+            Some(crate::tools::permissions::PermissionState::AskEachTime),
+            "this regression test assumes tool_install's seeded baseline is AskEachTime; \
+             if you changed it, point this test at a different seeded-AskEachTime tool"
+        );
+        db.set_setting(
+            "test_user",
+            "tool_permissions.tool_install",
+            &serde_json::to_value(crate::tools::permissions::PermissionState::AskEachTime)
+                .expect("serialize permission"),
+        )
+        .await
+        .expect("save tool permission");
+
+        let tools = Arc::new(ToolRegistry::new().with_database(db));
+        tools.register(Arc::new(SeededAskEachTimeTestTool)).await;
+        let adapter = EffectBridgeAdapter::new(
+            tools,
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        )
+        .with_global_auto_approve(true);
+
+        let err = adapter
+            .execute_action(
+                "tool_install",
+                serde_json::json!({"name": "gmail"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_seeded_ask_each_time"),
+                ),
+            )
+            .await
+            .expect_err(
+                "user-explicit AskEachTime must gate even when value matches seeded default \
+                 and AGENT_AUTO_APPROVE_TOOLS=true",
+            );
+
+        match err {
+            EngineError::GatePaused { gate_name, .. } => {
+                assert_eq!(
+                    gate_name, "approval",
+                    "explicit user choice must surface as approval gate, not bypass"
+                );
+            }
+            other => panic!("expected GatePaused, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_disabled_override_denies_tool_execution() {
+        let adapter = make_approval_test_adapter_with_permission(Some(
+            crate::tools::permissions::PermissionState::Disabled,
+        ))
+        .await
+        .with_global_auto_approve(true);
+
+        let err = adapter
+            .execute_action(
+                "approval_test",
+                serde_json::json!({"value": "x"}),
+                &lease(),
+                &exec_ctx(
+                    t3claw_engine::ThreadId::new(),
+                    Some("call_global_auto_approve_db_disabled"),
+                ),
+            )
+            .await
+            .expect_err("explicit disabled should deny execution");
+
+        match err {
+            EngineError::LeaseDenied { reason } => {
+                assert!(reason.contains("Tool 'approval_test' is disabled"));
+            }
+            other => panic!("expected LeaseDenied, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn hyphenated_engine_native_action_uses_snapshot_canonical_name() {
+        let adapter = make_adapter_with_missions().await;
+        let mut ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("call_mission_alias"));
+        ctx.available_actions_snapshot =
+            Some(crate::bridge::engine_actions::mission_capability_actions().into());
+
+        let result = adapter
+            .execute_action(
+                "mission-create",
+                serde_json::json!({
+                    "name": "daily check",
+                    "goal": "check systems",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("hyphenated mission action should canonicalize through the snapshot");
+
+        assert!(!result.is_error, "got error: {}", result.output);
+        assert_eq!(result.action_name, "mission_create");
+        assert_eq!(
+            result.output.get("status").and_then(|value| value.as_str()),
+            Some("created")
+        );
     }
 
     #[tokio::test]
@@ -2624,20 +4238,14 @@ mod tests {
         assert!(matches!(third, Err(EngineError::GatePaused { .. })));
     }
 
-    /// End-to-end gate verification for the real `MemoryWriteTool`.
+    /// End-to-end permission verification for the real `MemoryWriteTool`.
     ///
-    /// PR #1958 reviewer-flagged regression: the original effect bridge
-    /// mapped `ApprovalRequirement::Always` to `LeaseDenied` (a hard
-    /// refusal). Round 3 fixed both sides: the bridge now maps `Always`
-    /// to `GatePaused(Approval { allow_always: false })`, and
-    /// `MemoryWriteTool::requires_approval` returns `Always` for
-    /// protected orchestrator targets so session auto-approve cannot
-    /// silently skip the gate. This test asserts the full path:
-    /// `requires_approval` → adapter → gate, with the real tool wired
-    /// into a real registry.
+    /// Engine v2 resolves missing `memory_write` rows through the seeded
+    /// `AlwaysAllow` default, but protected targets still raise a per-call
+    /// `Always` floor that must not be bypassed.
     #[cfg(feature = "libsql")]
     #[tokio::test]
-    async fn memory_write_orchestrator_target_paused_for_approval_when_self_modify_enabled() {
+    async fn memory_write_orchestrator_target_preserves_always_approval_floor() {
         use crate::db::Database;
         use crate::db::libsql::LibSqlBackend;
         use crate::tools::builtin::memory::MemoryWriteTool;
@@ -2684,30 +4292,20 @@ mod tests {
         match result {
             Err(EngineError::GatePaused {
                 gate_name,
+                action_name,
                 resume_kind,
                 ..
             }) => {
                 assert_eq!(gate_name, "approval");
+                assert_eq!(action_name, "memory_write");
                 match *resume_kind {
                     t3claw_engine::ResumeKind::Approval { allow_always } => {
-                        assert!(
-                            !allow_always,
-                            "protected orchestrator writes must set allow_always=false \
-                             to prevent session auto-approve bypass"
-                        );
+                        assert!(!allow_always);
                     }
-                    other => panic!("expected Approval resume kind, got {other:?}"),
+                    other => panic!("expected approval resume kind, got {other:?}"),
                 }
             }
-            Err(EngineError::LeaseDenied { reason }) => {
-                panic!(
-                    "memory_write protected target was hard-denied (LeaseDenied) \
-                     instead of pausing for approval — this is the regression \
-                     that PR #1958's Always fix is meant to prevent. \
-                     Reason: {reason}"
-                );
-            }
-            other => panic!("expected GatePaused(approval), got {other:?}"),
+            other => panic!("expected approval gate pause, got {other:?}"),
         }
     }
 
@@ -2787,7 +4385,7 @@ mod tests {
         );
     }
 
-    /// Regression for nearai/ironclaw#ironclaw#2206: a `tool_activate`/`tool_auth`
+    /// Regression for nearai/ironclaw#2206: a `tool_install`/`tool_auth`
     /// extension result containing a non-https `auth_url` (e.g.
     /// `javascript:alert(1)`) must be sanitized to `None` before it reaches
     /// `ResumeKind::Authentication` and is forwarded onto the gate stream.
@@ -2797,7 +4395,7 @@ mod tests {
     /// isolation, per the "Test Through the Caller, Not Just the Helper"
     /// rule in `.claude/rules/testing.md`.
     #[tokio::test]
-    async fn auth_gate_strips_non_https_auth_url_from_tool_activate_output() {
+    async fn auth_gate_strips_non_https_auth_url_from_tool_install_output() {
         use t3claw_safety::SafetyConfig;
 
         struct OAuthPromptTool;
@@ -2805,11 +4403,11 @@ mod tests {
         #[async_trait]
         impl Tool for OAuthPromptTool {
             fn name(&self) -> &str {
-                "tool_activate"
+                "tool_install"
             }
 
             fn description(&self) -> &str {
-                "Test stub for tool_activate that returns a malicious auth_url"
+                "Test stub for tool_install that returns a malicious auth_url"
             }
 
             fn parameters_schema(&self) -> serde_json::Value {
@@ -2840,6 +4438,9 @@ mod tests {
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(OAuthPromptTool)).await;
 
+        // tool_install normally pauses on UnlessAutoApproved before
+        // reaching the auth-gate path. Skip that approval gate so the
+        // test exercises only the auth_url sanitization path.
         let adapter = EffectBridgeAdapter::new(
             tools,
             Arc::new(SafetyLayer::new(&SafetyConfig {
@@ -2847,11 +4448,12 @@ mod tests {
                 injection_check_enabled: false,
             })),
             Arc::new(HookRegistry::default()),
-        );
+        )
+        .with_global_auto_approve(true);
 
         let result = adapter
             .execute_action(
-                "tool_activate",
+                "tool_install",
                 serde_json::json!({}),
                 &lease(),
                 &exec_ctx(
@@ -2887,7 +4489,7 @@ mod tests {
     /// Sibling regression: a well-formed `https://` auth_url must still
     /// flow through unmodified. Guards against an over-eager sanitizer.
     #[tokio::test]
-    async fn auth_gate_preserves_https_auth_url_from_tool_activate_output() {
+    async fn auth_gate_preserves_https_auth_url_from_tool_install_output() {
         use t3claw_safety::SafetyConfig;
 
         struct OAuthPromptTool;
@@ -2895,11 +4497,11 @@ mod tests {
         #[async_trait]
         impl Tool for OAuthPromptTool {
             fn name(&self) -> &str {
-                "tool_activate"
+                "tool_install"
             }
 
             fn description(&self) -> &str {
-                "Test stub for tool_activate that returns a valid auth_url"
+                "Test stub for tool_install that returns a valid auth_url"
             }
 
             fn parameters_schema(&self) -> serde_json::Value {
@@ -2930,6 +4532,9 @@ mod tests {
         let tools = Arc::new(ToolRegistry::new());
         tools.register(Arc::new(OAuthPromptTool)).await;
 
+        // tool_install normally pauses on UnlessAutoApproved before
+        // reaching the auth-gate path. Skip that approval gate so the
+        // test exercises only the auth_url sanitization path.
         let adapter = EffectBridgeAdapter::new(
             tools,
             Arc::new(SafetyLayer::new(&SafetyConfig {
@@ -2937,11 +4542,12 @@ mod tests {
                 injection_check_enabled: false,
             })),
             Arc::new(HookRegistry::default()),
-        );
+        )
+        .with_global_auto_approve(true);
 
         let result = adapter
             .execute_action(
-                "tool_activate",
+                "tool_install",
                 serde_json::json!({}),
                 &lease(),
                 &exec_ctx(
@@ -3313,9 +4919,14 @@ mod tests {
 
     #[test]
     fn extract_guardrails_rejects_string_typed_integers() {
-        // Regression: LLMs pass numeric params as strings (e.g. cooldown_secs="0").
-        // The old code silently ignored the wrong type, so mission_update
-        // returned {"status":"updated"} but changed nothing in the database.
+        // Defense-in-depth: this helper is called directly on the raw
+        // params object and is the last line of defense if some future
+        // code path bypasses the schema-guided coercion that
+        // `execute_action_internal` now runs. A string-typed integer
+        // here means coercion didn't happen — fail loudly rather than
+        // silently dropping the value (the bug shape from before #2630).
+        // End-to-end coercion of `cooldown_secs="120"` is covered by
+        // `mission_create_string_guardrails_coerced_via_execute_action`.
         let params = serde_json::json!({"cooldown_secs": "0", "max_concurrent": "2"});
         let mut updates = t3claw_engine::MissionUpdate::default();
         let err = extract_guardrails(&params, &mut updates).unwrap_err();
@@ -3415,6 +5026,12 @@ mod tests {
             thread_goal: Some(
                 "Summarize the product feedback for me right now. Do it immediately.".to_string(),
             ),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         assert!(should_reject_immediate_mission_create(&ctx));
@@ -3434,6 +5051,12 @@ mod tests {
             thread_goal: Some(
                 "Create a daily routine to summarize product feedback and run it now.".to_string(),
             ),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         assert!(!should_reject_immediate_mission_create(&ctx));
@@ -3451,6 +5074,12 @@ mod tests {
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
             thread_goal: Some("Summarize every product feedback item right now.".to_string()),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         assert!(should_reject_immediate_mission_create(&ctx));
@@ -3468,6 +5097,12 @@ mod tests {
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
             thread_goal: Some("Set up the product feedback summary right now.".to_string()),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         assert!(should_reject_immediate_mission_create(&ctx));
@@ -3488,6 +5123,12 @@ mod tests {
             source_channel: Some("gateway".to_string()),
             user_timezone: None,
             thread_goal: Some("Set up monitoring now.".to_string()),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         // Should NOT be rejected — "monitoring" implies scheduling intent.
@@ -3506,6 +5147,12 @@ mod tests {
             source_channel: None,
             user_timezone: None,
             thread_goal: Some("Summarize feedback immediately.".to_string()),
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         assert!(!should_reject_immediate_mission_create(&ctx));
@@ -3685,7 +5332,16 @@ mod tests {
             async fn available_actions(
                 &self,
                 _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, EngineError> {
+                Ok(vec![])
+            }
+
+            async fn available_capabilities(
+                &self,
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, EngineError> {
                 Ok(vec![])
             }
         }
@@ -3719,6 +5375,12 @@ mod tests {
                 source_channel: Some("gateway".to_string()),
                 user_timezone: None,
                 thread_goal: Some(goal.to_string()),
+                available_actions_snapshot: None,
+                available_action_inventory_snapshot: None,
+                conversation_scope: None,
+                gate_controller: t3claw_engine::CancellingGateController::arc(),
+                call_approval_granted: false,
+                conversation_id: None,
             }
         }
 
@@ -3911,8 +5573,6 @@ mod tests {
     fn auth_tools_are_v1_auth() {
         assert!(is_v1_auth_tool("tool_auth"));
         assert!(is_v1_auth_tool("tool-auth"));
-        assert!(!is_v1_auth_tool("tool_activate"));
-        assert!(!is_v1_auth_tool("tool-activate"));
     }
 
     #[test]
@@ -4000,6 +5660,12 @@ mod tests {
             source_channel: None,
             user_timezone: None,
             thread_goal: None,
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         let result = adapter.execute_action("http", params, &lease, &ctx).await;
@@ -4020,115 +5686,6 @@ mod tests {
             other => {
                 panic!("Expected GatePaused for authentication preflight, got: {other:?}");
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn tool_activate_awaiting_authorization_becomes_auth_gate() {
-        struct ActivateTool;
-
-        #[async_trait]
-        impl Tool for ActivateTool {
-            fn name(&self) -> &str {
-                "tool_activate"
-            }
-
-            fn description(&self) -> &str {
-                "activate"
-            }
-
-            fn parameters_schema(&self) -> serde_json::Value {
-                serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"}
-                    }
-                })
-            }
-
-            async fn execute(
-                &self,
-                _params: serde_json::Value,
-                _ctx: &crate::context::JobContext,
-            ) -> Result<ToolOutput, ToolError> {
-                Ok(ToolOutput::success(
-                    serde_json::json!({
-                        "name": "notion",
-                        "status": "awaiting_authorization",
-                        "auth_url": "https://example.com/oauth",
-                    }),
-                    std::time::Duration::from_millis(1),
-                ))
-            }
-        }
-
-        let tools = Arc::new(ToolRegistry::new());
-        tools.register(Arc::new(ActivateTool)).await;
-
-        let adapter = EffectBridgeAdapter::new(
-            tools,
-            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
-                max_output_length: 10_000,
-                injection_check_enabled: false,
-            })),
-            Arc::new(HookRegistry::default()),
-        );
-
-        let lease = t3claw_engine::CapabilityLease {
-            id: t3claw_engine::types::capability::LeaseId::new(),
-            thread_id: t3claw_engine::ThreadId::new(),
-            capability_name: "tools".into(),
-            granted_actions: t3claw_engine::GrantedActions::All,
-            granted_at: chrono::Utc::now(),
-            expires_at: None,
-            max_uses: None,
-            uses_remaining: None,
-            revoked: false,
-            revoked_reason: None,
-        };
-        let ctx = t3claw_engine::ThreadExecutionContext {
-            thread_id: t3claw_engine::ThreadId::new(),
-            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
-            project_id: t3claw_engine::ProjectId::new(),
-            user_id: "test_user".to_string(),
-            step_id: t3claw_engine::StepId::new(),
-            current_call_id: Some("call_123".to_string()),
-            source_channel: None,
-            user_timezone: None,
-            thread_goal: None,
-        };
-
-        let result = adapter
-            .execute_action(
-                "tool_activate",
-                serde_json::json!({"name": "notion"}),
-                &lease,
-                &ctx,
-            )
-            .await;
-
-        match result {
-            Err(EngineError::GatePaused {
-                gate_name,
-                action_name,
-                resume_kind,
-                ..
-            }) => {
-                assert_eq!(gate_name, "authentication");
-                assert_eq!(action_name, "tool_activate");
-                match *resume_kind {
-                    t3claw_engine::ResumeKind::Authentication {
-                        credential_name,
-                        auth_url,
-                        ..
-                    } => {
-                        assert_eq!(credential_name, "notion");
-                        assert_eq!(auth_url.as_deref(), Some("https://example.com/oauth"));
-                    }
-                    other => panic!("expected authentication resume kind, got {other:?}"),
-                }
-            }
-            other => panic!("expected auth gate pause, got {other:?}"),
         }
     }
 
@@ -4182,7 +5739,8 @@ mod tests {
                 injection_check_enabled: false,
             })),
             Arc::new(HookRegistry::default()),
-        );
+        )
+        .with_global_auto_approve(true);
 
         let lease = t3claw_engine::CapabilityLease {
             id: t3claw_engine::types::capability::LeaseId::new(),
@@ -4206,6 +5764,12 @@ mod tests {
             source_channel: None,
             user_timezone: None,
             thread_goal: None,
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
         };
 
         let result = adapter
@@ -4231,7 +5795,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn available_actions_include_latent_inactive_provider_actions() {
+    async fn available_actions_omit_latent_inactive_provider_actions() {
         use crate::secrets::InMemorySecretsStore;
         use crate::secrets::SecretsCrypto;
         use crate::tools::mcp::process::McpProcessManager;
@@ -4290,8 +5854,547 @@ mod tests {
             )))
             .await;
 
-        let actions = adapter.available_actions(&[]).await.expect("actions");
-        assert!(actions.iter().any(|action| action.name == "latent_tool"));
+        let actions = adapter
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await
+            .expect("actions");
+        assert!(
+            !actions.iter().any(|action| action.name == "latent_tool"),
+            "latent WASM tool should stay out of model-facing available_actions; got: {:?}",
+            actions.iter().map(|a| &a.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn available_capabilities_include_latent_provider_activation_entry() {
+        use crate::secrets::InMemorySecretsStore;
+        use crate::secrets::SecretsCrypto;
+        use crate::tools::mcp::process::McpProcessManager;
+        use crate::tools::mcp::session::McpSessionManager;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("tools")).expect("tools dir");
+        std::fs::write(
+            dir.path().join("tools").join("latent_tool.wasm"),
+            b"fake-wasm",
+        )
+        .expect("write wasm");
+        std::fs::write(
+            dir.path()
+                .join("tools")
+                .join("latent_tool.capabilities.json"),
+            r#"{"description":"latent adapter test"}"#,
+        )
+        .expect("write capabilities");
+
+        let key = secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
+        let crypto = Arc::new(SecretsCrypto::new(key).expect("crypto"));
+        let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+            Arc::new(InMemorySecretsStore::new(crypto));
+
+        let tools = Arc::new(ToolRegistry::new());
+        let ext_mgr = Arc::new(crate::extensions::ExtensionManager::new(
+            Arc::new(McpSessionManager::new()),
+            Arc::new(McpProcessManager::new()),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            None,
+            None,
+            dir.path().join("tools"),
+            dir.path().join("channels"),
+            None,
+            "test_user".to_string(),
+            None,
+            vec![],
+        ));
+
+        let adapter = EffectBridgeAdapter::new(
+            Arc::clone(&tools),
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        );
+        adapter
+            .set_auth_manager(Arc::new(AuthManager::new(
+                secrets,
+                None,
+                Some(ext_mgr),
+                Some(Arc::clone(&tools)),
+            )))
+            .await;
+
+        let result = adapter
+            .available_capabilities(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await;
+
+        match result {
+            Ok(capabilities) => {
+                let latent = capabilities
+                    .into_iter()
+                    .find(|summary| summary.name == "latent_tool")
+                    .expect("latent tool should surface as an activatable capability");
+                assert!(matches!(
+                    latent.status,
+                    t3claw_engine::CapabilityStatus::Inactive
+                        | t3claw_engine::CapabilityStatus::AvailableNotInstalled
+                ));
+                assert_eq!(latent.action_preview, vec!["latent_tool".to_string()]);
+            }
+            other => panic!("expected latent capability background entry, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn available_actions_omit_registered_tool_when_provider_is_not_installed() {
+        use crate::secrets::InMemorySecretsStore;
+        use crate::secrets::SecretsCrypto;
+        use crate::tools::mcp::process::McpProcessManager;
+        use crate::tools::mcp::session::McpSessionManager;
+
+        struct LinearSearchTool;
+
+        #[async_trait]
+        impl crate::tools::Tool for LinearSearchTool {
+            fn name(&self) -> &str {
+                "linear_search"
+            }
+
+            fn description(&self) -> &str {
+                "Search Linear issues"
+            }
+
+            fn parameters_schema(&self) -> serde_json::Value {
+                serde_json::json!({"type": "object"})
+            }
+
+            async fn execute(
+                &self,
+                _: serde_json::Value,
+                _: &crate::context::JobContext,
+            ) -> Result<crate::tools::ToolOutput, crate::tools::ToolError> {
+                Ok(crate::tools::ToolOutput::success(
+                    serde_json::json!({}),
+                    std::time::Duration::from_millis(1),
+                ))
+            }
+
+            fn provider_extension(&self) -> Option<&str> {
+                Some("linear")
+            }
+        }
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("tools")).expect("tools dir");
+        std::fs::write(dir.path().join("tools").join("linear.wasm"), b"fake-wasm")
+            .expect("write wasm");
+        std::fs::write(
+            dir.path().join("tools").join("linear.capabilities.json"),
+            r#"{"description":"linear provider"}"#,
+        )
+        .expect("write capabilities");
+
+        let key = secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
+        let crypto = Arc::new(SecretsCrypto::new(key).expect("crypto"));
+        let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+            Arc::new(InMemorySecretsStore::new(crypto));
+
+        let tools = Arc::new(ToolRegistry::new());
+        tools.register(Arc::new(LinearSearchTool)).await;
+        let ext_mgr = Arc::new(crate::extensions::ExtensionManager::new(
+            Arc::new(McpSessionManager::new()),
+            Arc::new(McpProcessManager::new()),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            None,
+            None,
+            dir.path().join("tools"),
+            dir.path().join("channels"),
+            None,
+            "test_user".to_string(),
+            None,
+            vec![],
+        ));
+
+        let adapter = EffectBridgeAdapter::new(
+            Arc::clone(&tools),
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        );
+        adapter
+            .set_auth_manager(Arc::new(AuthManager::new(
+                secrets,
+                None,
+                Some(ext_mgr),
+                Some(Arc::clone(&tools)),
+            )))
+            .await;
+
+        let actions = adapter
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await
+            .expect("actions");
+        assert!(!actions.iter().any(|action| action.name == "linear_search"));
+    }
+
+    struct ProviderActionTool {
+        name: String,
+        description: String,
+        provider_extension: String,
+        parameters_schema: serde_json::Value,
+    }
+
+    struct ProviderFixture {
+        adapter: EffectBridgeAdapter,
+        _dir: tempfile::TempDir,
+    }
+
+    #[async_trait]
+    impl crate::tools::Tool for ProviderActionTool {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn description(&self) -> &str {
+            &self.description
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            self.parameters_schema.clone()
+        }
+
+        async fn execute(
+            &self,
+            _: serde_json::Value,
+            _: &crate::context::JobContext,
+        ) -> Result<crate::tools::ToolOutput, crate::tools::ToolError> {
+            Ok(crate::tools::ToolOutput::success(
+                serde_json::json!({}),
+                std::time::Duration::from_millis(1),
+            ))
+        }
+
+        fn provider_extension(&self) -> Option<&str> {
+            Some(&self.provider_extension)
+        }
+    }
+
+    async fn make_adapter_with_installed_provider_fixture(
+        provider_name: &str,
+        action_name: &str,
+        capabilities: serde_json::Value,
+        parameters_schema: serde_json::Value,
+    ) -> ProviderFixture {
+        use crate::secrets::InMemorySecretsStore;
+        use crate::secrets::SecretsCrypto;
+        use crate::tools::mcp::process::McpProcessManager;
+        use crate::tools::mcp::session::McpSessionManager;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir_path = dir.path().to_path_buf();
+        std::fs::create_dir_all(dir_path.join("tools")).expect("tools dir");
+        std::fs::write(
+            dir_path.join("tools").join(format!("{provider_name}.wasm")),
+            b"fake-wasm",
+        )
+        .expect("write wasm");
+        std::fs::write(
+            dir_path
+                .join("tools")
+                .join(format!("{provider_name}.capabilities.json")),
+            serde_json::to_vec(&capabilities).expect("serialize capabilities"),
+        )
+        .expect("write capabilities");
+
+        let key = secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
+        let crypto = Arc::new(SecretsCrypto::new(key).expect("crypto"));
+        let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+            Arc::new(InMemorySecretsStore::new(crypto));
+
+        let tools = Arc::new(ToolRegistry::new());
+        tools
+            .register(Arc::new(ProviderActionTool {
+                name: action_name.to_string(),
+                description: format!("{action_name} test action"),
+                provider_extension: provider_name.to_string(),
+                parameters_schema,
+            }))
+            .await;
+
+        let ext_mgr = Arc::new(crate::extensions::ExtensionManager::new(
+            Arc::new(McpSessionManager::new()),
+            Arc::new(McpProcessManager::new()),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            None,
+            None,
+            dir_path.join("tools"),
+            dir_path.join("channels"),
+            None,
+            "test_user".to_string(),
+            None,
+            vec![],
+        ));
+
+        let adapter = EffectBridgeAdapter::new(
+            Arc::clone(&tools),
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        );
+        adapter
+            .set_auth_manager(Arc::new(AuthManager::new(
+                secrets,
+                None,
+                Some(ext_mgr),
+                Some(Arc::clone(&tools)),
+            )))
+            .await;
+
+        ProviderFixture { adapter, _dir: dir }
+    }
+
+    #[tokio::test]
+    async fn available_actions_keep_installed_needs_auth_provider_action() {
+        // Post-#3133/#3166: an installed-but-unauthenticated provider
+        // tool (e.g. gmail) STAYS on the callable surface. The engine
+        // raises an Authentication gate at execute time when the
+        // declared credential is missing and the inline-await
+        // machinery resumes the action after OAuth completes. The
+        // model can call the tool directly with no separate enablement
+        // step. Pre-#3133 the action was hidden until auth completed.
+        let fixture = make_adapter_with_installed_provider_fixture(
+            "gmail",
+            "gmail_send",
+            serde_json::json!({
+                "auth": {
+                    "secret_name": "google_oauth_token",
+                    "display_name": "Google",
+                    "oauth": {
+                        "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
+                        "token_url": "https://oauth2.googleapis.com/token",
+                        "client_id_env": "GOOGLE_OAUTH_CLIENT_ID",
+                        "client_secret_env": "GOOGLE_OAUTH_CLIENT_SECRET",
+                        "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+                        "use_pkce": false,
+                        "extra_params": {
+                            "access_type": "offline",
+                            "prompt": "consent"
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({"type": "object"}),
+        )
+        .await;
+
+        let actions = fixture
+            .adapter
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await
+            .expect("actions");
+        assert!(
+            actions.iter().any(|action| action.name == "gmail_send"),
+            "NeedsAuth provider tool should be callable; auth resolves at \
+             execute time via inline-await. actions={actions:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn available_actions_omit_installed_needs_setup_provider_action() {
+        let fixture = make_adapter_with_installed_provider_fixture(
+            "notion",
+            "notion_search",
+            serde_json::json!({
+                "setup": {
+                    "required_secrets": [
+                        {
+                            "name": "notion_api_key",
+                            "prompt": "Provide your Notion API key"
+                        }
+                    ]
+                }
+            }),
+            serde_json::json!({"type": "object"}),
+        )
+        .await;
+
+        let actions = fixture
+            .adapter
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await
+            .expect("actions");
+        assert!(!actions.iter().any(|action| action.name == "notion_search"));
+    }
+
+    #[tokio::test]
+    async fn available_actions_omit_installed_inactive_provider_action() {
+        let fixture = make_adapter_with_installed_provider_fixture(
+            "github",
+            "github_search",
+            serde_json::json!({
+                "description": "GitHub provider fixture"
+            }),
+            serde_json::json!({"type": "object"}),
+        )
+        .await;
+
+        let actions = fixture
+            .adapter
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
+            .await
+            .expect("actions");
+        assert!(!actions.iter().any(|action| action.name == "github_search"));
+    }
+
+    #[tokio::test]
+    async fn available_action_inventory_keeps_provider_actions_inline_callable() {
+        let fixture = make_adapter_with_installed_provider_fixture(
+            "gmail",
+            "gmail",
+            serde_json::json!({
+                "description": "Gmail provider fixture"
+            }),
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+            }),
+        )
+        .await;
+
+        let base_ctx = exec_ctx(t3claw_engine::ThreadId::new(), None);
+        let inventory = fixture
+            .adapter
+            .available_action_inventory(&[], &base_ctx)
+            .await
+            .expect("inventory");
+
+        assert!(
+            inventory.inline.iter().any(|action| action.name == "gmail"),
+            "provider action should stay inline-callable"
+        );
+        let gmail = inventory
+            .inline
+            .iter()
+            .find(|action| action.name == "gmail")
+            .expect("provider action should be inline");
+        assert_eq!(gmail.description, "gmail test action");
+        assert_eq!(
+            gmail.parameters_schema,
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+            })
+        );
+
+        let actions = fixture
+            .adapter
+            .available_actions(&[], &base_ctx)
+            .await
+            .expect("actions");
+        assert!(
+            actions.iter().any(|action| action.name == "gmail"),
+            "provider action must remain callable in the provider surface"
+        );
+    }
+
+    #[tokio::test]
+    async fn available_capabilities_include_latent_provider_background() {
+        use crate::secrets::InMemorySecretsStore;
+        use crate::secrets::SecretsCrypto;
+        use crate::tools::mcp::process::McpProcessManager;
+        use crate::tools::mcp::session::McpSessionManager;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("tools")).expect("tools dir");
+        std::fs::write(
+            dir.path().join("tools").join("latent_tool.wasm"),
+            b"fake-wasm",
+        )
+        .expect("write wasm");
+        std::fs::write(
+            dir.path()
+                .join("tools")
+                .join("latent_tool.capabilities.json"),
+            r#"{"description":"latent capability test"}"#,
+        )
+        .expect("write capabilities");
+
+        let key = secrecy::SecretString::from(crate::secrets::keychain::generate_master_key_hex());
+        let crypto = Arc::new(SecretsCrypto::new(key).expect("crypto"));
+        let secrets: Arc<dyn crate::secrets::SecretsStore + Send + Sync> =
+            Arc::new(InMemorySecretsStore::new(crypto));
+
+        let tools = Arc::new(ToolRegistry::new());
+        let ext_mgr = Arc::new(crate::extensions::ExtensionManager::new(
+            Arc::new(McpSessionManager::new()),
+            Arc::new(McpProcessManager::new()),
+            Arc::clone(&secrets),
+            Arc::clone(&tools),
+            None,
+            None,
+            dir.path().join("tools"),
+            dir.path().join("channels"),
+            None,
+            "test_user".to_string(),
+            None,
+            vec![],
+        ));
+
+        let adapter = EffectBridgeAdapter::new(
+            Arc::clone(&tools),
+            Arc::new(SafetyLayer::new(&t3claw_safety::SafetyConfig {
+                max_output_length: 10_000,
+                injection_check_enabled: false,
+            })),
+            Arc::new(HookRegistry::default()),
+        );
+        adapter
+            .set_auth_manager(Arc::new(AuthManager::new(
+                secrets,
+                None,
+                Some(ext_mgr),
+                Some(Arc::clone(&tools)),
+            )))
+            .await;
+
+        let context = t3claw_engine::ThreadExecutionContext {
+            thread_id: t3claw_engine::ThreadId::new(),
+            thread_type: t3claw_engine::types::thread::ThreadType::Foreground,
+            project_id: t3claw_engine::ProjectId::new(),
+            user_id: "test_user".to_string(),
+            step_id: t3claw_engine::StepId::new(),
+            current_call_id: None,
+            source_channel: None,
+            user_timezone: None,
+            thread_goal: None,
+            available_actions_snapshot: None,
+            available_action_inventory_snapshot: None,
+            conversation_scope: None,
+            gate_controller: t3claw_engine::CancellingGateController::arc(),
+            call_approval_granted: false,
+            conversation_id: None,
+        };
+
+        let capabilities = adapter
+            .available_capabilities(&[], &context)
+            .await
+            .expect("capabilities");
+
+        assert!(
+            capabilities
+                .iter()
+                .any(|summary| summary.name == "latent_tool"),
+            "latent provider tool should appear in capability background when it is activatable"
+        );
     }
 
     #[tokio::test]
@@ -4360,7 +6463,8 @@ Use this skill to set up a Pika meeting.
                 injection_check_enabled: false,
             })),
             Arc::new(HookRegistry::default()),
-        );
+        )
+        .with_global_auto_approve(true);
         let store: Arc<dyn Store> = Arc::new(crate::bridge::store_adapter::HybridStore::new(None));
         adapter.set_engine_store(Arc::clone(&store)).await;
         adapter
@@ -5014,7 +7118,17 @@ Use this skill to set up a Pika meeting.
             async fn available_actions(
                 &self,
                 _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
             ) -> Result<Vec<t3claw_engine::ActionDef>, t3claw_engine::EngineError> {
+                Ok(vec![])
+            }
+
+            async fn available_capabilities(
+                &self,
+                _: &[t3claw_engine::CapabilityLease],
+                _: &t3claw_engine::ThreadExecutionContext,
+            ) -> Result<Vec<t3claw_engine::CapabilitySummary>, t3claw_engine::EngineError>
+            {
                 Ok(vec![])
             }
         }
@@ -5101,10 +7215,57 @@ Use this skill to set up a Pika meeting.
         );
     }
 
-    /// Regression: mission_create with string-typed guardrails (e.g.
-    /// cooldown_secs="0") must be caught before creating the mission.
+    /// Regression for #3132: string-typed guardrails (e.g.
+    /// `cooldown_secs="120"`) must be coerced to integers per the action's
+    /// JSON Schema before reaching the handler. Previously rejected with
+    /// `'cooldown_secs' must be an integer, got "120"`.
     #[tokio::test]
-    async fn mission_create_string_guardrails_rejected_via_execute_action() {
+    async fn mission_create_string_guardrails_coerced_via_execute_action() {
+        let (adapter, _store, dyn_store) =
+            make_adapter_with_missions_and_store(Arc::new(ToolRegistry::new())).await;
+        let result = adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "test",
+                    "goal": "do stuff",
+                    "cadence": "manual",
+                    "cooldown_secs": "120",
+                    "max_concurrent": "2",
+                    "dedup_window_secs": "30",
+                    "max_threads_per_day": "5",
+                }),
+                &lease(),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c3")),
+            )
+            .await
+            .expect("string-typed guardrails should be coerced and succeed");
+
+        assert!(!result.is_error, "got error: {}", result.output);
+        let mission_id_str = result
+            .output
+            .get("mission_id")
+            .and_then(|v| v.as_str())
+            .expect("should have mission_id");
+        let mission_id =
+            t3claw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
+        let mission = dyn_store
+            .load_mission(mission_id)
+            .await
+            .expect("load_mission")
+            .expect("mission persisted");
+        assert_eq!(mission.cooldown_secs, 120);
+        assert_eq!(mission.max_concurrent, 2);
+        assert_eq!(mission.dedup_window_secs, 30);
+        assert_eq!(mission.max_threads_per_day, 5);
+    }
+
+    /// Non-coercible strings (e.g. `cooldown_secs="abc"`) still surface as
+    /// a clean error rather than being silently dropped. Coercion leaves
+    /// the value unchanged when it can't parse to the target type, and
+    /// `extract_guardrails`'s strict check then rejects loudly.
+    #[tokio::test]
+    async fn mission_create_non_coercible_string_guardrail_returns_error() {
         let adapter = make_adapter_with_missions().await;
         let result = adapter
             .execute_action(
@@ -5113,10 +7274,10 @@ Use this skill to set up a Pika meeting.
                     "name": "test",
                     "goal": "do stuff",
                     "cadence": "manual",
-                    "cooldown_secs": "300"
+                    "cooldown_secs": "abc",
                 }),
                 &lease(),
-                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c3")),
+                &exec_ctx(t3claw_engine::ThreadId::new(), Some("c3b")),
             )
             .await
             .expect("should return Ok with is_error=true");
@@ -5165,11 +7326,13 @@ Use this skill to set up a Pika meeting.
         );
     }
 
-    /// Regression: mission_update with string-typed guardrails must be
-    /// caught at the execute_action level, not silently ignored.
+    /// Regression for #3132: `mission_update` with string-typed guardrails
+    /// must be coerced (not rejected) so LLM calls passing `"5"` for an
+    /// integer parameter succeed and persist the new value.
     #[tokio::test]
-    async fn mission_update_string_guardrails_rejected_via_execute_action() {
-        let adapter = make_adapter_with_missions().await;
+    async fn mission_update_string_guardrails_coerced_via_execute_action() {
+        let (adapter, _store, dyn_store) =
+            make_adapter_with_missions_and_store(Arc::new(ToolRegistry::new())).await;
         let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("u1"));
 
         // First create a mission to get an ID.
@@ -5187,40 +7350,39 @@ Use this skill to set up a Pika meeting.
             .await
             .expect("create should succeed");
         assert!(!create_result.is_error);
-        let mission_id = create_result
+        let mission_id_str = create_result
             .output
             .get("mission_id")
             .and_then(|v| v.as_str())
             .expect("should have mission_id");
 
-        // Now update with string-typed guardrails — should fail.
+        // Update with a string-typed integer — should be coerced and applied.
         let update_result = adapter
             .execute_action(
                 "mission_update",
                 serde_json::json!({
-                    "id": mission_id,
+                    "id": mission_id_str,
                     "max_concurrent": "5"
                 }),
                 &lease(),
                 &ctx,
             )
             .await
-            .expect("should return Ok with is_error=true");
+            .expect("string-typed guardrails should be coerced and succeed");
 
         assert!(
-            update_result.is_error,
-            "string guardrails should fail: {}",
+            !update_result.is_error,
+            "update should succeed after coercion: {}",
             update_result.output
         );
-        assert!(
-            update_result
-                .output
-                .get("error")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| s.contains("must be an integer")),
-            "got: {}",
-            update_result.output
-        );
+        let mission_id =
+            t3claw_engine::MissionId(uuid::Uuid::parse_str(mission_id_str).expect("uuid"));
+        let mission = dyn_store
+            .load_mission(mission_id)
+            .await
+            .expect("load_mission")
+            .expect("mission persisted");
+        assert_eq!(mission.max_concurrent, 5);
     }
 
     /// Verify system_event cadence round-trips through mission_list.
@@ -5472,6 +7634,507 @@ Use this skill to set up a Pika meeting.
         );
     }
 
+    /// Regression for #2583: `mission_fire` must accept a `name` parameter
+    /// and resolve it to the mission's id internally. Before this fix the
+    /// handler hard-required a UUID `id`, the `routine_fire` alias path
+    /// passed through the agent's `name=...` unchanged, and the resulting
+    /// "invalid mission id: invalid length 0" loop was the actual root
+    /// cause of the bug bash failure (not the budget-rework hypothesis in
+    /// the linked #2843).
+    #[tokio::test]
+    async fn mission_fire_resolves_by_name_when_id_absent() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("name-fire-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "fire-by-name",
+                    "goal": "verify name-based fire",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let fire = adapter
+            .execute_action(
+                "mission_fire",
+                serde_json::json!({"name": "fire-by-name"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("fire by name should succeed");
+
+        assert!(!fire.is_error, "fire by name failed: {}", fire.output);
+        assert_eq!(
+            fire.output.get("status").and_then(|v| v.as_str()),
+            Some("fired"),
+            "name-based fire should produce 'fired' status, got: {}",
+            fire.output
+        );
+        assert!(
+            fire.output
+                .get("thread_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| uuid::Uuid::parse_str(s).is_ok()),
+            "fired response must include a UUID thread_id"
+        );
+    }
+
+    /// Calling the LLM-facing `routine_fire` alias with a `name` parameter
+    /// must resolve through the bridge's mission_fire handler. This is the
+    /// exact path that #2583 reproduces — the agent calls
+    /// `routine_fire(name="bitcoin_price_checker")` and the handler
+    /// previously rejected with "invalid mission id" because it tried to
+    /// parse the routine name as a UUID.
+    #[tokio::test]
+    async fn routine_fire_alias_resolves_by_name_through_mission_fire() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("alias-name-fire-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "bitcoin_price_checker",
+                    "goal": "fetch BTC price",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let fire = adapter
+            .execute_action(
+                "routine_fire",
+                serde_json::json!({"name": "bitcoin_price_checker"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("routine_fire alias should dispatch through mission_fire");
+
+        assert!(
+            !fire.is_error,
+            "routine_fire by name failed: {}",
+            fire.output
+        );
+        assert_eq!(
+            fire.output.get("status").and_then(|v| v.as_str()),
+            Some("fired"),
+            "routine_fire alias should produce 'fired' status, got: {}",
+            fire.output
+        );
+    }
+
+    /// Calling `mission_fire` with neither `id` nor `name` must surface a
+    /// clear, actionable error rather than an empty-UUID parse failure.
+    /// The previous error message ("invalid mission id: invalid length:
+    /// expected length 32 for simple format, found 0") leaked the internal
+    /// validation noise to the LLM and contributed to retry loops.
+    #[tokio::test]
+    async fn mission_fire_errors_when_neither_id_nor_name_provided() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("no-id-no-name-1"));
+
+        let res = adapter
+            .execute_action("mission_fire", serde_json::json!({}), &lease(), &ctx)
+            .await
+            .expect("missing-id-and-name should produce an ActionResult, not panic");
+        assert!(
+            res.is_error,
+            "ActionResult must be flagged is_error when params are missing: {res:?}"
+        );
+        let s = res
+            .output
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            s.contains("name") && s.contains("id"),
+            "error message must mention both 'name' and 'id' so the LLM knows \
+             what to do; got: {s}"
+        );
+    }
+
+    /// Calling `mission_fire` with a `name` that doesn't exist must error
+    /// with a message that names the missing mission and points at
+    /// `mission_list` for discovery. The previous "invalid mission id" leak
+    /// was actively misleading — the mission existed under a different id.
+    #[tokio::test]
+    async fn mission_fire_errors_with_helpful_message_when_name_not_found() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("name-not-found-1"));
+
+        // Create a mission with a different name so we know the mission
+        // store is reachable; this isolates the failure to "name lookup
+        // didn't match" rather than "no missions exist for user".
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "real-mission",
+                    "goal": "exists",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let res = adapter
+            .execute_action(
+                "mission_fire",
+                serde_json::json!({"name": "no-such-mission"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("unknown-name fire should produce an ActionResult, not panic");
+        assert!(
+            res.is_error,
+            "ActionResult must be flagged is_error when name lookup fails: {res:?}"
+        );
+        let s = res
+            .output
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            s.contains("no-such-mission"),
+            "error must echo the missing name; got: {s}"
+        );
+        assert!(
+            s.contains("mission_list"),
+            "error should hint at mission_list for discovery; got: {s}"
+        );
+    }
+
+    /// `mission_get` resolves by `name`. Pinning the name path here
+    /// closes the test gap flagged on PR #3155: every migrated
+    /// handler routes through `resolve_mission_id`, but only
+    /// `mission_fire` had a by-name regression before this.
+    #[tokio::test]
+    async fn mission_get_resolves_by_name() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("get-by-name-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "lookup-target-get",
+                    "goal": "exists for mission_get",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let got = adapter
+            .execute_action(
+                "mission_get",
+                serde_json::json!({"name": "lookup-target-get"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("mission_get by name should succeed");
+        assert!(!got.is_error, "mission_get by name failed: {}", got.output);
+        assert_eq!(
+            got.output.get("name").and_then(|v| v.as_str()),
+            Some("lookup-target-get"),
+            "mission_get must echo the same name back"
+        );
+    }
+
+    /// `mission_complete` resolves by `name`.
+    #[tokio::test]
+    async fn mission_complete_resolves_by_name() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("complete-by-name-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "complete-target",
+                    "goal": "exists for mission_complete",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let res = adapter
+            .execute_action(
+                "mission_complete",
+                serde_json::json!({"name": "complete-target"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("mission_complete by name should succeed");
+        assert!(!res.is_error, "complete failed: {}", res.output);
+        assert_eq!(
+            res.output.get("status").and_then(|v| v.as_str()),
+            Some("completed")
+        );
+    }
+
+    /// `mission_pause` and `mission_resume` round-trip by `name`.
+    #[tokio::test]
+    async fn mission_pause_and_resume_resolve_by_name() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("pause-resume-name-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "pause-target",
+                    "goal": "exists for pause/resume",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let pause = adapter
+            .execute_action(
+                "mission_pause",
+                serde_json::json!({"name": "pause-target"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("pause by name should succeed");
+        assert!(!pause.is_error, "pause failed: {}", pause.output);
+
+        let resume = adapter
+            .execute_action(
+                "mission_resume",
+                serde_json::json!({"name": "pause-target"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("resume by name should succeed");
+        assert!(!resume.is_error, "resume failed: {}", resume.output);
+    }
+
+    /// Conflict guard: if `id` and `name` are both supplied AND they
+    /// identify *different* missions, the resolver must error rather
+    /// than silently preferring one. Silently preferring the UUID was
+    /// the foot-gun serrrfirat flagged on PR #3155 — a mistyped
+    /// `name` would rename the wrong mission.
+    #[tokio::test]
+    async fn mission_resolver_errors_when_id_and_name_disagree() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("conflict-1"));
+
+        // Create two distinct missions: A (the one our id refers to)
+        // and B (the one our `name` refers to). They are different.
+        let create_a = adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "mission-A",
+                    "goal": "the real target",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create A should succeed");
+        let id_a = create_a
+            .output
+            .get("mission_id")
+            .and_then(|v| v.as_str())
+            .expect("mission_id present")
+            .to_string();
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "mission-B",
+                    "goal": "the wrong target",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create B should succeed");
+
+        // mission_fire with id=A but name=B — they identify different
+        // missions. Must error, not silently fire either one.
+        let res = adapter
+            .execute_action(
+                "mission_fire",
+                serde_json::json!({"id": id_a, "name": "mission-B"}),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("conflict should produce an ActionResult, not panic");
+        assert!(
+            res.is_error,
+            "id/name conflict must be flagged as is_error: {res:?}"
+        );
+        let err_text = res
+            .output
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(
+            err_text.contains("different missions") || err_text.contains("identify different"),
+            "error must explain the conflict; got: {err_text}"
+        );
+    }
+
+    /// Backwards-compat: pre-PR callers renamed via
+    /// `mission_update({id: <uuid>, name: <new>})`. After the PR,
+    /// `name` became the lookup key and `new_name` is the rename
+    /// target — but a caller still passing the old shape must keep
+    /// renaming, not silently no-op. The handler preserves the legacy
+    /// shape only when `id` is the explicit lookup AND `new_name` is
+    /// absent.
+    #[tokio::test]
+    async fn mission_update_preserves_legacy_id_plus_name_rename() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("legacy-rename-1"));
+
+        let create = adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "old-name",
+                    "goal": "test legacy rename shape",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+        let mission_id = create
+            .output
+            .get("mission_id")
+            .and_then(|v| v.as_str())
+            .expect("create must return mission_id")
+            .to_string();
+
+        // Legacy shape: id-as-lookup + name-as-rename-target.
+        let update = adapter
+            .execute_action(
+                "mission_update",
+                serde_json::json!({
+                    "id": mission_id,
+                    "name": "new-name-via-legacy-shape"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("legacy mission_update must succeed");
+        assert!(
+            !update.is_error,
+            "legacy update must succeed: {}",
+            update.output
+        );
+
+        // Verify the rename actually happened (not just a returned
+        // status). mission_list reflects the persisted name.
+        let list = adapter
+            .execute_action("mission_list", serde_json::json!({}), &lease(), &ctx)
+            .await
+            .expect("list should succeed");
+        let missions = list.output.as_array().expect("array");
+        let entry = missions
+            .iter()
+            .find(|m| m.get("id").and_then(|v| v.as_str()) == Some(mission_id.as_str()))
+            .expect("renamed mission must still be in list");
+        assert_eq!(
+            entry.get("name").and_then(|v| v.as_str()),
+            Some("new-name-via-legacy-shape"),
+            "legacy {{id, name}} update shape must rename the mission, \
+             not silently no-op"
+        );
+    }
+
+    /// Canonical post-PR rename via `new_name`. Pins that the new
+    /// schema field is honoured and that `name` (when also present
+    /// AND `new_name` is set) acts as the lookup key, NOT a second
+    /// rename source.
+    #[tokio::test]
+    async fn mission_update_renames_via_new_name_and_uses_name_as_lookup() {
+        let adapter = make_adapter_with_missions().await;
+        let ctx = exec_ctx(t3claw_engine::ThreadId::new(), Some("new-name-1"));
+
+        adapter
+            .execute_action(
+                "mission_create",
+                serde_json::json!({
+                    "name": "lookup-target",
+                    "goal": "test new_name rename",
+                    "cadence": "manual"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("create should succeed");
+
+        let update = adapter
+            .execute_action(
+                "mission_update",
+                serde_json::json!({
+                    "name": "lookup-target",
+                    "new_name": "renamed-via-new_name"
+                }),
+                &lease(),
+                &ctx,
+            )
+            .await
+            .expect("new_name update should succeed");
+        assert!(!update.is_error, "update failed: {}", update.output);
+
+        let list = adapter
+            .execute_action("mission_list", serde_json::json!({}), &lease(), &ctx)
+            .await
+            .expect("list should succeed");
+        let missions = list.output.as_array().expect("array");
+        // Old name must no longer be present (it was renamed).
+        assert!(
+            !missions
+                .iter()
+                .any(|m| m.get("name").and_then(|v| v.as_str()) == Some("lookup-target")),
+            "old name must not survive a rename"
+        );
+        assert!(
+            missions
+                .iter()
+                .any(|m| m.get("name").and_then(|v| v.as_str()) == Some("renamed-via-new_name")),
+            "renamed mission must appear under its new name in mission_list"
+        );
+    }
+
     /// `mission_list` returns every mission the user created in the
     /// current project, isolated from other users. Pins the per-user
     /// scoping that chat history and project-detail pages rely on.
@@ -5527,29 +8190,7 @@ Use this skill to set up a Pika meeting.
         t3claw_engine::Capability {
             name: "missions".into(),
             description: "Mission lifecycle".into(),
-            actions: vec![
-                ActionDef {
-                    name: "mission_create".into(),
-                    description: "Create a mission".into(),
-                    parameters_schema: serde_json::json!({"type": "object"}),
-                    effects: vec![],
-                    requires_approval: false,
-                },
-                ActionDef {
-                    name: "mission_list".into(),
-                    description: "List missions".into(),
-                    parameters_schema: serde_json::json!({"type": "object"}),
-                    effects: vec![],
-                    requires_approval: false,
-                },
-                ActionDef {
-                    name: "mission_complete".into(),
-                    description: "Complete a mission".into(),
-                    parameters_schema: serde_json::json!({"type": "object"}),
-                    effects: vec![],
-                    requires_approval: false,
-                },
-            ],
+            actions: crate::bridge::engine_actions::mission_capability_actions(),
             knowledge: vec![],
             policies: vec![],
         }
@@ -5580,11 +8221,14 @@ Use this skill to set up a Pika meeting.
         adapter.set_capability_registry(Arc::new(registry)).await;
 
         let actions = adapter
-            .available_actions(&[mission_lease(&[
-                "mission_create",
-                "mission_list",
-                "mission_complete",
-            ])])
+            .available_actions(
+                &[mission_lease(&[
+                    "mission_create",
+                    "mission_list",
+                    "mission_complete",
+                ])],
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
+            )
             .await
             .expect("available_actions should succeed");
 
@@ -5595,6 +8239,33 @@ Use this skill to set up a Pika meeting.
                 "expected {expected} in advertised actions, got: {names:?}"
             );
         }
+
+        let mission_create = actions
+            .iter()
+            .find(|action| action.name == "mission_create")
+            .expect("mission_create should be advertised");
+        assert_eq!(
+            mission_create.parameters_schema["required"],
+            serde_json::json!(["name", "goal", "cadence"])
+        );
+        let create_summary = mission_create
+            .discovery_summary()
+            .expect("mission_create should carry curated discovery guidance");
+        assert_eq!(
+            create_summary.always_required,
+            vec![
+                "name".to_string(),
+                "goal".to_string(),
+                "cadence".to_string()
+            ]
+        );
+
+        let mission_list = actions
+            .iter()
+            .find(|action| action.name == "mission_list")
+            .expect("mission_list should be advertised");
+        assert!(mission_list.discovery.is_none());
+        assert!(mission_list.discovery_summary().is_none());
     }
 
     #[tokio::test]
@@ -5608,7 +8279,10 @@ Use this skill to set up a Pika meeting.
         // must NOT be advertised to the LLM even though they exist in the
         // capability registry.
         let actions = adapter
-            .available_actions(&[mission_lease(&["mission_list"])])
+            .available_actions(
+                &[mission_lease(&["mission_list"])],
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
+            )
             .await
             .expect("available_actions should succeed");
 
@@ -5637,7 +8311,7 @@ Use this skill to set up a Pika meeting.
         // No leases passed — no capability actions should surface even
         // though the registry has them.
         let actions = adapter
-            .available_actions(&[])
+            .available_actions(&[], &exec_ctx(t3claw_engine::ThreadId::new(), None))
             .await
             .expect("available_actions should succeed");
 
@@ -5702,11 +8376,14 @@ Use this skill to set up a Pika meeting.
         adapter.set_capability_registry(Arc::new(registry)).await;
 
         let actions = adapter
-            .available_actions(&[mission_lease(&[
-                "mission_create",
-                "mission_list",
-                "mission_complete",
-            ])])
+            .available_actions(
+                &[mission_lease(&[
+                    "mission_create",
+                    "mission_list",
+                    "mission_complete",
+                ])],
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
+            )
             .await
             .expect("available_actions should succeed");
 
@@ -5744,6 +8421,8 @@ Use this skill to set up a Pika meeting.
                     parameters_schema: serde_json::json!({"type": "object"}),
                     effects: vec![],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
                 },
                 ActionDef {
                     name: "tool_auth".into(), // v1 auth tool
@@ -5751,6 +8430,8 @@ Use this skill to set up a Pika meeting.
                     parameters_schema: serde_json::json!({"type": "object"}),
                     effects: vec![],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
                 },
                 ActionDef {
                     name: "safe_action".into(),
@@ -5758,6 +8439,8 @@ Use this skill to set up a Pika meeting.
                     parameters_schema: serde_json::json!({"type": "object"}),
                     effects: vec![],
                     requires_approval: false,
+                    model_tool_surface: ModelToolSurface::FullSchema,
+                    discovery: None,
                 },
             ],
             knowledge: vec![],
@@ -5779,7 +8462,10 @@ Use this skill to set up a Pika meeting.
         };
 
         let actions = adapter
-            .available_actions(&[rogue_lease])
+            .available_actions(
+                &[rogue_lease],
+                &exec_ctx(t3claw_engine::ThreadId::new(), None),
+            )
             .await
             .expect("available_actions should succeed");
 
@@ -5796,5 +8482,143 @@ Use this skill to set up a Pika meeting.
             names.contains(&"safe_action"),
             "safe_action should surface through the engine capability path: {names:?}"
         );
+    }
+
+    /// Race-window regression: when the bridge has registered caller
+    /// tools under the conversation_scope (the responses_api handler's
+    /// pre-spawn key) and the engine task starts running before the
+    /// post-spawn `transfer` rebinds onto the engine `thread_id`, the
+    /// adapter must still surface those tools — looked up via the
+    /// `conversation_scope` field plumbed through `ThreadExecutionContext`.
+    #[tokio::test]
+    async fn available_action_inventory_falls_back_to_conversation_scope() {
+        let adapter = make_adapter();
+        let catalog = Arc::new(crate::bridge::ExternalToolCatalog::new());
+        adapter
+            .set_external_tool_catalog(Arc::clone(&catalog))
+            .await;
+
+        let scope_uuid = uuid::Uuid::new_v4();
+        let engine_thread_id = t3claw_engine::ThreadId::new();
+        assert_ne!(
+            scope_uuid, engine_thread_id.0,
+            "test setup: scope and engine thread must differ"
+        );
+
+        catalog
+            .register(
+                t3claw_engine::ThreadId(scope_uuid),
+                vec![t3claw_engine::ActionDef {
+                    name: "lookup_weather".to_string(),
+                    description: "caller tool".to_string(),
+                    parameters_schema: serde_json::json!({"type": "object"}),
+                    effects: vec![t3claw_engine::EffectType::Compute],
+                    requires_approval: false,
+                    model_tool_surface: t3claw_engine::ModelToolSurface::FullSchema,
+                    discovery: None,
+                }],
+            )
+            .await;
+
+        let mut ctx = exec_ctx(engine_thread_id, None);
+        ctx.conversation_scope = Some(scope_uuid);
+
+        let inventory = adapter
+            .available_action_inventory(&[], &ctx)
+            .await
+            .expect("inventory");
+        assert!(
+            inventory.inline.iter().any(|a| a.name == "lookup_weather"),
+            "caller tool registered under scope must surface even before \
+             post-spawn transfer; inline = {:?}",
+            inventory
+                .inline
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Same race-window regression for `execute_action`: a tool name
+    /// registered under the conversation_scope must short-circuit to a
+    /// `GatePaused { External }` even when the engine `thread_id`
+    /// hasn't received the catalog entry yet.
+    #[tokio::test]
+    async fn execute_action_short_circuits_via_conversation_scope() {
+        let adapter = make_adapter();
+        let catalog = Arc::new(crate::bridge::ExternalToolCatalog::new());
+        adapter
+            .set_external_tool_catalog(Arc::clone(&catalog))
+            .await;
+
+        let scope_uuid = uuid::Uuid::new_v4();
+        let engine_thread_id = t3claw_engine::ThreadId::new();
+        catalog
+            .register(
+                t3claw_engine::ThreadId(scope_uuid),
+                vec![t3claw_engine::ActionDef {
+                    name: "lookup_weather".to_string(),
+                    description: "caller tool".to_string(),
+                    parameters_schema: serde_json::json!({"type": "object"}),
+                    effects: vec![t3claw_engine::EffectType::Compute],
+                    requires_approval: false,
+                    model_tool_surface: t3claw_engine::ModelToolSurface::FullSchema,
+                    discovery: None,
+                }],
+            )
+            .await;
+
+        let mut ctx = exec_ctx(engine_thread_id, Some("call_xyz"));
+        ctx.conversation_scope = Some(scope_uuid);
+
+        let result = adapter
+            .execute_action(
+                "lookup_weather",
+                serde_json::json!({"city": "NYC"}),
+                &lease(),
+                &ctx,
+            )
+            .await;
+
+        match result {
+            Err(EngineError::GatePaused { resume_kind, .. }) => {
+                assert!(
+                    matches!(
+                        &*resume_kind,
+                        t3claw_engine::ResumeKind::External { callback_id }
+                            if callback_id.starts_with("ext_tool:")
+                    ),
+                    "expected ResumeKind::External(ext_tool:...), got {resume_kind:?}"
+                );
+            }
+            other => {
+                panic!("expected GatePaused(External) when catalog hit via scope; got {other:?}")
+            }
+        }
+    }
+
+    /// Sanity guard: the keys helper yields the engine `thread_id`
+    /// first (so post-rebind lookups stay fast) and only emits the
+    /// `conversation_scope` when it differs. Same-key contexts must not
+    /// trigger a duplicate lookup.
+    #[test]
+    fn external_tool_catalog_keys_dedupes_when_scope_equals_thread() {
+        let thread_id = t3claw_engine::ThreadId::new();
+
+        let mut ctx_no_scope = exec_ctx(thread_id, None);
+        ctx_no_scope.conversation_scope = None;
+        let keys: Vec<_> = EffectBridgeAdapter::external_tool_catalog_keys(&ctx_no_scope).collect();
+        assert_eq!(keys, vec![thread_id]);
+
+        let mut ctx_same = exec_ctx(thread_id, None);
+        ctx_same.conversation_scope = Some(thread_id.0);
+        let keys: Vec<_> = EffectBridgeAdapter::external_tool_catalog_keys(&ctx_same).collect();
+        assert_eq!(keys, vec![thread_id], "scope == thread must dedupe");
+
+        let mut ctx_diff = exec_ctx(thread_id, None);
+        let scope = uuid::Uuid::new_v4();
+        ctx_diff.conversation_scope = Some(scope);
+        let keys: Vec<_> = EffectBridgeAdapter::external_tool_catalog_keys(&ctx_diff).collect();
+        assert_eq!(keys, vec![thread_id, t3claw_engine::ThreadId(scope)]);
     }
 }

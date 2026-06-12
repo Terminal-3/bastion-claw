@@ -19,18 +19,17 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 use crate::auth::resolve_secret_for_runtime;
 use crate::context::JobContext;
 use crate::db::UserStore;
-use crate::llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
 use crate::secrets::SecretsStore;
+use crate::secrets::host_matches_pattern;
 use crate::tools::tool::{Tool, ToolDiscoverySummary, ToolError, ToolOutput};
 use crate::tools::wasm::capabilities::Capabilities;
-use crate::tools::wasm::credential_injector::{
-    InjectedCredentials, host_matches_pattern, inject_credential,
-};
+use crate::tools::wasm::credential_injector::{InjectedCredentials, inject_credential};
 use crate::tools::wasm::error::WasmError;
 use crate::tools::wasm::host::{HostState, LogLevel};
 use crate::tools::wasm::limits::{ResourceLimits, WasmResourceLimiter};
 use crate::tools::wasm::runtime::{EPOCH_TICK_INTERVAL, PreparedModule, WasmToolRuntime};
 use crate::tools::wasm::{ssrf_safe_client_builder_for_target, validate_and_resolve_http_target};
+use t3claw_llm::recording::{HttpExchangeRequest, HttpExchangeResponse, HttpInterceptor};
 use t3claw_safety::LeakDetector;
 
 // Generate component model bindings from the WIT file.
@@ -94,8 +93,14 @@ impl OAuthRefreshConfig {
 /// panic message, or a `dbg!()` cannot leak credentials. Do NOT add
 /// `#[derive(Debug)]` here without revisiting the redaction.
 struct ResolvedHostCredential {
+    /// Name of the source secret. Non-sensitive metadata used only for
+    /// deterministic tie-breaks when two matching credentials share the
+    /// same path specificity; never rendered to logs or tool output.
+    secret_name: String,
     /// Host patterns this credential applies to (e.g., "www.googleapis.com").
     host_patterns: Vec<String>,
+    /// Path prefixes this credential is scoped to. Empty means all paths.
+    path_patterns: Vec<String>,
     /// Headers to add to matching requests (e.g., "Authorization: Bearer ...").
     headers: HashMap<String, String>,
     /// Query parameters to add to matching requests.
@@ -114,6 +119,7 @@ impl std::fmt::Debug for ResolvedHostCredential {
         let query_keys: Vec<&String> = self.query_params.keys().collect();
         f.debug_struct("ResolvedHostCredential")
             .field("host_patterns", &self.host_patterns)
+            .field("path_patterns", &self.path_patterns)
             .field("header_names", &header_keys)
             .field("query_param_names", &query_keys)
             .field("secret_value", &"[REDACTED]")
@@ -211,25 +217,50 @@ impl StoreData {
 
     /// Inject pre-resolved host credentials into the request.
     ///
-    /// Matches the URL host against each resolved credential's host_patterns.
-    /// Matching credentials have their headers merged and query params appended.
+    /// Matches the URL host against each resolved credential's host_patterns
+    /// and — when declared — path_patterns. Matching credentials are ordered
+    /// by ascending path specificity (longest matching prefix last), with
+    /// ties broken alphabetically on `secret_name`. Last-write-wins header
+    /// merging then means the most-specific mapping wins any conflict,
+    /// deterministically.
     fn inject_host_credentials(
         &self,
         url_host: &str,
         headers: &mut HashMap<String, String>,
         url: &mut String,
     ) {
-        for cred in &self.host_credentials {
-            let matches = cred
-                .host_patterns
-                .iter()
-                .any(|pattern| host_matches_pattern(url_host, pattern));
+        use crate::secrets::{
+            extract_url_path_for_matching, match_specificity, path_matches_prefix,
+        };
 
-            if !matches {
-                continue;
-            }
+        let url_path = extract_url_path_for_matching(url);
 
-            // Merge injected headers (host credentials take precedence)
+        let mut matches_for_request: Vec<&ResolvedHostCredential> = self
+            .host_credentials
+            .iter()
+            .filter(|cred| {
+                cred.host_patterns
+                    .iter()
+                    .any(|pattern| host_matches_pattern(url_host, pattern))
+                    && (cred.path_patterns.is_empty()
+                        || cred
+                            .path_patterns
+                            .iter()
+                            .any(|prefix| path_matches_prefix(&url_path, prefix)))
+            })
+            .collect();
+
+        matches_for_request.sort_by(|a, b| {
+            let spec_a = match_specificity(&a.path_patterns, &url_path);
+            let spec_b = match_specificity(&b.path_patterns, &url_path);
+            spec_a
+                .cmp(&spec_b)
+                .then_with(|| a.secret_name.cmp(&b.secret_name))
+        });
+
+        for cred in matches_for_request {
+            // Merge injected headers (host credentials take precedence; the
+            // most-specific match iterates last, so it wins any conflict).
             for (key, value) in &cred.headers {
                 headers.insert(key.clone(), value.clone());
             }
@@ -359,6 +390,22 @@ impl near::agent::host::Host for StoreData {
         // based on the request's target host.
         if let Some(host) = extract_host_from_url(&url) {
             self.inject_host_credentials(&host, &mut headers, &mut url);
+        }
+
+        // Apply T3CLAW_TEST_HTTP_REWRITE_MAP for tests (parallel to
+        // the WASM-channel path in `src/channels/wasm/wrapper.rs`).
+        // Without this, a test fixture's rewrite of e.g.
+        // gmail.googleapis.com → mock_llm doesn't apply to WASM tools'
+        // HTTP calls, and the tool reaches the real upstream — the
+        // exact bug uncovered while debugging the #3133 live test.
+        #[cfg(any(test, debug_assertions))]
+        if let Some(rewritten) = rewrite_http_url_for_tool_testing(&url) {
+            tracing::debug!(
+                original = %url,
+                rewritten = %rewritten,
+                "WASM tool HTTP: applying TEST_HTTP_REWRITE_MAP"
+            );
+            url = rewritten;
         }
 
         // Get the max response size from capabilities (default 10MB).
@@ -653,51 +700,11 @@ impl WasmToolSchemas {
     }
 
     fn is_permissive_schema(schema: &serde_json::Value) -> bool {
-        if schema
-            .get("properties")
-            .and_then(|p| p.as_object())
-            .is_some_and(|p| !p.is_empty())
-        {
-            return false;
-        }
-
-        // Schemas with combinator variants containing properties are not permissive
-        for key in ["oneOf", "anyOf", "allOf"] {
-            if let Some(variants) = schema.get(key).and_then(|v| v.as_array())
-                && variants.iter().any(|v| {
-                    v.get("properties")
-                        .and_then(|p| p.as_object())
-                        .is_some_and(|p| !p.is_empty())
-                })
-            {
-                return false;
-            }
-        }
-
-        true
+        crate::tools::schema_metrics::is_permissive_schema(schema)
     }
 
     fn typed_property_count(schema: &serde_json::Value) -> usize {
-        let mut all_props = serde_json::Map::new();
-
-        if let Some(props) = schema.get("properties").and_then(|p| p.as_object()) {
-            all_props.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
-        }
-
-        for key in ["allOf", "oneOf", "anyOf"] {
-            if let Some(variants) = schema.get(key).and_then(|v| v.as_array()) {
-                for variant in variants {
-                    if let Some(props) = variant.get("properties").and_then(|p| p.as_object()) {
-                        all_props.extend(props.iter().map(|(k, v)| (k.clone(), v.clone())));
-                    }
-                }
-            }
-        }
-
-        all_props
-            .values()
-            .filter(|prop| schema_is_typed_property(prop))
-            .count()
+        crate::tools::schema_metrics::typed_property_count(schema)
     }
 
     fn new(discovery: serde_json::Value) -> Self {
@@ -1238,6 +1245,26 @@ impl Tool for WasmToolWrapper {
         Some(&self.prepared.name)
     }
 
+    /// Walk the WASM tool's declared HTTP credentials and return every
+    /// non-optional `secret_name`. The engine's auth preflight
+    /// (`AuthManager::check_action_auth`) uses this to raise an
+    /// `Authentication` gate when the tool is called and any required
+    /// credential is missing from the secrets store — so the model can
+    /// call e.g. `gmail` directly with no separate enablement step.
+    fn required_credentials(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(http) = &self.capabilities.http {
+            for mapping in http.credentials.values() {
+                if !mapping.optional {
+                    out.push(mapping.secret_name.clone());
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Compose the tool schema for LLM function calling.
     ///
     /// When the advertised schema is permissive (no typed properties), appends
@@ -1522,7 +1549,9 @@ async fn resolve_host_credentials(
         }
 
         resolved.push(ResolvedHostCredential {
+            secret_name: mapping.secret_name.clone(),
             host_patterns: mapping.host_patterns.clone(),
+            path_patterns: mapping.path_patterns.clone(),
             headers: injected.headers,
             query_params: injected.query_params,
             secret_value: secret.expose().to_string(),
@@ -1540,6 +1569,85 @@ async fn resolve_host_credentials(
         resolved,
         missing_required,
     }
+}
+
+/// Apply `T3CLAW_TEST_HTTP_REWRITE_MAP` to a WASM-tool HTTP request.
+///
+/// Mirrors the WASM-channel rewrite at
+/// `src/channels/wasm/wrapper.rs::rewrite_http_url_for_testing`. The
+/// env var is a JSON object `{ host: replacement_base }` (e.g.
+/// `{"gmail.googleapis.com":"http://127.0.0.1:8080"}`); a matching
+/// host substitutes the host's scheme/authority while preserving path
+/// and query. Replacement bases must be loopback URLs.
+///
+/// Without this, WASM tools' HTTP calls (e.g. `gmail` hitting
+/// gmail.googleapis.com) ignored the test rewrite and reached the
+/// real upstream — the bug uncovered while debugging the #3133 live
+/// test.
+#[cfg(any(test, debug_assertions))]
+pub(crate) fn rewrite_http_url_for_tool_testing(url: &str) -> Option<String> {
+    let raw = std::env::var("T3CLAW_TEST_HTTP_REWRITE_MAP").ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let map: HashMap<String, String> = serde_json::from_str(trimmed).ok()?;
+    let parsed = url::Url::parse(url).ok()?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return None;
+    }
+    let host = parsed.host_str()?.to_lowercase();
+    let base = map.get(&host)?.trim().trim_end_matches('/').to_string();
+    // Match `channels::wasm::wrapper::is_loopback_test_rewrite_base`:
+    // accept any http/https loopback URL (`localhost`, `127.0.0.1/8`,
+    // `[::1]`) via URL parsing rather than hardcoded `http://...` prefix
+    // matching, which silently dropped valid forms like
+    // `https://localhost:8443` that the channel-side helper accepts.
+    if !is_loopback_test_rewrite_base(&base) {
+        tracing::warn!(
+            host = %host,
+            base = %base,
+            "T3CLAW_TEST_HTTP_REWRITE_MAP: ignoring non-loopback target"
+        );
+        return None;
+    }
+    let path = parsed.path().trim_start_matches('/');
+    let mut rewritten = format!("{base}/{path}");
+    if let Some(query) = parsed.query() {
+        rewritten.push('?');
+        rewritten.push_str(query);
+    }
+    Some(rewritten)
+}
+
+/// Validate that a test-rewrite target is an http/https loopback URL.
+///
+/// Accepts `localhost`, IPv4 loopback (`127.0.0.0/8`), and IPv6 `::1`
+/// (the `url` crate keeps brackets on IPv6 hosts, so we strip them
+/// before `IpAddr::parse`). Mirrors
+/// `channels::wasm::wrapper::is_loopback_test_rewrite_base` — single
+/// source of truth would be nicer, but the two `wrapper.rs` files sit
+/// in sibling modules with independent `cfg(any(test,
+/// debug_assertions))` gates.
+#[cfg(any(test, debug_assertions))]
+fn is_loopback_test_rewrite_base(base: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(base) else {
+        return false;
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return false;
+    }
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    let host = host
+        .strip_prefix('[')
+        .and_then(|v| v.strip_suffix(']'))
+        .unwrap_or(host);
+    host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
 }
 
 /// Extract the hostname from a URL string.
@@ -2432,7 +2540,9 @@ mod tests {
         use std::collections::HashMap;
 
         let host_credentials = vec![ResolvedHostCredential {
+            secret_name: "google_token".to_string(),
             host_patterns: vec!["www.googleapis.com".to_string()],
+            path_patterns: vec![],
             headers: {
                 let mut h = HashMap::new();
                 h.insert(
@@ -2469,12 +2579,186 @@ mod tests {
     }
 
     #[test]
+    fn test_inject_host_credentials_path_scoped() {
+        use crate::tools::wasm::wrapper::{ResolvedHostCredential, StoreData};
+        use std::collections::HashMap;
+
+        let host_credentials = vec![ResolvedHostCredential {
+            secret_name: "scoped_token".to_string(),
+            host_patterns: vec!["api.example.com".to_string()],
+            path_patterns: vec!["/api/v1".to_string()],
+            headers: {
+                let mut h = HashMap::new();
+                h.insert(
+                    "Authorization".to_string(),
+                    "Bearer scoped-token".to_string(),
+                );
+                h
+            },
+            query_params: HashMap::new(),
+            secret_value: "scoped-token".to_string(),
+        }];
+
+        let store_data = StoreData::new(
+            1024 * 1024,
+            Capabilities::default(),
+            HashMap::new(),
+            host_credentials,
+        );
+
+        // Should inject for matching host + matching path
+        let mut headers = HashMap::new();
+        let mut url = "https://api.example.com/api/v1/users".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers, &mut url);
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer scoped-token".to_string())
+        );
+
+        // Should NOT inject for matching host + non-matching path
+        let mut headers2 = HashMap::new();
+        let mut url2 = "https://api.example.com/other/endpoint".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers2, &mut url2);
+        assert!(!headers2.contains_key("Authorization"));
+
+        // Should NOT inject for matching host + prefix-boundary attack
+        let mut headers3 = HashMap::new();
+        let mut url3 = "https://api.example.com/api/v1-malicious".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers3, &mut url3);
+        assert!(!headers3.contains_key("Authorization"));
+    }
+
+    #[test]
+    fn test_inject_host_credentials_different_paths_same_host() {
+        use crate::tools::wasm::wrapper::{ResolvedHostCredential, StoreData};
+        use std::collections::HashMap;
+
+        let host_credentials = vec![
+            ResolvedHostCredential {
+                secret_name: "v1_token".to_string(),
+                host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: vec!["/api/v1".to_string()],
+                headers: {
+                    let mut h = HashMap::new();
+                    h.insert("Authorization".to_string(), "Bearer v1-token".to_string());
+                    h
+                },
+                query_params: HashMap::new(),
+                secret_value: "v1-token".to_string(),
+            },
+            ResolvedHostCredential {
+                secret_name: "v2_token".to_string(),
+                host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: vec!["/api/v2".to_string()],
+                headers: {
+                    let mut h = HashMap::new();
+                    h.insert("Authorization".to_string(), "Bearer v2-token".to_string());
+                    h
+                },
+                query_params: HashMap::new(),
+                secret_value: "v2-token".to_string(),
+            },
+        ];
+
+        let store_data = StoreData::new(
+            1024 * 1024,
+            Capabilities::default(),
+            HashMap::new(),
+            host_credentials,
+        );
+
+        // /api/v1 path gets v1 token
+        let mut headers = HashMap::new();
+        let mut url = "https://api.example.com/api/v1/users".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers, &mut url);
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer v1-token".to_string())
+        );
+
+        // /api/v2 path gets v2 token
+        let mut headers2 = HashMap::new();
+        let mut url2 = "https://api.example.com/api/v2/data".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers2, &mut url2);
+        assert_eq!(
+            headers2.get("Authorization"),
+            Some(&"Bearer v2-token".to_string())
+        );
+
+        // Unscoped path gets neither
+        let mut headers3 = HashMap::new();
+        let mut url3 = "https://api.example.com/other".to_string();
+        store_data.inject_host_credentials("api.example.com", &mut headers3, &mut url3);
+        assert!(!headers3.contains_key("Authorization"));
+    }
+
+    #[test]
+    fn test_inject_host_credentials_most_specific_path_wins() {
+        // Regression for Firat round-4 (#3125963270): overlapping mappings
+        // had no deterministic precedence and the HashMap-backed WASM
+        // credential source could pick the wrong winner. With ordered
+        // specificity, the longest matching path prefix must always win any
+        // conflicting header, regardless of insertion order.
+        use crate::tools::wasm::wrapper::{ResolvedHostCredential, StoreData};
+        use std::collections::HashMap;
+
+        fn global() -> ResolvedHostCredential {
+            ResolvedHostCredential {
+                secret_name: "global_token".to_string(),
+                host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: vec![],
+                headers: {
+                    let mut h = HashMap::new();
+                    h.insert("Authorization".to_string(), "Bearer GLOBAL".to_string());
+                    h
+                },
+                query_params: HashMap::new(),
+                secret_value: "GLOBAL".to_string(),
+            }
+        }
+        fn scoped() -> ResolvedHostCredential {
+            ResolvedHostCredential {
+                secret_name: "write_token".to_string(),
+                host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: vec!["/api/v1/write".to_string()],
+                headers: {
+                    let mut h = HashMap::new();
+                    h.insert("Authorization".to_string(), "Bearer WRITE".to_string());
+                    h
+                },
+                query_params: HashMap::new(),
+                secret_value: "WRITE".to_string(),
+            }
+        }
+
+        for creds in [
+            // "wrong" order: global first, specific second
+            vec![global(), scoped()],
+            // reverse order: specific first, global second — must still
+            // yield the same WRITE winner under specificity sort
+            vec![scoped(), global()],
+        ] {
+            let store = StoreData::new(1024 * 1024, Capabilities::default(), HashMap::new(), creds);
+            let mut headers = HashMap::new();
+            let mut url = "https://api.example.com/api/v1/write/foo".to_string();
+            store.inject_host_credentials("api.example.com", &mut headers, &mut url);
+            assert_eq!(
+                headers.get("Authorization"),
+                Some(&"Bearer WRITE".to_string()),
+                "most-specific path_patterns (/api/v1/write) must win over global credential"
+            );
+        }
+    }
+
+    #[test]
     fn test_inject_host_credentials_query_params() {
         use crate::tools::wasm::wrapper::{ResolvedHostCredential, StoreData};
         use std::collections::HashMap;
 
         let host_credentials = vec![ResolvedHostCredential {
+            secret_name: "api_key".to_string(),
             host_patterns: vec!["api.example.com".to_string()],
+            path_patterns: vec![],
             headers: HashMap::new(),
             query_params: {
                 let mut q = HashMap::new();
@@ -2504,7 +2788,9 @@ mod tests {
         use std::collections::HashMap;
 
         let host_credentials = vec![ResolvedHostCredential {
+            secret_name: "super_secret".to_string(),
             host_patterns: vec!["api.example.com".to_string()],
+            path_patterns: vec![],
             headers: HashMap::new(),
             query_params: HashMap::new(),
             secret_value: "super-secret-token".to_string(),
@@ -2568,6 +2854,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2615,6 +2902,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2663,6 +2951,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2701,6 +2990,7 @@ mod tests {
                 secret_name: "missing_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2745,6 +3035,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2805,6 +3096,7 @@ mod tests {
                 secret_name: "my_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["api.example.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2848,6 +3140,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -2881,7 +3174,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "current_thread")]
     async fn test_resolve_host_credentials_refreshes_via_proxy_without_direct_token_url_validation()
     {
         use crate::secrets::{
@@ -2890,21 +3183,43 @@ mod tests {
         use crate::tools::wasm::capabilities::HttpCapability;
         use crate::tools::wasm::wrapper::{OAuthRefreshConfig, resolve_host_credentials};
 
+        struct EnvLockGuard {
+            _guard: std::sync::MutexGuard<'static, ()>,
+        }
+        impl EnvLockGuard {
+            fn new() -> Self {
+                Self {
+                    _guard: crate::config::helpers::lock_env(),
+                }
+            }
+        }
+
         // The OAuth proxy URL is now SSRF-validated. The mock proxy below
         // binds to a loopback address, which is normally rejected; opt into
         // the loopback escape hatch so the test can exercise the proxy
         // refresh path end-to-end. The escape hatch only affects this
         // process and is not exposed to operators.
-        struct EnvGuard;
+        let _env_lock = EnvLockGuard::new();
+        struct EnvGuard {
+            original: Option<std::ffi::OsString>,
+        }
         impl Drop for EnvGuard {
             fn drop(&mut self) {
-                // safety: env mutation in tests; var is test-only.
-                unsafe { std::env::remove_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK") };
+                // SAFETY: Tests serialize env access with lock_env().
+                unsafe {
+                    match &self.original {
+                        Some(value) => {
+                            std::env::set_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK", value)
+                        }
+                        None => std::env::remove_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK"),
+                    }
+                };
             }
         }
-        // safety: env mutation in tests; var is test-only.
+        let original = std::env::var_os("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK");
+        // SAFETY: Tests serialize env access with lock_env().
         unsafe { std::env::set_var("T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK", "1") };
-        let _proxy_loopback_guard = EnvGuard;
+        let _proxy_loopback_guard = EnvGuard { original };
 
         let proxy = MockProxyServer::start().await;
         let store = test_secrets_store();
@@ -2932,6 +3247,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -3043,6 +3359,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -3112,6 +3429,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["www.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -3508,6 +3826,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["sheets.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -3624,6 +3943,7 @@ mod tests {
                 secret_name: "google_oauth_token".to_string(),
                 location: CredentialLocation::AuthorizationBearer,
                 host_patterns: vec!["sheets.googleapis.com".to_string()],
+                path_patterns: Vec::new(),
                 optional: false,
             },
         );
@@ -3873,7 +4193,9 @@ mod tests {
             "another-secret-value-also-do-not-leak".to_string(),
         );
         let cred = super::ResolvedHostCredential {
+            secret_name: "googleapis_secret".to_string(),
             host_patterns: vec!["www.googleapis.com".to_string()],
+            path_patterns: vec![],
             headers,
             query_params,
             secret_value: "raw-secret-bytes".to_string(),
@@ -3901,5 +4223,85 @@ mod tests {
             !debug_output.contains("raw-secret-bytes"),
             "secret_value leaked: {debug_output}"
         );
+    }
+
+    #[test]
+    fn is_loopback_test_rewrite_base_accepts_http_and_https_loopback() {
+        // Mirror the channel-side helper: accept localhost / 127.0.0.0/8 /
+        // [::1] under both http and https, reject anything else. Locks in
+        // the contract that previously diverged from the channel-side
+        // (PR #3366 review).
+        assert!(super::is_loopback_test_rewrite_base("http://localhost"));
+        assert!(super::is_loopback_test_rewrite_base(
+            "http://localhost:9999"
+        ));
+        assert!(super::is_loopback_test_rewrite_base("http://127.0.0.1"));
+        assert!(super::is_loopback_test_rewrite_base(
+            "http://127.0.0.1:8080"
+        ));
+        assert!(super::is_loopback_test_rewrite_base("http://[::1]"));
+        assert!(super::is_loopback_test_rewrite_base("http://[::1]:8443"));
+        assert!(super::is_loopback_test_rewrite_base("https://localhost"));
+        assert!(super::is_loopback_test_rewrite_base(
+            "https://localhost:8443"
+        ));
+        assert!(super::is_loopback_test_rewrite_base("https://127.0.0.1"));
+        assert!(super::is_loopback_test_rewrite_base("https://[::1]"));
+
+        // Non-loopback / wrong scheme / malformed → reject.
+        assert!(!super::is_loopback_test_rewrite_base("https://example.com"));
+        assert!(!super::is_loopback_test_rewrite_base("http://10.0.0.1"));
+        assert!(!super::is_loopback_test_rewrite_base("http://0.0.0.0"));
+        assert!(!super::is_loopback_test_rewrite_base("ftp://localhost"));
+        assert!(!super::is_loopback_test_rewrite_base("not a url"));
+    }
+
+    #[test]
+    fn rewrite_http_url_for_tool_testing_accepts_https_loopback() {
+        // Regression for PR #3366 review: the tool-side rewrite previously
+        // hardcoded `http://...` prefix matches and silently rejected valid
+        // https-loopback bases that the channel-side helper accepts.
+        let _guard = crate::config::helpers::lock_env();
+        let original = std::env::var("T3CLAW_TEST_HTTP_REWRITE_MAP").ok();
+
+        // SAFETY: guarded by lock_env() — no concurrent env access.
+        unsafe {
+            std::env::set_var(
+                "T3CLAW_TEST_HTTP_REWRITE_MAP",
+                r#"{"gmail.googleapis.com":"https://localhost:8443"}"#,
+            );
+        }
+        let rewritten = super::rewrite_http_url_for_tool_testing(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        );
+        assert_eq!(
+            rewritten.as_deref(),
+            Some("https://localhost:8443/gmail/v1/users/me/profile"),
+            "https-loopback base must be accepted (parity with channel-side helper)"
+        );
+
+        // Non-loopback target is still rejected.
+        unsafe {
+            std::env::set_var(
+                "T3CLAW_TEST_HTTP_REWRITE_MAP",
+                r#"{"gmail.googleapis.com":"https://attacker.example.com"}"#,
+            );
+        }
+        let rejected = super::rewrite_http_url_for_tool_testing(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+        );
+        assert!(
+            rejected.is_none(),
+            "non-loopback rewrite targets must remain rejected"
+        );
+
+        // SAFETY: restore original env var under the same lock.
+        unsafe {
+            if let Some(ref val) = original {
+                std::env::set_var("T3CLAW_TEST_HTTP_REWRITE_MAP", val);
+            } else {
+                std::env::remove_var("T3CLAW_TEST_HTTP_REWRITE_MAP");
+            }
+        }
     }
 }

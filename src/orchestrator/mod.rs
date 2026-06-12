@@ -47,9 +47,9 @@ use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
 use crate::db::Database;
-use crate::llm::LlmProvider;
 use crate::secrets::SecretsStore;
 use t3claw_common::AppEvent;
+use t3claw_llm::LlmProvider;
 
 /// Resolve the orchestrator port from the `ORCHESTRATOR_PORT` environment
 /// variable, falling back to 50051.
@@ -140,7 +140,6 @@ pub async fn setup_orchestrator(
             prompt_queue: Arc::clone(&prompt_queue),
             store: db.cloned(),
             secrets_store: secrets_store.cloned(),
-            user_id: config.owner_id.clone(),
             job_owner_cache: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         };
 

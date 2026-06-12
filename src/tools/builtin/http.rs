@@ -46,7 +46,7 @@ const MAX_REDIRECTS: usize = 3;
 const USER_AGENT: &str = concat!(
     "T3Claw-Agent/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/Terminal-3/t3-claw)"
+    " (https://github.com/nearai/ironclaw)"
 );
 
 /// Tool for making HTTP requests.
@@ -409,6 +409,14 @@ pub fn extract_host_from_params(params: &serde_json::Value) -> Option<String> {
         .and_then(|u| u.host_str().map(|h| h.to_string()))
 }
 
+pub fn extract_path_from_params(params: &serde_json::Value) -> Option<String> {
+    params
+        .get("url")
+        .and_then(|u| u.as_str())
+        .and_then(|u| reqwest::Url::parse(u).ok())
+        .map(|u| u.path().to_string())
+}
+
 /// Deduplicate credential mappings by `(secret_name, location)`.
 ///
 /// The same secret can be declared by both a WASM tool's capabilities
@@ -437,6 +445,17 @@ impl Default for HttpTool {
 impl Tool for HttpTool {
     fn name(&self) -> &str {
         "http"
+    }
+
+    fn runtime_affordance(&self) -> crate::tools::ToolRuntimeAffordance {
+        // Direct outbound HTTP egress. Hosted-multi-tenant policies
+        // resolve to `Brokered`/`Allowlist` network modes; the broker
+        // is the supported route for those deployments. Hide this tool
+        // under non-Direct policies so the model uses the brokered
+        // surface instead. `Direct` and `DirectLogged` profiles
+        // (LocalYolo, EnterpriseYoloDedicated) keep it visible
+        // (#3243 MED tool-affordance coverage).
+        crate::tools::ToolRuntimeAffordance::DirectNetwork
     }
 
     fn description(&self) -> &str {
@@ -533,9 +552,13 @@ impl Tool for HttpTool {
         // Snapshot once here and hand this to the interceptor instead.
         let caller_url = parsed_url.clone();
 
-        // Block LLM-provided authorization headers when the host has registered
-        // credential mappings. Credentials must come from the registry, not from
-        // LLM-generated arguments — prevents prompt-injection exfiltration.
+        // Block LLM-supplied auth headers for any host with a registered
+        // credential mapping — host-scoped on purpose. Header blocking is
+        // exfiltration defense (a prompt-injection attack must not be able
+        // to smuggle an `Authorization` header through an un-scoped path),
+        // while injection below is path-scoped for minimum privilege. A
+        // path not covered by `path_patterns` therefore goes out
+        // unauthenticated; that's intended.
         if let Some(registry) = self.credential_registry.as_ref() {
             let cred_host = parsed_url.host_str().unwrap_or("");
             if registry.has_credentials_for_host(cred_host) {
@@ -632,15 +655,22 @@ impl Tool for HttpTool {
             NotConfigured,
             RefreshFailed,
         }
+        // Conjunctive credential tracking: if a request matches multiple
+        // required mappings (e.g. Bearer token + org header), ALL must
+        // resolve for the request to be fully authenticated. If any is
+        // missing we retain it in `missing_credential` — clearing it on a
+        // successful peer injection would silently drop the auth gate and
+        // surface a raw 401 with no remediation path. `optional` mappings
+        // are permitted to be missing without raising the gate.
         let mut missing_credential: Option<(String, MissingReason)> = None;
-        let mut injected_any_credential = false;
         if let (Some(registry), Some(store)) = (
             self.credential_registry.as_ref(),
             self.secrets_store.as_ref(),
         ) {
             let cred_host = parsed_url.host_str().unwrap_or("").to_string();
+            let cred_path = parsed_url.path();
             let matched: Vec<crate::secrets::CredentialMapping> =
-                registry.find_for_host(&cred_host);
+                registry.find_for_url(&cred_host, cred_path);
             tracing::debug!(
                 host = %cred_host,
                 matched_count = matched.len(),
@@ -663,8 +693,6 @@ impl Tool for HttpTool {
                 .await
                 {
                     Ok(secret) => {
-                        injected_any_credential = true;
-                        missing_credential = None;
                         // Redacted preview for triage: first and last 4 chars
                         // only, never the middle. Lets an operator tell at a
                         // glance whether the decrypted value even looks like
@@ -697,12 +725,20 @@ impl Tool for HttpTool {
                             request = request.query(&[(name.as_str(), value.as_str())]);
                         }
                     }
-                    Err(error) if error.requires_authentication() && !injected_any_credential => {
+                    Err(error) if error.requires_authentication() => {
+                        if mapping.optional {
+                            tracing::debug!(
+                                secret = %mapping.secret_name,
+                                host = %cred_host,
+                                "Optional credential unavailable — proceeding without"
+                            );
+                            continue;
+                        }
                         tracing::debug!(
                             secret = %mapping.secret_name,
                             host = %cred_host,
                             error = ?error,
-                            "Credential unavailable — proceeding without auth"
+                            "Required credential unavailable — will surface auth gate on 401/403"
                         );
                         let reason = match error {
                             crate::auth::CredentialResolutionError::RefreshFailed => {
@@ -710,7 +746,12 @@ impl Tool for HttpTool {
                             }
                             _ => MissingReason::NotConfigured,
                         };
-                        missing_credential = Some((mapping.secret_name.clone(), reason));
+                        // Keep the FIRST missing required credential for the
+                        // remediation UX — the auth gate surfaces one issue at
+                        // a time.
+                        if missing_credential.is_none() {
+                            missing_credential = Some((mapping.secret_name.clone(), reason));
+                        }
                     }
                     Err(e) => {
                         tracing::warn!(
@@ -729,13 +770,13 @@ impl Tool for HttpTool {
         // API keys, and injected query-param/URL-path credentials never
         // reach the recorder. Replay matching uses `method` + `url` only,
         // so omitting the injected values is safe for determinism.
-        let intercept_req = crate::llm::recording::HttpExchangeRequest {
+        let intercept_req = t3claw_llm::recording::HttpExchangeRequest {
             method: method_upper,
             url: caller_url.to_string(),
             headers: caller_headers,
             body: body_bytes
                 .as_ref()
-                .map(|b| crate::llm::recording::redact_body(&String::from_utf8_lossy(b))),
+                .map(|b| t3claw_llm::recording::redact_body(&String::from_utf8_lossy(b))),
         };
 
         // Check HTTP interceptor (replay mode returns pre-recorded response)
@@ -1029,7 +1070,7 @@ impl Tool for HttpTool {
             interceptor
                 .after_response(
                     &intercept_req,
-                    &crate::llm::recording::HttpExchangeResponse {
+                    &t3claw_llm::recording::HttpExchangeResponse {
                         status,
                         headers: resp_headers,
                         body: body_text.clone(),
@@ -1570,6 +1611,53 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_path_from_params_valid() {
+        let params = serde_json::json!({"url": "https://api.example.com/v1/users"});
+        assert_eq!(extract_path_from_params(&params), Some("/v1/users".into()));
+    }
+
+    #[test]
+    fn test_extract_path_from_params_missing_url() {
+        let params = serde_json::json!({"method": "GET"});
+        assert_eq!(extract_path_from_params(&params), None);
+    }
+
+    #[test]
+    fn test_extract_path_from_params_strips_query_and_fragment() {
+        // Url::parse().path() returns just the path; query/fragment live on
+        // separate accessors. This locks that behavior in so the auth
+        // pre-flight and credential lookup agree on the effective path.
+        let with_query = serde_json::json!({"url": "https://host/api/v1?page=1"});
+        assert_eq!(
+            extract_path_from_params(&with_query),
+            Some("/api/v1".into())
+        );
+
+        let with_fragment = serde_json::json!({"url": "https://host/api/v1#frag"});
+        assert_eq!(
+            extract_path_from_params(&with_fragment),
+            Some("/api/v1".into())
+        );
+    }
+
+    #[test]
+    fn test_extract_path_from_params_root_when_no_path() {
+        // `https://host` parses to path "/", so callers get a defined value
+        // rather than needing a `.unwrap_or("/")` fallback. This test locks
+        // that in — if it ever returns `None` for `https://host`, the auth
+        // pre-flight `.unwrap_or_else(|| "/".to_string())` would still work,
+        // but it'd be a subtle behavior change.
+        let params = serde_json::json!({"url": "https://host"});
+        assert_eq!(extract_path_from_params(&params), Some("/".into()));
+    }
+
+    #[test]
+    fn test_extract_path_from_params_malformed_url() {
+        let params = serde_json::json!({"url": "not a url"});
+        assert_eq!(extract_path_from_params(&params), None);
+    }
+
+    #[test]
     fn test_requires_approval_with_stringified_http_params() {
         use crate::tools::wasm::SharedCredentialRegistry;
 
@@ -1803,7 +1891,7 @@ mod tests {
     /// no real HTTP call is made.
     #[derive(Debug)]
     struct SpyInterceptor {
-        captured: tokio::sync::Mutex<Option<crate::llm::recording::HttpExchangeRequest>>,
+        captured: tokio::sync::Mutex<Option<t3claw_llm::recording::HttpExchangeRequest>>,
     }
 
     impl SpyInterceptor {
@@ -1813,19 +1901,19 @@ mod tests {
             }
         }
 
-        async fn captured_request(&self) -> Option<crate::llm::recording::HttpExchangeRequest> {
+        async fn captured_request(&self) -> Option<t3claw_llm::recording::HttpExchangeRequest> {
             self.captured.lock().await.clone()
         }
     }
 
     #[async_trait::async_trait]
-    impl crate::llm::recording::HttpInterceptor for SpyInterceptor {
+    impl t3claw_llm::recording::HttpInterceptor for SpyInterceptor {
         async fn before_request(
             &self,
-            request: &crate::llm::recording::HttpExchangeRequest,
-        ) -> Option<crate::llm::recording::HttpExchangeResponse> {
+            request: &t3claw_llm::recording::HttpExchangeRequest,
+        ) -> Option<t3claw_llm::recording::HttpExchangeResponse> {
             *self.captured.lock().await = Some(request.clone());
-            Some(crate::llm::recording::HttpExchangeResponse {
+            Some(t3claw_llm::recording::HttpExchangeResponse {
                 status: 200,
                 headers: vec![],
                 body: r#"{"ok":true}"#.to_string(),
@@ -1834,8 +1922,8 @@ mod tests {
 
         async fn after_response(
             &self,
-            _request: &crate::llm::recording::HttpExchangeRequest,
-            _response: &crate::llm::recording::HttpExchangeResponse,
+            _request: &t3claw_llm::recording::HttpExchangeRequest,
+            _response: &t3claw_llm::recording::HttpExchangeResponse,
         ) {
         }
     }
@@ -1865,6 +1953,7 @@ mod tests {
                 name: "signature".to_string(),
             },
             host_patterns: vec!["api.github.com".to_string()],
+            path_patterns: Vec::new(),
             optional: false,
         }]);
 
@@ -1884,7 +1973,7 @@ mod tests {
 
         let spy = Arc::new(SpyInterceptor::new());
         let mut ctx = crate::context::JobContext::new("test", "test");
-        ctx.http_interceptor = Some(spy.clone() as Arc<dyn crate::llm::recording::HttpInterceptor>);
+        ctx.http_interceptor = Some(spy.clone() as Arc<dyn t3claw_llm::recording::HttpInterceptor>);
 
         // `api.github.com` chosen because DNS resolution runs before the
         // interceptor short-circuits (see `validate_and_resolve_url` in
@@ -1959,7 +2048,7 @@ mod tests {
 
         let spy = Arc::new(SpyInterceptor::new());
         let mut ctx = crate::context::JobContext::new("test", "test");
-        ctx.http_interceptor = Some(spy.clone() as Arc<dyn crate::llm::recording::HttpInterceptor>);
+        ctx.http_interceptor = Some(spy.clone() as Arc<dyn t3claw_llm::recording::HttpInterceptor>);
 
         let params = serde_json::json!({
             "method": "GET",

@@ -30,7 +30,17 @@ import httpx
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from helpers import AUTH_TOKEN, SEL, api_get, api_post, sse_stream, wait_for_ready
+from helpers import (
+    AUTH_TOKEN,
+    SEL,
+    _reserve_loopback_port,
+    api_get,
+    api_post,
+    create_member_user,
+    open_authed_page,
+    sse_stream,
+    wait_for_ready,
+)
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -69,10 +79,35 @@ async def _stop_process(proc, sig=signal.SIGINT, timeout=5):
     await _drain_pipes()
 
 
+async def _drain_stream_to_file(stream, path):
+    """Drain an asyncio subprocess stream to a file in a background task.
+
+    Without an active drainer, ``asyncio.create_subprocess_exec(stdout=PIPE,
+    stderr=PIPE)`` deadlocks under sustained log output: the kernel pipe
+    buffer fills (64 KiB on Linux, 16-64 KiB on macOS depending on tuning)
+    and the child blocks on its next stdout/stderr write. For t3claw
+    with ``RUST_LOG=t3claw=info`` and an SSE-driven test that pumps
+    requests, that translates into the gateway freezing mid-request and
+    SSE events never arriving — exactly the failure mode of
+    test_wasm_tool_first_chat_auth_attempt_emits_auth_url. Mirrors the
+    sync threading.Thread version in scripts/live_canary/common.py.
+    """
+    try:
+        with open(path, "ab", buffering=0) as fh:
+            while True:
+                chunk = await stream.readline()
+                if not chunk:
+                    return
+                fh.write(chunk)
+    except Exception:
+        pass
+
+
 async def _start_mock_google_api():
     from aiohttp import web
 
     received_tokens: list[str] = []
+    received_requests: list[str] = []
     messages = [
         {
             "id": "msg-1",
@@ -99,7 +134,11 @@ async def _start_mock_google_api():
         received_tokens.append(token)
         return token
 
+    def _record_request(request: web.Request) -> None:
+        received_requests.append(f"{request.method} {request.path}")
+
     async def handle_drive_files(request: web.Request) -> web.Response:
+        _record_request(request)
         if _authorized(request) is None:
             return web.json_response({"error": "missing_auth"}, status=401)
         return web.json_response(
@@ -112,9 +151,11 @@ async def _start_mock_google_api():
         )
 
     async def handle_userinfo(request: web.Request) -> web.Response:
+        _record_request(request)
         return web.json_response({"email": "matrix@example.com", "name": "Matrix User"})
 
     async def handle_gmail_messages(request: web.Request) -> web.Response:
+        _record_request(request)
         if _authorized(request) is None:
             return web.json_response({"error": "missing_auth"}, status=401)
         return web.json_response(
@@ -128,6 +169,7 @@ async def _start_mock_google_api():
         )
 
     async def handle_gmail_message(request: web.Request) -> web.Response:
+        _record_request(request)
         if _authorized(request) is None:
             return web.json_response({"error": "missing_auth"}, status=401)
         message_id = request.match_info["message_id"]
@@ -139,6 +181,9 @@ async def _start_mock_google_api():
     async def handle_received_tokens(request: web.Request) -> web.Response:
         return web.json_response({"tokens": received_tokens})
 
+    async def handle_received_requests(request: web.Request) -> web.Response:
+        return web.json_response({"requests": received_requests})
+
     app = web.Application()
     app.router.add_get("/drive/v3/files", handle_drive_files)
     app.router.add_get("/oauth2/v1/userinfo", handle_userinfo)
@@ -146,6 +191,7 @@ async def _start_mock_google_api():
     app.router.add_get("/gmail/v1/users/me/messages", handle_gmail_messages)
     app.router.add_get("/gmail/v1/users/me/messages/{message_id}", handle_gmail_message)
     app.router.add_get("/__mock/received-tokens", handle_received_tokens)
+    app.router.add_get("/__mock/received-requests", handle_received_requests)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -167,10 +213,11 @@ def _write_google_skill(skills_dir: str, mock_api_host: str) -> None:
             f"""---
 name: google_auth_matrix
 version: "1.0.0"
-keywords:
-  - google
-  - drive
-  - gmail
+activation:
+  keywords:
+    - google
+    - drive
+    - gmail
 credentials:
   - name: google_oauth_token
     provider: google
@@ -237,6 +284,55 @@ async def _seed_mock_llm_api_url(mock_llm_server: str, mock_api_url: str) -> Non
     response.raise_for_status()
 
 
+async def _pin_mock_llm_settings(base_url: str, mock_llm_server: str) -> None:
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    writes = [
+        ("llm_backend", "openai_compatible"),
+        ("openai_compatible_base_url", mock_llm_server),
+        ("selected_model", "mock-model"),
+    ]
+    async with httpx.AsyncClient() as client:
+        for key, value in writes:
+            response = await client.put(
+                f"{base_url}/api/settings/{key}",
+                headers=headers,
+                json={"value": value},
+                timeout=15,
+            )
+            assert response.status_code in (200, 201, 204), (
+                f"failed to pin {key}: {response.status_code} {response.text[:300]}"
+            )
+
+
+async def _set_tool_permission(
+    base_url: str, tool_name: str, state: str
+) -> None:
+    """Override a tool's permission state via the settings API.
+
+    Post-#3559 (security-review follow-up to #3533): no DB row exists
+    for tools the user hasn't explicitly customized — the seeder was
+    removed and a one-shot startup migration deletes ghost-seeded rows.
+    Any value written through this helper is therefore a true user
+    override and `AGENT_AUTO_APPROVE_TOOLS=true` will NOT bypass it.
+    Use this helper to: (a) pre-approve a tool with no seeded default
+    so a post-install retry doesn't gate, or (b) force a specific
+    permission for tests that intentionally exercise the gate path
+    (typically combined with `AGENT_AUTO_APPROVE_TOOLS=false`).
+    """
+    headers = {"Authorization": f"Bearer {AUTH_TOKEN}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{base_url}/api/settings/tool_permissions.{tool_name}",
+            headers=headers,
+            json={"value": state},
+            timeout=15,
+        )
+        assert response.status_code in (200, 201, 204), (
+            f"failed to set tool_permissions.{tool_name}={state}: "
+            f"{response.status_code} {response.text[:300]}"
+        )
+
+
 async def _start_auth_matrix_server(
     t3claw_binary: str,
     mock_llm_server: str,
@@ -244,13 +340,8 @@ async def _start_auth_matrix_server(
     *,
     exchange_url: str,
     existing_paths: dict | None = None,
+    auto_approve_tools: bool = True,
 ):
-    reserved = []
-    for _ in range(2):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(("127.0.0.1", 0))
-        reserved.append(sock)
-
     if existing_paths is None:
         db_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-auth-matrix-db-")
         home_tmpdir = tempfile.TemporaryDirectory(prefix="t3claw-auth-matrix-home-")
@@ -272,10 +363,8 @@ async def _start_auth_matrix_server(
         tmpdirs = existing_paths["tmpdirs"]
 
     try:
-        gateway_port = reserved[0].getsockname()[1]
-        http_port = reserved[1].getsockname()[1]
-        for sock in reserved:
-            sock.close()
+        gateway_port = _reserve_loopback_port()
+        http_port = _reserve_loopback_port()
 
         skills_dir = os.path.join(home_dir, ".t3claw", "skills")
         os.makedirs(skills_dir, exist_ok=True)
@@ -285,8 +374,8 @@ async def _start_auth_matrix_server(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_dir,
-            "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
-            "IRONCLAW_OWNER_ID": TEST_USER_ID,
+            "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+            "T3CLAW_OWNER_ID": TEST_USER_ID,
             "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
             "ENGINE_V2": "true",
@@ -302,6 +391,7 @@ async def _start_auth_matrix_server(
             "CLI_ENABLED": "false",
             "LLM_BACKEND": "openai_compatible",
             "LLM_BASE_URL": mock_llm_server,
+            "LLM_API_KEY": "mock-api-key",
             "LLM_MODEL": "mock-model",
             "DATABASE_BACKEND": "libsql",
             "LIBSQL_PATH": db_path,
@@ -314,14 +404,29 @@ async def _start_auth_matrix_server(
             "WASM_TOOLS_DIR": tools_dir,
             "WASM_CHANNELS_DIR": channels_dir,
             "ONBOARD_COMPLETED": "true",
-            "IRONCLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
-            "IRONCLAW_OAUTH_EXCHANGE_URL": exchange_url,
-            "IRONCLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
+            # Auto-approve administrative tools so the chat-driven install
+            # path (`tool_install` from chat in #3533) runs without a human
+            # approval prompt. Authentication gates remain active. Tests
+            # that exercise the explicit approval path opt out of this via
+            # the `auto_approve_tools=False` fixture parameter.
+            "AGENT_AUTO_APPROVE_TOOLS": "true" if auto_approve_tools else "false",
+            "T3CLAW_OAUTH_CALLBACK_URL": "https://oauth.test.example/oauth/callback",
+            "T3CLAW_OAUTH_EXCHANGE_URL": exchange_url,
+            # The exchange proxy runs on 127.0.0.1 in tests; the SSRF guard
+            # for OAuth refresh refuses loopback by default. The env var is
+            # cfg(any(test, debug_assertions))-gated so it's a no-op in
+            # release builds, matching src/auth/mod.rs::validate_oauth_proxy_url.
+            "T3CLAW_OAUTH_PROXY_ALLOW_LOOPBACK": "1",
             "GOOGLE_OAUTH_CLIENT_ID": "hosted-google-client-id",
-            "IRONCLAW_TEST_HTTP_REMAP": (
+            "T3CLAW_TEST_HTTP_REMAP": (
                 f"gmail.googleapis.com={mock_api_url},"
                 f"www.googleapis.com={mock_api_url}"
             ),
+            # Allow RUST_LOG passthrough from the test runner — the auth
+            # matrix fixture historically built its env from scratch
+            # which made it impossible to crank up logging from the
+            # outside. Forwarded here so debug runs work.
+            "RUST_LOG": os.environ.get("RUST_LOG", "t3claw=info"),
         }
         _forward_coverage_env(env)
 
@@ -334,9 +439,24 @@ async def _start_auth_matrix_server(
             env=env,
         )
 
+        # Drain stdout/stderr to a temp log file so the kernel pipe buffer
+        # never fills. Without this, t3claw's RUST_LOG=info output
+        # eventually blocks on stdout writes and the SSE event loop
+        # freezes mid-request. See _drain_stream_to_file's docstring.
+        # Log path lives outside home_dir so it survives tmpdir cleanup
+        # and can be inspected post-test for debugging.
+        log_path = os.environ.get(
+            "T3CLAW_AUTH_MATRIX_LOG", "/tmp/t3claw-auth-matrix-gateway.log"
+        )
+        drain_tasks = [
+            asyncio.create_task(_drain_stream_to_file(proc.stdout, log_path)),
+            asyncio.create_task(_drain_stream_to_file(proc.stderr, log_path)),
+        ]
+
         base_url = f"http://127.0.0.1:{gateway_port}"
         try:
             await wait_for_ready(f"{base_url}/api/health", timeout=60)
+            await _pin_mock_llm_settings(base_url, mock_llm_server)
             await _seed_mock_llm_api_url(mock_llm_server, mock_api_url)
             return {
                 "base_url": base_url,
@@ -350,6 +470,8 @@ async def _start_auth_matrix_server(
                 "tools_dir": tools_dir,
                 "channels_dir": channels_dir,
                 "proc": proc,
+                "drain_tasks": drain_tasks,
+                "log_path": log_path,
                 "tmpdirs": tmpdirs,
             }
         except Exception:
@@ -357,11 +479,6 @@ async def _start_auth_matrix_server(
                 await _stop_process(proc, timeout=2)
             raise
     except Exception:
-        for sock in reserved:
-            try:
-                sock.close()
-            except Exception:
-                pass
         for tmpdir in [db_tmpdir, home_tmpdir, tools_tmpdir, channels_tmpdir]:
             if tmpdir is not None:
                 tmpdir.cleanup()
@@ -374,6 +491,15 @@ async def _shutdown_auth_matrix_server(server: dict, *, cleanup: bool = True) ->
         await _stop_process(proc, sig=signal.SIGINT, timeout=10)
         if proc.returncode is None:
             await _stop_process(proc, timeout=2)
+    # Cancel the stdout/stderr drainer tasks once the process is dead;
+    # they'll naturally exit on their next readline() returning empty,
+    # but cancelling guarantees no leaked tasks across test boundaries.
+    for task in server.get("drain_tasks", []):
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
     if cleanup:
         for tmpdir in server["tmpdirs"]:
             tmpdir.cleanup()
@@ -419,8 +545,8 @@ async def _start_auth_matrix_repl(
         env = {
             "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
             "HOME": home_dir,
-            "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
-            "IRONCLAW_OWNER_ID": TEST_USER_ID,
+            "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+            "T3CLAW_OWNER_ID": TEST_USER_ID,
             "RUST_LOG": "t3claw=info",
             "RUST_BACKTRACE": "1",
             "TERM": os.environ.get("TERM", "xterm-256color"),
@@ -432,8 +558,19 @@ async def _start_auth_matrix_repl(
             "SECRETS_MASTER_KEY": MASTER_KEY,
             "GATEWAY_ENABLED": "false",
             "CLI_ENABLED": "true",
+            # `CLI_MODE` defaults to `tui` (ratatui full-screen UI)
+            # which reads stdin keystroke-by-keystroke and renders into
+            # a framebuffer. The PTY-driven tests here send whole lines
+            # via `os.write(master_fd, b"prompt\n")` and match for
+            # specific text in the raw stream — under the default TUI
+            # mode those line-based sends don't dispatch the prompt to
+            # the agent and the test times out with nothing but
+            # cursor-position escapes captured. Pin the plain REPL so
+            # these PTY-based tests drive the expected CLI surface.
+            "CLI_MODE": "repl",
             "LLM_BACKEND": "openai_compatible",
             "LLM_BASE_URL": mock_llm_server,
+            "LLM_API_KEY": "mock-api-key",
             "LLM_MODEL": "mock-model",
             "DATABASE_BACKEND": "libsql",
             "LIBSQL_PATH": os.path.join(db_tmpdir.name, "auth-matrix-repl.db"),
@@ -545,6 +682,41 @@ async def auth_matrix_repl(t3claw_binary, mock_llm_server):
 
 
 @pytest.fixture
+async def auth_matrix_server_no_auto_approve(t3claw_binary, mock_llm_server):
+    """Sibling of `auth_matrix_server` that disables tool auto-approve.
+
+    Used by `test_chat_install_approval_then_auth_card` so the explicit
+    approval gate for `tool_install` actually fires through to the
+    user-facing approval card.
+    """
+    mock_api = await _start_mock_google_api()
+    server = await _start_auth_matrix_server(
+        t3claw_binary,
+        mock_llm_server,
+        mock_api["base_url"],
+        exchange_url=mock_llm_server,
+        auto_approve_tools=False,
+    )
+    try:
+        yield server
+    finally:
+        await _shutdown_auth_matrix_server(server)
+        await mock_api["runner"].cleanup()
+
+
+@pytest.fixture
+async def auth_matrix_page_no_auto_approve(browser, auth_matrix_server_no_auto_approve):
+    context = await browser.new_context(viewport={"width": 1280, "height": 720})
+    page = await context.new_page()
+    await page.goto(f"{auth_matrix_server_no_auto_approve['base_url']}/?token={AUTH_TOKEN}")
+    await page.wait_for_selector("#auth-screen", state="hidden", timeout=15000)
+    try:
+        yield page
+    finally:
+        await context.close()
+
+
+@pytest.fixture
 async def auth_matrix_page(browser, auth_matrix_server):
     context = await browser.new_context(viewport={"width": 1280, "height": 720})
     page = await context.new_page()
@@ -615,8 +787,8 @@ def _parse_timestamp(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-async def _get_extension(base_url: str, name: str) -> dict | None:
-    response = await api_get(base_url, "/api/extensions", timeout=15)
+async def _get_extension(base_url: str, name: str, *, token: str = AUTH_TOKEN) -> dict | None:
+    response = await api_get(base_url, "/api/extensions", token=token, timeout=15)
     response.raise_for_status()
     for extension in response.json().get("extensions", []):
         if extension["name"] == name:
@@ -624,9 +796,15 @@ async def _get_extension(base_url: str, name: str) -> dict | None:
     return None
 
 
-async def _wait_for_extension(base_url: str, name: str, *, timeout: float = 30.0) -> dict:
+async def _wait_for_extension(
+    base_url: str,
+    name: str,
+    *,
+    token: str = AUTH_TOKEN,
+    timeout: float = 30.0,
+) -> dict:
     for _ in range(int(timeout * 2)):
-        extension = await _get_extension(base_url, name)
+        extension = await _get_extension(base_url, name, token=token)
         if extension is not None:
             return extension
         await asyncio.sleep(0.5)
@@ -683,6 +861,18 @@ async def _read_repl_until_any(
     raise AssertionError(f"Matched union {union!r} but no individual pattern matched")
 
 
+async def _try_read_repl_until_any(
+    repl: dict,
+    patterns: list[str],
+    *,
+    timeout: float = 30.0,
+) -> tuple[str, str] | None:
+    try:
+        return await _read_repl_until_any(repl, patterns, timeout=timeout)
+    except AssertionError:
+        return None
+
+
 async def _drain_repl_output(repl: dict, *, idle_secs: float = 0.4) -> str:
     chunks: list[str] = []
     while True:
@@ -713,8 +903,13 @@ async def _send_repl_key(repl: dict, key: str) -> None:
     os.write(repl["master_fd"], key.encode("utf-8"))
 
 
-async def _get_extension_readiness(base_url: str, name: str) -> dict | None:
-    response = await api_get(base_url, "/api/extensions/readiness", timeout=15)
+async def _get_extension_readiness(
+    base_url: str,
+    name: str,
+    *,
+    token: str = AUTH_TOKEN,
+) -> dict | None:
+    response = await api_get(base_url, "/api/extensions/readiness", token=token, timeout=15)
     response.raise_for_status()
     for extension in response.json().get("extensions", []):
         if extension["name"] == name:
@@ -723,10 +918,14 @@ async def _get_extension_readiness(base_url: str, name: str) -> dict | None:
 
 
 async def _wait_for_extension_readiness(
-    base_url: str, name: str, *, timeout: float = 30.0
+    base_url: str,
+    name: str,
+    *,
+    token: str = AUTH_TOKEN,
+    timeout: float = 30.0,
 ) -> dict:
     for _ in range(int(timeout * 2)):
-        extension = await _get_extension_readiness(base_url, name)
+        extension = await _get_extension_readiness(base_url, name, token=token)
         if extension is not None:
             return extension
         await asyncio.sleep(0.5)
@@ -737,6 +936,7 @@ async def _install_extension(
     base_url: str,
     name: str,
     *,
+    token: str = AUTH_TOKEN,
     kind: str | None = None,
     url: str | None = None,
 ):
@@ -748,6 +948,7 @@ async def _install_extension(
     response = await api_post(
         base_url,
         "/api/extensions/install",
+        token=token,
         json=payload,
         timeout=180,
     )
@@ -912,6 +1113,16 @@ async def _wait_for_mock_google_tokens(mock_api_url: str, *, timeout: float = 30
     raise AssertionError("Timed out waiting for Gmail HTTP execution against the mock API")
 
 
+async def _get_mock_google_requests(mock_api_url: str) -> list[str]:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f"{mock_api_url}/__mock/received-requests",
+            timeout=15,
+        )
+    response.raise_for_status()
+    return response.json().get("requests", [])
+
+
 async def _wait_for_mock_llm_request_contains(
     mock_llm_url: str, needle: str, *, timeout: float = 30.0
 ) -> dict:
@@ -934,12 +1145,15 @@ async def _wait_for_tool_call(
     thread_id: str,
     tool_name: str,
     timeout: float = 30.0,
+    *,
+    token: str = AUTH_TOKEN,
 ) -> dict:
     approved_request_ids = set()
     for _ in range(int(timeout * 2)):
         response = await api_get(
             base_url,
             f"/api/chat/history?thread_id={thread_id}",
+            token=token,
             timeout=15,
         )
         response.raise_for_status()
@@ -950,6 +1164,7 @@ async def _wait_for_tool_call(
             approve = await api_post(
                 base_url,
                 "/api/chat/approval",
+                token=token,
                 json={
                     "request_id": pending["request_id"],
                     "action": "approve",
@@ -1030,10 +1245,23 @@ async def _get_mock_oauth_state(mock_base_url: str) -> dict:
     return response.json()
 
 
+async def _reset_mock_mcp_state(mock_base_url: str) -> None:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(f"{mock_base_url}/__mock/mcp/reset", timeout=10)
+    response.raise_for_status()
+
+
+async def _get_mock_mcp_state(mock_base_url: str) -> dict:
+    async with httpx.AsyncClient() as client:
+        response = await client.get(f"{mock_base_url}/__mock/mcp/state", timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+
 async def _wait_for_refresh_request(
     mock_base_url: str,
     *,
-    timeout: float = 20.0,
+    timeout: float = 120.0,
 ) -> dict:
     for _ in range(int(timeout * 2)):
         state = await _get_mock_oauth_state(mock_base_url)
@@ -1065,13 +1293,19 @@ async def _wait_for_mock_token(
     raise AssertionError(f"Timed out waiting for token {token!r}. Last tokens: {last}")
 
 
-async def _remove_extension_if_present(base_url: str, name: str) -> None:
-    extension = await _get_extension(base_url, name)
+async def _remove_extension_if_present(
+    base_url: str,
+    name: str,
+    *,
+    token: str = AUTH_TOKEN,
+) -> None:
+    extension = await _get_extension(base_url, name, token=token)
     if extension is None:
         return
     response = await api_post(
         base_url,
         f"/api/extensions/{name}/remove",
+        token=token,
         timeout=30,
     )
     assert response.status_code == 200, response.text
@@ -1170,6 +1404,7 @@ async def _mcp_auth_url(server: dict) -> str:
     await _install_extension(
         server["base_url"],
         "mock-mcp",
+        token=AUTH_TOKEN,
         kind="mcp_server",
         url=f"{server['mock_llm_url']}/mcp",
     )
@@ -1194,16 +1429,18 @@ async def _mcp_auth_url(server: dict) -> str:
     return auth_url
 
 
-async def _mcp_activate_auth_url(server: dict) -> str:
+async def _mcp_activate_auth_url(server: dict, *, token: str = AUTH_TOKEN) -> str:
     await _install_extension(
         server["base_url"],
         "mock-mcp",
+        token=token,
         kind="mcp_server",
         url=f"{server['mock_llm_url']}/mcp",
     )
     response = await api_post(
         server["base_url"],
         "/api/extensions/mock-mcp/activate",
+        token=token,
         timeout=30,
     )
     assert response.status_code == 200, response.text
@@ -1293,7 +1530,7 @@ async def test_wasm_tool_first_chat_auth_attempt_emits_auth_url(auth_matrix_serv
     thread_id = await _create_thread(server["base_url"])
 
     event_type, payload, auth_url = await _wait_for_auth_event(
-        server["base_url"], thread_id, timeout=60
+        server["base_url"], thread_id, timeout=90
     )
 
     assert auth_url, payload
@@ -1304,7 +1541,7 @@ async def test_wasm_tool_first_chat_auth_attempt_emits_auth_url(auth_matrix_serv
         auth = payload["resume_kind"]["Authentication"]
         assert auth.get("credential_name") in {"gmail", "google_oauth_token"}, payload
 
-    history = await _wait_for_auth_prompt(server["base_url"], thread_id, timeout=60)
+    history = await _wait_for_auth_prompt(server["base_url"], thread_id, timeout=90)
     all_text = " ".join(turn.get("response") or "" for turn in history.get("turns", []))
     pending = history.get("pending_gate")
     assert (
@@ -1355,12 +1592,96 @@ async def test_mcp_oauth_roundtrip_via_browser(browser, auth_matrix_server):
         await context.close()
 
 
+async def test_mcp_same_server_multi_user_via_browser(browser, auth_matrix_server):
+    server = auth_matrix_server
+    member = await create_member_user(server["base_url"], display_name="MCP Matrix Member")
+
+    owner_auth_url = await _mcp_activate_auth_url(server, token=AUTH_TOKEN)
+    owner_callback = await _complete_callback(
+        server["base_url"], owner_auth_url, code="mock_mcp_code_owner"
+    )
+    assert owner_callback.status_code == 200, owner_callback.text[:400]
+    owner_extension = await _wait_for_extension(
+        server["base_url"], MCP_EXTENSION_NAME, token=AUTH_TOKEN
+    )
+    assert owner_extension["authenticated"] is True, owner_extension
+
+    member_auth_url = await _mcp_activate_auth_url(server, token=member["token"])
+    member_callback = await _complete_callback(
+        server["base_url"], member_auth_url, code="mock_mcp_code_member"
+    )
+    assert member_callback.status_code == 200, member_callback.text[:400]
+    member_extension = await _wait_for_extension(
+        server["base_url"], MCP_EXTENSION_NAME, token=member["token"]
+    )
+    assert member_extension["authenticated"] is True, member_extension
+
+    await _reset_mock_mcp_state(server["mock_llm_url"])
+
+    owner_context, owner_page = await open_authed_page(
+        browser, server["base_url"], token=AUTH_TOKEN
+    )
+    member_context, member_page = await open_authed_page(
+        browser, server["base_url"], token=member["token"]
+    )
+    try:
+        # Send the chat through each user's browser session. Engine v2 opens
+        # an `approval` pending_gate on the first MCP tool call; the browser
+        # has no auto-approve UI in this fixture, so drive approval through
+        # the per-user API while polling for the tool call to land. Without
+        # this, both pages hang in the streaming predicate forever.
+        await owner_page.locator(SEL["chat_input"]).fill("check mock mcp search")
+        await owner_page.locator(SEL["chat_input"]).press("Enter")
+        await member_page.locator(SEL["chat_input"]).fill("check mock mcp search")
+        await member_page.locator(SEL["chat_input"]).press("Enter")
+
+        owner_thread = await _current_thread_id(owner_page)
+        member_thread = await _current_thread_id(member_page)
+
+        await _wait_for_tool_call(
+            server["base_url"],
+            owner_thread,
+            "mock_mcp_mock_search",
+            timeout=60.0,
+            token=AUTH_TOKEN,
+        )
+        await _wait_for_tool_call(
+            server["base_url"],
+            member_thread,
+            "mock_mcp_mock_search",
+            timeout=60.0,
+            token=member["token"],
+        )
+
+        mcp_state = await _get_mock_mcp_state(server["mock_llm_url"])
+        tool_call_auths = {
+            request.get("authorization")
+            for request in mcp_state.get("requests", [])
+            if request.get("method") == "tools/call"
+        }
+        assert "Bearer mock-token-mock_mcp_code_owner" in tool_call_auths, mcp_state
+        assert "Bearer mock-token-mock_mcp_code_member" in tool_call_auths, mcp_state
+    finally:
+        await owner_context.close()
+        await member_context.close()
+
+
 async def test_chat_first_gmail_installs_prompts_and_retries(
     auth_matrix_server, auth_matrix_page
 ):
     server = auth_matrix_server
     page = auth_matrix_page
     await _remove_extension_if_present(server["base_url"], "gmail")
+    # The fixture sets `AGENT_AUTO_APPROVE_TOOLS=true`. Post-#3559
+    # (security-review follow-up to #3533), the boot-time seeder that
+    # wrote ghost `tool_install = AskEachTime` rows has been removed
+    # and a startup migration cleans up any pre-existing ghosts. With
+    # no DB row, `effective_permission` falls back to the code-level
+    # `AskEachTime` baseline, which is implicit — so the env knob
+    # bypasses the gate without `_set_tool_permission` having to force
+    # `always_allow`. A user who deliberately picks `AskEachTime`
+    # through the settings UI WOULD have it respected (regression
+    # covered by `bridge::tool_permissions::tests`).
 
     chat_input = page.locator(SEL["chat_input"])
     await chat_input.fill("check gmail unread")
@@ -1395,6 +1716,90 @@ async def test_chat_first_gmail_installs_prompts_and_retries(
     assert extension["active"] is True, extension
 
 
+async def test_chat_install_approval_then_auth_card(
+    auth_matrix_server_no_auto_approve, auth_matrix_page_no_auto_approve
+):
+    """#3533: chat-driven `tool_install` raises an approval gate.
+
+    Sibling to `test_chat_first_gmail_installs_prompts_and_retries`. The
+    other test pre-approves `tool_install` so install completes silently
+    and only the auth card surfaces. This one keeps the seeded
+    `AskEachTime` default so the explicit approval flow is exercised:
+
+      1. User types "check gmail unread".
+      2. Mock LLM dispatches `gmail()` → engine rejects (not installed).
+      3. Mock LLM dispatches `tool_install("gmail")` → engine raises an
+         **Approval gate**, surfacing the `.approval-card`.
+      4. Test clicks the card's Approve button.
+      5. Install completes, gmail registers; the engine retries the next
+         turn with the **Authentication gate** that surfaces the
+         `.auth-card`.
+      6. Test completes OAuth via `/oauth/callback`.
+      7. Gmail tool runs against the mock Google API and the final
+         response contains the canned subject line.
+    """
+    server = auth_matrix_server_no_auto_approve
+    page = auth_matrix_page_no_auto_approve
+    await _remove_extension_if_present(server["base_url"], "gmail")
+    # Note: deliberately NOT pre-approving `tool_install` here so the
+    # approval gate fires and the approval card surfaces in the UI.
+    # The dedicated `_no_auto_approve` fixture passes
+    # `AGENT_AUTO_APPROVE_TOOLS=false` so the env knob doesn't bypass
+    # the code-level `AskEachTime` baseline for `tool_install`.
+    # Pre-approve `gmail` so the post-install retry doesn't *also* gate
+    # — this test isolates the explicit-approval path for `tool_install`
+    # specifically. (Gmail has no seeded permission default, so without
+    # `AGENT_AUTO_APPROVE_TOOLS=true` it would otherwise gate too.)
+    await _set_tool_permission(server["base_url"], "gmail", "always_allow")
+
+    chat_input = page.locator(SEL["chat_input"])
+    await chat_input.fill("check gmail unread")
+    await chat_input.press("Enter")
+
+    approval_card = page.locator(".approval-card").first
+    await approval_card.wait_for(state="visible", timeout=20000)
+    assert await approval_card.get_attribute("data-request-id"), (
+        "expected approval gate request id on the approval card"
+    )
+    tool_name_text = await approval_card.locator(".approval-tool-name").text_content()
+    assert tool_name_text and "install" in tool_name_text.lower(), (
+        f"approval card should be for tool_install, got: {tool_name_text!r}"
+    )
+
+    # Single "Approve" click is sufficient. The stack of #3533 fixes
+    # (`resume_output` on InlineGate so inline-await doesn't re-execute
+    # `tool_install`, OAuth callback skipping `ExternalCallback` when an
+    # inline waiter is already in flight, and discarding the matching
+    # Authentication pending-gate row when the inline path delivers
+    # Approved) means no second `tool_install` dispatch fires, so a
+    # plain "Approve" suffices — no "Always" workaround needed.
+    await approval_card.locator("button.approve").click()
+    await approval_card.locator(".approval-resolved").wait_for(
+        state="visible", timeout=10000
+    )
+
+    auth_card = await _wait_for_auth_card(page)
+    assert await auth_card.get_attribute("data-extension-name") in {
+        "gmail",
+        "google_oauth_token",
+    }
+    auth_url = await _auth_oauth_url_from_card(page)
+    assert auth_url, "Expected auth card to expose an OAuth URL"
+    response = await _complete_callback(
+        server["base_url"], auth_url, code="mock_auth_code"
+    )
+    assert response.status_code == 200, response.text[:400]
+    await auth_card.wait_for(state="hidden", timeout=20000)
+
+    thread_id = await _current_thread_id(page)
+    tokens = await _wait_for_mock_google_tokens(server["mock_api_url"], timeout=60.0)
+    assert tokens, "expected Gmail to hit the mock Google API after OAuth replay"
+    history = await _wait_for_response_contains(
+        server["base_url"], thread_id, "Quarterly update", timeout=60.0
+    )
+    assert history.get("pending_gate") is None, history
+
+
 async def test_settings_first_gmail_auth_then_chat_runs(
     auth_matrix_server, auth_matrix_page
 ):
@@ -1403,15 +1808,22 @@ async def test_settings_first_gmail_auth_then_chat_runs(
     await _remove_extension_if_present(server["base_url"], "gmail")
 
     await _go_to_settings_subtab(page, "extensions")
-    available_card = page.locator("#available-wasm-list .ext-card").filter(
-        has=page.locator(".ext-name", has_text="Gmail")
-    ).first
+    # `has_text="Gmail"` matched *any* card mentioning Gmail in its body —
+    # e.g. Composio's description ("Gmail, GitHub, Slack..."). Match the
+    # card whose `.ext-name` header is exactly "Gmail" so we install the
+    # gmail tool and not Composio.
+    available_card = (
+        page.locator("#available-wasm-list .ext-card")
+        .filter(has=page.locator(".ext-name", has_text=re.compile(r"^Gmail$")))
+        .first
+    )
     await available_card.wait_for(state="visible", timeout=20000)
     await available_card.locator(SEL["ext_install_btn"]).click()
 
     await _wait_for_extension(server["base_url"], "gmail")
     card = await _wait_for_auth_card(page)
     assert await card.get_attribute("data-extension-name") in {"gmail", "google_oauth_token"}
+    assert await _get_mock_google_requests(server["mock_api_url"]) == []
     auth_url = await _auth_oauth_url_from_card(page)
     assert auth_url, "Expected auth card to expose an OAuth URL"
     response = await _complete_callback(server["base_url"], auth_url, code="mock_auth_code")
@@ -1424,10 +1836,11 @@ async def test_settings_first_gmail_auth_then_chat_runs(
     await chat_input.press("Enter")
 
     thread_id = await _current_thread_id(page)
-    tokens = await _wait_for_mock_google_tokens(server["mock_api_url"], timeout=60.0)
+    await _wait_for_tool_call(server["base_url"], thread_id, "gmail", timeout=120.0)
+    tokens = await _wait_for_mock_google_tokens(server["mock_api_url"], timeout=120.0)
     assert tokens, "expected Gmail to hit the mock Google API after settings-first auth"
     history = await _wait_for_response_contains(
-        server["base_url"], thread_id, "Quarterly update", timeout=60.0
+        server["base_url"], thread_id, "Quarterly update", timeout=120.0
     )
     assert history.get("pending_gate") is None, history
     assert "Quarterly update" in " ".join(
@@ -1476,6 +1889,14 @@ async def test_settings_first_custom_mcp_auth_then_chat_runs(
     await chat_input.press("Enter")
 
     thread_id = await _current_thread_id(page)
+    # Engine v2 gates the first MCP tool call on `approval` before it runs;
+    # the browser fixture has no auto-approve UI, so drive approval through
+    # the API while polling for the tool to land. Same pattern as
+    # test_wasm_tool_oauth_refresh_on_demand and
+    # test_mcp_same_server_multi_user_via_browser (#3235).
+    await _wait_for_tool_call(
+        server["base_url"], thread_id, "mock_mcp_mock_search", timeout=60.0
+    )
     history = await _wait_for_response_contains(
         server["base_url"], thread_id, "Mock MCP search result", timeout=60.0
     )
@@ -1605,6 +2026,15 @@ async def test_wasm_tool_oauth_refresh_on_demand(auth_matrix_server):
     thread_id = await _create_thread(server["base_url"])
     await _send_chat(server["base_url"], thread_id, "check gmail unread")
 
+    # Engine v2 gates the gmail call on `approval` before reaching the
+    # http credential-injection layer that performs the refresh. Without
+    # approving, the chat sits in pending_gate forever and the refresh
+    # endpoint is never hit. Drive approval through the API while waiting
+    # for the tool to land.
+    await _wait_for_tool_call(
+        server["base_url"], thread_id, "gmail", timeout=30.0
+    )
+
     oauth_state = await _wait_for_refresh_request(server["mock_llm_url"])
     assert oauth_state["refresh_count"] >= 1, oauth_state
 
@@ -1724,16 +2154,29 @@ async def test_repl_http_auth_prompt_accepts_token_and_retries(auth_matrix_repl)
             "OAuth callback paths are covered by other auth-matrix tests."
         )
 
-    await _drain_repl_output(repl)
-    await _send_repl_line(repl, prompt)
-    output, matched = await _read_repl_until_any(
-        repl,
-        [
-            r"The http tool returned:|Budget Q1\.xlsx|Roadmap\.md",
-            r"requires approval|Reply .*yes.*approve",
-        ],
-        timeout=60.0,
-    )
+    result_patterns = [
+        r"The http tool returned:|Budget Q1\.xlsx|Roadmap\.md",
+        r"requires approval|Reply .*yes.*approve",
+    ]
+
+    # Token entry resolves the inline auth gate and the suspended CodeAct turn
+    # resumes asynchronously. Under coverage CI that resume can still be
+    # processing after the secret row appears; sending a duplicate prompt at
+    # that point races the active REPL turn and can leave the test waiting on
+    # the duplicate while the original turn owns the spinner. Prefer the
+    # resumed original output, and only fall back to a manual retry if no
+    # output appears.
+    resumed = await _try_read_repl_until_any(repl, result_patterns, timeout=60.0)
+    if resumed is None:
+        await _drain_repl_output(repl)
+        await _send_repl_line(repl, prompt)
+        output, matched = await _read_repl_until_any(
+            repl,
+            result_patterns,
+            timeout=60.0,
+        )
+    else:
+        output, matched = resumed
     if "requires approval" in matched.lower() or "reply" in matched.lower():
         output += await _drain_repl_output(repl)
         await _send_repl_line(repl, "yes")

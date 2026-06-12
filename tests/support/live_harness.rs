@@ -30,8 +30,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use t3claw::llm::recording::RecordingLlm;
-use t3claw::llm::{ChatMessage, CompletionRequest, LlmProvider, SessionConfig, SessionManager};
+use t3claw_llm::recording::RecordingLlm;
+use t3claw_llm::{ChatMessage, CompletionRequest, LlmProvider, SessionConfig, SessionManager};
 
 use crate::support::test_rig::{TestRig, TestRigBuilder};
 use crate::support::trace_llm::LlmTrace;
@@ -249,7 +249,7 @@ impl LiveTestHarness {
     /// `user_input` is the message that was sent to the agent.
     /// `responses` are the agent's text responses (from `wait_for_responses`).
     ///
-    /// The session log is written to `tests/fixtures/llm_traces/live/{name}.log`.
+    /// Live runs write a local debugging log beside the committed trace JSON.
     pub async fn finish(self, user_input: &str, responses: &[String]) {
         let turns = [SessionTurn {
             source: TurnSource::User,
@@ -338,7 +338,7 @@ impl LiveTestHarness {
 
     /// Write a human-readable session log.
     ///
-    /// Live mode writes to `tests/fixtures/llm_traces/live/{name}.log` (committed).
+    /// Live mode writes to `tests/fixtures/llm_traces/live/{name}.log` (ignored).
     /// Replay mode writes to a temp file so it can be diffed against the live log.
     fn save_session_log(&self, turns: &[SessionTurn]) {
         use t3claw::channels::StatusUpdate;
@@ -704,7 +704,7 @@ impl LiveTestHarnessBuilder {
         let source_user_id = config.owner_id.clone();
 
         let session = Arc::new(SessionManager::new(SessionConfig::default()));
-        let (provider, cheap_llm, _, _) = t3claw::llm::build_provider_chain(&config.llm, session)
+        let (provider, cheap_llm, _, _) = t3claw_llm::build_provider_chain(&config.llm, session)
             .await
             .expect("Failed to build LLM provider chain for live test");
 
@@ -1117,13 +1117,13 @@ async fn hydrate_llm_secrets_into_env() {
     let store = LibSqlSecretsStore::new(raw_db, crypto);
 
     // Owner id selection: a user with a non-default scope (e.g. via
-    // `IRONCLAW_OWNER_ID` or settings.json) stores secrets under that
+    // `T3CLAW_OWNER_ID` or settings.json) stores secrets under that
     // user_id, not "default". Try the env-resolved value first; if it's
     // unset, fall back to the legacy "default" scope that single-user
     // installs use. We don't reach into Config::from_env() here to avoid
     // pulling in the full settings file resolution chain inside test
     // hydration.
-    let env_owner = std::env::var("IRONCLAW_OWNER_ID")
+    let env_owner = std::env::var("T3CLAW_OWNER_ID")
         .ok()
         .filter(|s| !s.is_empty());
     let owner_id_owned = env_owner.unwrap_or_else(|| "default".to_string());

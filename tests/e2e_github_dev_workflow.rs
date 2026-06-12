@@ -450,7 +450,7 @@ mod github_dev_workflow_test {
             - Active session count + thread count\n\
             - LLM token usage counters per model + per backend\n\n\
             The endpoint should not require auth in single-user mode (the typical local \
-            ironclaw deployment); for multi-user gateway deployments it should require the \
+            t3claw deployment); for multi-user gateway deployments it should require the \
             existing admin credential.\n\n\
             ## Why this matters\n\n\
             Production observability is currently limited to `tracing` log output. A \

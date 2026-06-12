@@ -73,7 +73,7 @@ async def v2_visibility_server(t3claw_binary, mock_llm_server):
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": home_dir,
-        "IRONCLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
+        "T3CLAW_BASE_DIR": os.path.join(home_dir, ".t3claw"),
         "RUST_LOG": "t3claw=info",
         "RUST_BACKTRACE": "1",
         "ENGINE_V2": "true",
@@ -87,6 +87,8 @@ async def v2_visibility_server(t3claw_binary, mock_llm_server):
         "CLI_ENABLED": "false",
         "LLM_BACKEND": "openai_compatible",
         "LLM_BASE_URL": mock_llm_server,
+        # Dummy key: mock LLM ignores it, but openai_compatible config requires auth.
+        "LLM_API_KEY": "mock-api-key",
         "LLM_MODEL": "mock-model",
         "DATABASE_BACKEND": "libsql",
         "LIBSQL_PATH": os.path.join(

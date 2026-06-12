@@ -8,14 +8,20 @@ via TOOL_CALL_PATTERNS.
 import argparse
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
 from aiohttp import web
 
+DENIAL_PATTERN = re.compile(
+    r"user denied action|user denied tool|denied:\s*",
+    re.IGNORECASE,
+)
+
 CANNED_RESPONSES = [
     (re.compile(r"empty routine response", re.IGNORECASE), ""),
-    (re.compile(r"hello|hi|hey", re.IGNORECASE), "Hello! How can I help you today?"),
+    (re.compile(r"\bhello\b|\bhi\b|\bhey\b", re.IGNORECASE), "Hello! How can I help you today?"),
     (re.compile(r"2\s*\+\s*2|two plus two", re.IGNORECASE), "The answer is 4."),
     (
         re.compile(r"Tool `gmail` returned:.*Quarterly update", re.IGNORECASE | re.DOTALL),
@@ -31,6 +37,22 @@ CANNED_RESPONSES = [
             re.IGNORECASE | re.DOTALL,
         ),
         "Mock MCP search completed successfully.",
+    ),
+    (
+        re.compile(r"Tool `gmail` returned:|The gmail tool returned:", re.IGNORECASE | re.DOTALL),
+        "Gmail check completed successfully.",
+    ),
+    (
+        re.compile(r"Tool `google_calendar` returned:", re.IGNORECASE | re.DOTALL),
+        "Calendar check completed successfully.",
+    ),
+    (
+        re.compile(r"Tool `github` returned:", re.IGNORECASE | re.DOTALL),
+        "GitHub issue lookup completed successfully.",
+    ),
+    (
+        re.compile(r"Tool `notion_notion_search` returned:", re.IGNORECASE | re.DOTALL),
+        "Notion search completed successfully.",
     ),
     (re.compile(r"portfolio|defi|rebalance|yield.*positions", re.IGNORECASE),
      "I'll analyze your DeFi portfolio. The portfolio skill is active and I can scan "
@@ -67,6 +89,24 @@ TRUNCATED_TOOL_CALL_TRIGGER = re.compile(
 EMPTY_REPLY_TRIGGER = re.compile(r"issue 1780 empty reply", re.IGNORECASE)
 LOOP_FOREVER_TRIGGER = re.compile(r"issue 1780 loop forever", re.IGNORECASE)
 MULTI_STEP_TRIGGER = re.compile(r"multi step echo then time", re.IGNORECASE)
+
+# Lifecycle canary triggers for write+cleanup flows against real provider APIs.
+GITHUB_ISSUE_LIFECYCLE_TRIGGER = re.compile(
+    r"create a github issue in (?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+) titled",
+    re.IGNORECASE,
+)
+GMAIL_ROUNDTRIP_TRIGGER = re.compile(
+    r"send an email to (?P<email>\S+@\S+) with subject",
+    re.IGNORECASE,
+)
+GCAL_LIFECYCLE_TRIGGER = re.compile(
+    r"create a google calendar event titled",
+    re.IGNORECASE,
+)
+NOTION_SEARCH_LIFECYCLE_TRIGGER = re.compile(
+    r"search notion for .*, then search again",
+    re.IGNORECASE,
+)
 
 TOOL_CALL_PATTERNS = [
     # Parallel tool calls: return both echo and time in one response
@@ -112,6 +152,249 @@ TOOL_CALL_PATTERNS = [
             "body": {"label": m.group("label")},
         },
     ),
+    # Workflow-canary NL-driven routine creation: when a chat message
+    # carries the [CANARY-WORKFLOW-NL-CREATE] sentinel, emit a
+    # routine_create tool call so the canary can verify the agent's
+    # NL → tool dispatch → routine row pipeline.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-NL-CREATE\]", re.IGNORECASE),
+        "routine_create",
+        lambda _: {
+            "name": "canary-nl-created",
+            "prompt": (
+                "send a Telegram acknowledgement\n\n"
+                "[CANARY-WORKFLOW-nl_create] inner-prompt"
+            ),
+            "trigger_type": "cron",
+            "schedule": "0 */1 * * *",
+            "description": "canary: NL-driven routine creation",
+        },
+    ),
+    # Workflow-canary NL-driven schedule update: when a chat message
+    # carries [CANARY-WORKFLOW-NL-UPDATE], emit a routine_update tool
+    # call retargeting the canary's pre-seeded routine.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-NL-UPDATE\]", re.IGNORECASE),
+        "routine_update",
+        lambda _: {
+            "name": "canary-nl-update-target",
+            "schedule": "0 */6 * * *",
+        },
+    ),
+    # Workflow-canary Sheet-write side-effect probe. When a routine's
+    # Lightweight prompt carries [CANARY-WORKFLOW-SHEET-APPEND], emit
+    # an http POST to the mock Google Sheets API's values:append
+    # endpoint. The T3CLAW_TEST_HTTP_REMAP set in
+    # run_workflow_canary.py routes sheets.googleapis.com to the local
+    # sheets_mock subprocess, which records the captured row for the
+    # scenario's assertion.
+    #
+    # Spreadsheet ID is hardcoded; the scenario pre-seeds the sheet
+    # with that ID + headers via /__mock/seed_spreadsheet.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-SHEET-APPEND\]", re.IGNORECASE),
+        "http",
+        lambda _: {
+            "method": "POST",
+            "url": (
+                "https://sheets.googleapis.com/v4/spreadsheets/"
+                "canary-bug-logger/values/Sheet1:append"
+                "?valueInputOption=USER_ENTERED"
+            ),
+            "body": {
+                "range": "Sheet1",
+                "majorDimension": "ROWS",
+                "values": [
+                    [
+                        "2026-04-28T00:00:00Z",
+                        "login button is unresponsive on mobile",
+                        "telegram",
+                    ]
+                ],
+            },
+        },
+    ),
+    # Workflow-canary Calendar events.list + prep summary. When a
+    # routine's Lightweight prompt carries [CANARY-WORKFLOW-CAL-LIST],
+    # emit a PARALLEL pair of http tool calls in one response:
+    #   1. GET events.list against the mock Calendar API
+    #   2. POST sendMessage with a prep briefing referencing the seeded
+    #      event title.
+    # T3CLAW_TEST_HTTP_REMAP routes both: www.googleapis.com →
+    # calendar_mock, api.telegram.org → telegram_mock. Parallel emit is
+    # required because the engine's lightweight loop dedup
+    # (match_tool_call:1178-1179) skips re-dispatching the same tool —
+    # so a multi-step flow has to fan out in one response.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-CAL-LIST\]", re.IGNORECASE),
+        "http",
+        lambda _: [
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "GET",
+                    "url": (
+                        "https://www.googleapis.com/calendar/v3/calendars/"
+                        "primary/events?maxResults=10"
+                    ),
+                },
+            },
+            # Web-search lookup for the meeting attendee's company.
+            # Routes to web_search_mock via
+            # T3CLAW_TEST_HTTP_REMAP=api.search.brave.com=<mock>.
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "GET",
+                    "url": (
+                        "https://api.search.brave.com/res/v1/web/search"
+                        "?q=Acme%20Corp%20company%20background"
+                    ),
+                },
+            },
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "POST",
+                    "url": (
+                        "https://api.telegram.org/bot111222333:CANARY/sendMessage"
+                    ),
+                    "body": {
+                        "chat_id": 8800800800,
+                        "text": (
+                            "[canary-workflow:calendar_prep] prep for "
+                            "'Canary kickoff with Acme' — Acme Corp is "
+                            "a fintech in Series B."
+                        ),
+                    },
+                },
+            },
+        ],
+    ),
+    # Workflow-canary Hacker News fetch + summary. [CANARY-WORKFLOW-HN-FETCH]
+    # emits a parallel pair: GET /newest (hn_mock returns deterministic
+    # HTML) + POST sendMessage with the canary post summary.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-HN-FETCH\]", re.IGNORECASE),
+        "http",
+        lambda _: [
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "GET",
+                    "url": "https://news.ycombinator.com/newest",
+                },
+            },
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "POST",
+                    "url": (
+                        "https://api.telegram.org/bot111222333:CANARY/sendMessage"
+                    ),
+                    "body": {
+                        "chat_id": 8800800800,
+                        "text": (
+                            "[canary-workflow:hn_monitor] new Show HN posts: "
+                            "Show HN: Canary Post Alpha "
+                            "(https://example.com/alpha by canary_alpha); "
+                            "Show HN: Canary Post Beta "
+                            "(https://example.com/beta by canary_beta)"
+                        ),
+                    },
+                },
+            },
+        ],
+    ),
+    # Workflow-canary CRM tracker: gmail unread → classify → append
+    # only sales leads to Sheets. [CANARY-WORKFLOW-CRM-CLASSIFY] emits
+    # a parallel triplet: mock Gmail GET messages, mock Sheets POST
+    # values:append for the lead, telegram sendMessage acking the run.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-CRM-CLASSIFY\]", re.IGNORECASE),
+        "http",
+        lambda _: [
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "GET",
+                    "url": (
+                        "https://gmail.googleapis.com/gmail/v1/users/me/"
+                        "messages?q=is:unread"
+                    ),
+                },
+            },
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "POST",
+                    "url": (
+                        "https://sheets.googleapis.com/v4/spreadsheets/"
+                        "canary-crm-tracker/values/Sheet1:append"
+                        "?valueInputOption=USER_ENTERED"
+                    ),
+                    "body": {
+                        "range": "Sheet1",
+                        "majorDimension": "ROWS",
+                        "values": [
+                            [
+                                "Acme Corp",
+                                "Jane Lead",
+                                "jane.lead@acme.example",
+                                "new",
+                                "Inbound interest in enterprise tier",
+                                "schedule discovery call",
+                            ]
+                        ],
+                    },
+                },
+            },
+            {
+                "tool_name": "http",
+                "arguments": {
+                    "method": "POST",
+                    "url": (
+                        "https://api.telegram.org/bot111222333:CANARY/sendMessage"
+                    ),
+                    "body": {
+                        "chat_id": 8800800800,
+                        "text": (
+                            "[canary-workflow:crm_tracker] logged 1 new "
+                            "lead from Acme Corp"
+                        ),
+                    },
+                },
+            },
+        ],
+    ),
+    # Default workflow-canary scenarios tag their routine prompt with
+    # [CANARY-WORKFLOW-<key>] so this matcher emits a deterministic
+    # `http` tool call that reaches mock_telegram via
+    # T3CLAW_TEST_HTTP_REMAP=api.telegram.org=<mock>. The chat_id is
+    # the canary's simulated test user (mock_telegram DEFAULT_USER_ID).
+    # The text echoes the scenario key so the scenario can disambiguate
+    # which message belongs to it when the mock_telegram is shared
+    # across the workflow-canary lane's probes.
+    #
+    # Important: this generic matcher must come AFTER the specific
+    # NL-CREATE / NL-UPDATE matchers above. mock_llm.py iterates
+    # TOOL_CALL_PATTERNS in order and stops at the first match —
+    # without ordering, [CANARY-WORKFLOW-nl_create] inside a routine
+    # PROMPT would emit an http tool call instead of routine_create.
+    (
+        re.compile(r"\[CANARY-WORKFLOW-(?P<key>[a-z_0-9]+)\]", re.IGNORECASE),
+        "http",
+        lambda m: {
+            "method": "POST",
+            "url": (
+                "https://api.telegram.org/bot111222333:CANARY/sendMessage"
+            ),
+            "body": {
+                "chat_id": 8800800800,
+                "text": f"[canary-workflow:{m.group('key').lower()}] ack",
+            },
+        },
+    ),
     (
         re.compile(r"check gmail unread|gmail unread", re.IGNORECASE),
         "gmail",
@@ -133,6 +416,33 @@ TOOL_CALL_PATTERNS = [
         re.compile(r"check mock mcp|mock mcp search", re.IGNORECASE),
         "mock_mcp_mock_search",
         lambda _: {"query": "refresh-check"},
+    ),
+    (
+        re.compile(r"list next calendar event|check calendar next event", re.IGNORECASE),
+        "google_calendar",
+        lambda _: {
+            "action": "list_events",
+            "calendar_id": "primary",
+            "max_results": 1,
+        },
+    ),
+    (
+        re.compile(
+            r"read github issue (?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)#(?P<num>\d+)",
+            re.IGNORECASE,
+        ),
+        "github",
+        lambda m: {
+            "action": "get_issue",
+            "owner": m.group("owner"),
+            "repo": m.group("repo"),
+            "issue_number": int(m.group("num")),
+        },
+    ),
+    (
+        re.compile(r"search notion for (?P<query>.+)", re.IGNORECASE),
+        "notion_notion_search",
+        lambda m: {"query": m.group("query").strip()},
     ),
     (re.compile(r"what time|current time", re.IGNORECASE), "time", lambda _: {"operation": "now"}),
     (
@@ -478,6 +788,12 @@ def _new_oauth_state() -> dict:
     }
 
 
+def _new_mcp_state() -> dict:
+    return {
+        "requests": [],
+    }
+
+
 def _message_text(msg: dict) -> str:
     content = msg.get("content") or ""
     if isinstance(content, list):
@@ -551,6 +867,24 @@ def _conversation_has_active_skill(messages: list[dict], skill_name: str) -> boo
         if msg.get("role") == "system" and needle in _message_text(msg):
             return True
         if msg.get("role") == "user" and f"/{skill_name}" in _message_text(msg):
+            return True
+    return False
+
+
+def _conversation_uses_codeact(messages: list[dict]) -> bool:
+    for msg in messages:
+        if msg.get("role") != "system":
+            continue
+        text = _message_text(msg)
+        if "Python REPL environment" in text and "```repl" in text:
+            return True
+    return False
+
+
+def _conversation_includes_denial(messages: list[dict]) -> bool:
+    for msg in messages:
+        text = f"{_message_text(msg)}\n{_message_payload_text(msg)}"
+        if DENIAL_PATTERN.search(text):
             return True
     return False
 
@@ -725,9 +1059,20 @@ def match_response(messages: list[dict]) -> str:
     resumed = _resumed_action_summary(messages)
     if resumed:
         return resumed
-    if "user denied action" in content.lower():
-        action_match = re.search(r"User denied action '([^']+)'", content)
-        action_name = action_match.group(1) if action_match else "that action"
+    denial_text = f"{content}\n{payload_text}"
+    if DENIAL_PATTERN.search(denial_text):
+        action_match = re.search(
+            r"User denied action '([^']+)'", denial_text, re.IGNORECASE
+        )
+        tool_match = re.search(
+            r"user denied tool '([^']+)'", denial_text, re.IGNORECASE
+        )
+        if action_match:
+            action_name = action_match.group(1)
+        elif tool_match:
+            action_name = tool_match.group(1)
+        else:
+            action_name = "that action"
         return (
             f"The request for {action_name} was denied. "
             "No installation or setup was performed."
@@ -786,6 +1131,32 @@ def match_response(messages: list[dict]) -> str:
                 "I need an avatar image for the video meeting. "
                 "Send me an image, or say \"generate\" and I'll create one for you."
             )
+    # Nudge recovery: when the engine sends a "you expressed intent but
+    # didn't call a tool" nudge, check whether the conversation has
+    # portfolio/wallet context from an earlier user message and return a
+    # portfolio-relevant response so the nudge pattern (which matches
+    # before the portfolio patterns in CANNED_RESPONSES) doesn't swallow
+    # the domain context.
+    _nudge_re = re.compile(
+        r"You said you would perform an action|You expressed intent",
+        re.IGNORECASE,
+    )
+    if _nudge_re.search(content):
+        for msg in messages:
+            if msg.get("role") == "user":
+                msg_text = _message_text(msg)
+                if re.search(r"portfolio|defi|rebalance|yield.*positions", msg_text, re.IGNORECASE):
+                    return (
+                        "I'll analyze your DeFi portfolio. The portfolio skill is active and I can scan "
+                        "your wallet addresses across chains to discover positions, check yields, and "
+                        "suggest rebalancing opportunities."
+                    )
+                if re.search(r"0x[a-fA-F0-9]{40}", msg_text, re.IGNORECASE):
+                    return (
+                        "I found your wallet address. Let me scan your portfolio across all supported "
+                        "chains to discover DeFi positions and classify them against known protocols."
+                    )
+
     for pattern, response in CANNED_RESPONSES:
         if pattern.search(content):
             return response
@@ -868,18 +1239,69 @@ def match_tool_call(messages: list[dict], has_tools: bool) -> list[dict] | None:
         return None
     lower = content.lower()
     recent_tool_results = _find_tool_results(messages)
-    if (
-        ("check gmail unread" in lower or "gmail unread" in lower)
-        and any(
-            tr["name"] == "gmail"
-            and "Extension not installed:" in tr["content"]
+    # #3533: gmail-install-then-retry sequence.
+    #
+    # Turn 1: user says "check gmail unread" → match_tool_call below dispatches
+    #         a direct `gmail` call. Engine rejects with either "Extension not
+    #         installed:" (pre-#3533 wording, from the bridge-side
+    #         not-installed reject — the chat-driven install path was wired up
+    #         here in mock_llm but non-functional because `tool_install` was
+    #         hidden from the agent surface) or "is not callable in this
+    #         execution context" (post-#3533, engine-side preflight rejection,
+    #         tool_install restored on the agent surface).
+    # Turn 2: this branch fires — call `tool_install("gmail")`.
+    # Turn 3: install succeeded → call `gmail` again, this time the engine's
+    #         auth preflight raises an Authentication gate.
+    # Turn 4 (after OAuth completes): mock LLM falls through to the
+    #         tool-result-summary path returning the "Quarterly update" text.
+    if "check gmail unread" in lower or "gmail unread" in lower:
+        # Three engine paths can surface gmail-unavailable depending on
+        # whether gmail is in the registry, installed-but-blocked, or
+        # entirely unknown:
+        #   * "Extension not installed: gmail"           — registry has it, not installed
+        #   * "is not callable in this execution context" — installed but engine-v2 blocked
+        #   * "Tool gmail not found"                      — not even in the dispatcher (workflow-canary stack)
+        # A real LLM would treat all three the same way and reach for
+        # `tool_install`. Mirror that — restricting to the first two
+        # made the workflow-canary `tool_install_chat` probe fall
+        # through to text and never recover.
+        gmail_error = next(
+            (
+                tr
+                for tr in recent_tool_results
+                if tr["name"] == "gmail"
+                and (
+                    "Extension not installed:" in tr["content"]
+                    or "is not callable in this execution context" in tr["content"]
+                    or "Tool gmail not found" in tr["content"]
+                )
+            ),
+            None,
+        )
+        install_done = any(
+            tr["name"] == "tool_install"
+            and "error" not in tr["content"].lower()
             for tr in recent_tool_results
         )
-    ):
-        return [{
-            "tool_name": "tool_install",
-            "arguments": {"name": "gmail"},
-        }]
+        if gmail_error and not install_done:
+            return [{
+                "tool_name": "tool_install",
+                "arguments": {"name": "gmail"},
+            }]
+        if install_done and not any(
+            tr["name"] == "gmail" and "is not callable" not in tr["content"]
+            and "Extension not installed" not in tr["content"]
+            and "Tool gmail not found" not in tr["content"]
+            for tr in recent_tool_results
+        ):
+            # Retry gmail after install — the engine's auth preflight will
+            # raise an Authentication gate, which surfaces the auth card.
+            # After OAuth completes, this re-fires and reaches the actual
+            # gmail tool with the correct `list_messages` action.
+            return [{
+                "tool_name": "gmail",
+                "arguments": {"action": "list_messages"},
+            }]
     if _conversation_has_active_skill(messages, "pikastream-video-meeting"):
         bundle_path = _active_skill_bundle_path(messages, "pikastream-video-meeting")
         if (
@@ -901,6 +1323,16 @@ def match_tool_call(messages: list[dict], has_tools: bool) -> list[dict] | None:
     for pattern, tool_name, args_fn in TOOL_CALL_PATTERNS:
         m = pattern.search(content)
         if m:
+            # Don't re-dispatch a tool that already ran this turn: the
+            # agentic loop calls the mock LLM again after each tool
+            # result, and the "last user content" (which is what we
+            # pattern-match against) hasn't changed. A real LLM would
+            # see the tool result and respond with text — we mirror that
+            # by falling through to the match_response text path when a
+            # matching call is already sitting in the tool_results
+            # buffer.
+            if any(tr["name"] == tool_name for tr in recent_tool_results):
+                return None
             return _normalize_tool_calls(tool_name, args_fn(m))
     return None
 
@@ -965,6 +1397,10 @@ def _find_tool_result(messages: list[dict]) -> dict | None:
     return results[0] if results else None
 
 
+def _tool_results_include_denial(tool_results: list[dict]) -> bool:
+    return any(DENIAL_PATTERN.search(tr.get("content", "")) for tr in tool_results)
+
+
 def _recent_tool_names(messages: list[dict]) -> set[str]:
     """Collect tool names referenced after the most recent user turn."""
     last_user_idx = -1
@@ -1023,6 +1459,97 @@ def _conversation_has_tool_name(messages: list[dict], expected_name: str) -> boo
             if tool_name == expected_name:
                 return True
     return False
+
+
+# ── Lifecycle canary helpers ────────────────────────────────────────────────
+#
+# These extract structured data from real provider tool-result JSON so the
+# multi-step lifecycle flows can pass IDs between steps (e.g. the issue
+# number from create_issue feeds into create_issue_comment, the event_id
+# from create_event feeds into delete_event, etc.).
+
+
+def _extract_canary_title(text: str) -> str:
+    """Extract a quoted title like '[canary] 1713...' from a user prompt."""
+    m = re.search(r"titled\s+'([^']+)'", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"titled\s+\"([^\"]+)\"", text)
+    if m:
+        return m.group(1)
+    return "[canary] lifecycle-test"
+
+
+def _extract_canary_subject(text: str) -> str:
+    """Extract a subject like '[canary] 1713...' from a user prompt."""
+    m = re.search(r"subject\s+'([^']+)'", text)
+    if m:
+        return m.group(1)
+    m = re.search(r"subject\s+\"([^\"]+)\"", text)
+    if m:
+        return m.group(1)
+    return "[canary] lifecycle-test"
+
+
+def _extract_issue_number(content: str) -> int | None:
+    """Extract the issue number from a GitHub create_issue tool result."""
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict) and "number" in data:
+            return int(data["number"])
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    m = re.search(r'"number"\s*:\s*(\d+)', content)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+def _extract_gmail_message_id(content: str) -> str | None:
+    """Extract the message id from a Gmail send_message tool result."""
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            return data.get("id") or data.get("message_id")
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    m = re.search(r'"id"\s*:\s*"([^"]+)"', content)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _extract_calendar_event_id(content: str) -> str | None:
+    """Extract the event id from a Google Calendar create_event tool result."""
+    try:
+        data = json.loads(content)
+        if isinstance(data, dict):
+            event = data.get("event", data)
+            return event.get("id") or event.get("event_id")
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    m = re.search(r'"id"\s*:\s*"([^"]+)"', content)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _tomorrow_10am_utc() -> str:
+    """Return an RFC3339 timestamp for tomorrow at 10:00 UTC."""
+    from datetime import datetime, timedelta, timezone
+    tomorrow = datetime.now(timezone.utc).replace(
+        hour=10, minute=0, second=0, microsecond=0,
+    ) + timedelta(days=1)
+    return tomorrow.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _tomorrow_1030am_utc() -> str:
+    """Return an RFC3339 timestamp for tomorrow at 10:30 UTC."""
+    from datetime import datetime, timedelta, timezone
+    tomorrow = datetime.now(timezone.utc).replace(
+        hour=10, minute=30, second=0, microsecond=0,
+    ) + timedelta(days=1)
+    return tomorrow.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _make_base(completion_id: str) -> dict:
@@ -1100,6 +1627,194 @@ def match_special_response(messages: list[dict], has_tools: bool) -> dict | None
             "text": "Multi-step complete: executed echo then time.",
         }
 
+    # ── Lifecycle canary: GitHub issue create → comment → verify ─────────
+    m = GITHUB_ISSUE_LIFECYCLE_TRIGGER.search(last_user)
+    if m and has_tools:
+        owner = m.group("owner")
+        repo = m.group("repo")
+        tool_results = _find_tool_results(messages)
+        n = len(tool_results)
+        if n == 0:
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "github",
+                    "arguments": {
+                        "action": "create_issue",
+                        "owner": owner,
+                        "repo": repo,
+                        "title": _extract_canary_title(last_user),
+                        "body": "Automated canary lifecycle test.",
+                        "labels": ["canary"],
+                    },
+                },
+            }
+        if n == 1:
+            issue_number = _extract_issue_number(tool_results[0].get("content", ""))
+            if issue_number:
+                return {
+                    "type": "tool_call",
+                    "tool_call": {
+                        "tool_name": "github",
+                        "arguments": {
+                            "action": "create_issue_comment",
+                            "owner": owner,
+                            "repo": repo,
+                            "issue_number": issue_number,
+                            "body": "Canary verification",
+                        },
+                    },
+                }
+        if n == 2:
+            issue_number = _extract_issue_number(tool_results[0].get("content", ""))
+            if issue_number:
+                return {
+                    "type": "tool_call",
+                    "tool_call": {
+                        "tool_name": "github",
+                        "arguments": {
+                            "action": "get_issue",
+                            "owner": owner,
+                            "repo": repo,
+                            "issue_number": issue_number,
+                        },
+                    },
+                }
+        return {
+            "type": "text",
+            "text": "github issue lifecycle complete. Issue created, commented, and verified.",
+        }
+
+    # ── Lifecycle canary: Gmail send → list → trash ──────────────────────
+    m = GMAIL_ROUNDTRIP_TRIGGER.search(last_user)
+    if m and has_tools:
+        email = m.group("email")
+        tool_results = _find_tool_results(messages)
+        n = len(tool_results)
+        if n == 0:
+            subject = _extract_canary_subject(last_user)
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "gmail",
+                    "arguments": {
+                        "action": "send_message",
+                        "to": email,
+                        "subject": subject,
+                        "body": "Canary test",
+                    },
+                },
+            }
+        if n == 1:
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "gmail",
+                    "arguments": {
+                        "action": "list_messages",
+                        "query": "subject:[canary] newer_than:1h",
+                        "max_results": 5,
+                    },
+                },
+            }
+        if n == 2:
+            message_id = _extract_gmail_message_id(tool_results[0].get("content", ""))
+            if message_id:
+                return {
+                    "type": "tool_call",
+                    "tool_call": {
+                        "tool_name": "gmail",
+                        "arguments": {
+                            "action": "trash_message",
+                            "message_id": message_id,
+                        },
+                    },
+                }
+        return {
+            "type": "text",
+            "text": "gmail roundtrip complete. Message sent, verified, and trashed.",
+        }
+
+    # ── Lifecycle canary: Google Calendar create → list → delete ─────────
+    if GCAL_LIFECYCLE_TRIGGER.search(last_user) and has_tools:
+        tool_results = _find_tool_results(messages)
+        n = len(tool_results)
+        if n == 0:
+            title = _extract_canary_title(last_user)
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "google_calendar",
+                    "arguments": {
+                        "action": "create_event",
+                        "calendar_id": "primary",
+                        "summary": title,
+                        "start_datetime": _tomorrow_10am_utc(),
+                        "end_datetime": _tomorrow_1030am_utc(),
+                        "timezone": "UTC",
+                    },
+                },
+            }
+        if n == 1:
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "google_calendar",
+                    "arguments": {
+                        "action": "list_events",
+                        "calendar_id": "primary",
+                        "max_results": 5,
+                    },
+                },
+            }
+        if n == 2:
+            event_id = _extract_calendar_event_id(tool_results[0].get("content", ""))
+            if event_id:
+                return {
+                    "type": "tool_call",
+                    "tool_call": {
+                        "tool_name": "google_calendar",
+                        "arguments": {
+                            "action": "delete_event",
+                            "calendar_id": "primary",
+                            "event_id": event_id,
+                        },
+                    },
+                }
+        return {
+            "type": "text",
+            "text": "google_calendar lifecycle complete. Event created, verified, and deleted.",
+        }
+
+    # ── Lifecycle canary: Notion search → search again ────────────────────
+    if NOTION_SEARCH_LIFECYCLE_TRIGGER.search(last_user) and has_tools:
+        tool_results = _find_tool_results(messages)
+        n = len(tool_results)
+        if n == 0:
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "notion_notion_search",
+                    "arguments": {
+                        "query": "canary",
+                    },
+                },
+            }
+        if n == 1:
+            return {
+                "type": "tool_call",
+                "tool_call": {
+                    "tool_name": "notion_notion_search",
+                    "arguments": {
+                        "query": "test",
+                    },
+                },
+            }
+        return {
+            "type": "text",
+            "text": "notion search lifecycle complete. Both searches executed successfully.",
+        }
+
     return None
 
 
@@ -1165,10 +1880,57 @@ async def chat_completions(request: web.Request) -> web.StreamResponse:
     # Multi-step chain: must bypass tool-result-summary to issue second tool call
     if special and _conversation_has_user_trigger(messages, MULTI_STEP_TRIGGER):
         return await _dispatch_special_response(request, cid, stream, special)
+    # Lifecycle canary multi-step chains: create → verify → cleanup → summarize
+    for lifecycle_trigger in (
+        GITHUB_ISSUE_LIFECYCLE_TRIGGER,
+        GMAIL_ROUNDTRIP_TRIGGER,
+        GCAL_LIFECYCLE_TRIGGER,
+        NOTION_SEARCH_LIFECYCLE_TRIGGER,
+    ):
+        if special and _conversation_has_user_trigger(messages, lifecycle_trigger):
+            return await _dispatch_special_response(request, cid, stream, special)
+
+    tool_results = _find_tool_results(messages)
+    # #3533: when a multi-step recovery is in progress (e.g. gmail not
+    # installed → `tool_install` → retry gmail), the next move is another
+    # tool call, not a text summary of the failure. Let `match_tool_call`
+    # take precedence over the tool-result-summary fallback whenever it
+    # has a follow-up call to emit.
+    if tool_results:
+        followup = match_tool_call(messages, has_tools)
+        if followup:
+            if not stream:
+                return _tool_call_response(cid, followup)
+            return await _stream_tool_call(request, cid, followup)
+    if (
+        not tool_results
+        and _conversation_uses_codeact(messages)
+        and re.search(
+            r"list.*(?:google|drive).*files|show.*drive",
+            _last_user_content(messages),
+            re.IGNORECASE,
+        )
+    ):
+        text = (
+            "```repl\n"
+            f"result = await http(method=\"GET\", url=\"{_github_api_url}/drive/v3/files\")\n"
+            "FINAL(str(result))\n"
+            "```"
+        )
+        if not stream:
+            return _text_response(cid, text)
+        return await _stream_text(request, cid, text)
 
     # Tool result(s) in messages -> text summary covering every fresh result
-    tool_results = _find_tool_results(messages)
     if _conversation_has_active_skill(messages, "pikastream-video-meeting"):
+        if _conversation_includes_denial(messages) or _tool_results_include_denial(tool_results):
+            text = (
+                "The request for shell was denied. "
+                "No installation or setup was performed."
+            )
+            if not stream:
+                return _text_response(cid, text)
+            return await _stream_text(request, cid, text)
         recent_tool_names = _recent_tool_names(messages)
         if "shell" in recent_tool_names:
             text = (
@@ -1181,6 +1943,14 @@ async def chat_completions(request: web.Request) -> web.StreamResponse:
             return await _stream_text(request, cid, text)
     if tool_results:
         if _conversation_has_active_skill(messages, "pikastream-video-meeting"):
+            if _tool_results_include_denial(tool_results):
+                text = (
+                    "The request for shell was denied. "
+                    "No installation or setup was performed."
+                )
+                if not stream:
+                    return _text_response(cid, text)
+                return await _stream_text(request, cid, text)
             if any(tr["name"] == "shell" for tr in tool_results):
                 text = (
                     "Python dependencies are prepared for the Pika video-meeting skill. "
@@ -1400,6 +2170,21 @@ async def _stream_truncated_tool_call(
     return resp
 
 
+def _is_google_token_url(url: str) -> bool:
+    """Whether an OAuth `token_url` points at Google.
+
+    Used to gate the `AUTH_LIVE_GOOGLE_*` live-token override so
+    non-Google providers (GitHub, Notion, MCP) cannot accidentally
+    receive Google tokens during auth-live-seeded canary runs. The
+    earlier `not code.startswith("mock_mcp_code")` gate only ruled out
+    the MCP code-prefix convention, not GitHub/Notion flows.
+    """
+    if not url:
+        return False
+    lowered = url.lower()
+    return "googleapis.com" in lowered or "accounts.google.com" in lowered
+
+
 async def oauth_exchange(request: web.Request) -> web.Response:
     """Mock OAuth token exchange proxy for E2E tests.
 
@@ -1417,13 +2202,30 @@ async def oauth_exchange(request: web.Request) -> web.Response:
     code = data.get("code", "")
     access_token_field = data.get("access_token_field", "access_token")
 
-    if code == "mock_mcp_code":
+    if code.startswith("mock_mcp_code"):
         if not data.get("token_url", "").endswith("/oauth/token"):
             return web.json_response({"error": "missing_token_url"}, status=400)
         if not data.get("client_id"):
             return web.json_response({"error": "missing_client_id"}, status=400)
         if not data.get("resource"):
             return web.json_response({"error": "missing_resource"}, status=400)
+
+    # When real provider tokens are available (auth-live-seeded canary),
+    # return them instead of mock tokens so the extension gets real
+    # credentials. Gate strictly on the Google token_url host: the
+    # previous `not mcp_code` gate also matched GitHub and Notion
+    # exchanges, which would have shipped Google tokens to the wrong
+    # extension and masked real provider-specific failures.
+    live_access = os.environ.get("AUTH_LIVE_GOOGLE_ACCESS_TOKEN", "").strip()
+    live_refresh = os.environ.get("AUTH_LIVE_GOOGLE_REFRESH_TOKEN", "").strip()
+    if live_access and _is_google_token_url(data.get("token_url", "")):
+        resp = {
+            access_token_field: live_access,
+            "expires_in": 3600,
+        }
+        if live_refresh:
+            resp["refresh_token"] = live_refresh
+        return web.json_response(resp)
 
     return web.json_response({
         access_token_field: f"mock-token-{code}",
@@ -1446,6 +2248,26 @@ async def oauth_refresh(request: web.Request) -> web.Response:
         return web.json_response({"error": "invalid_gateway_auth"}, status=401)
 
     provider = data.get("provider", "")
+
+    # When real provider tokens are available (auth-live-seeded canary),
+    # return them for Google refreshes instead of validating mock
+    # client_id. Gate strictly on the Google token_url host: the
+    # previous `not mcp:` gate still matched GitHub and Notion
+    # refreshes, which would have returned Google tokens for the wrong
+    # provider and hidden refresh-path bugs.
+    live_access = os.environ.get("AUTH_LIVE_GOOGLE_ACCESS_TOKEN", "").strip()
+    if live_access and _is_google_token_url(data.get("token_url", "")):
+        live_refresh = os.environ.get("AUTH_LIVE_GOOGLE_REFRESH_TOKEN", "").strip()
+        resp = {
+            "access_token": live_access,
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "mock-scope",
+        }
+        if live_refresh:
+            resp["refresh_token"] = live_refresh
+        return web.json_response(resp)
+
     if provider.startswith("mcp:"):
         if data.get("client_id") != "mock-mcp-client-id":
             return web.json_response({"error": "invalid_mcp_client_id"}, status=400)
@@ -1476,6 +2298,15 @@ async def oauth_state_handler(request: web.Request) -> web.Response:
 
 async def oauth_reset(request: web.Request) -> web.Response:
     request.app["oauth_state"] = _new_oauth_state()
+    return web.json_response({"ok": True})
+
+
+async def mcp_state_handler(request: web.Request) -> web.Response:
+    return web.json_response(request.app["mcp_state"])
+
+
+async def mcp_reset(request: web.Request) -> web.Response:
+    request.app["mcp_state"] = _new_mcp_state()
     return web.json_response({"ok": True})
 
 
@@ -1528,6 +2359,10 @@ async def _mcp_handle_authed(request: web.Request) -> web.Response:
     body = await request.json()
     method = body.get("method", "")
     req_id = body.get("id")
+    request.app["mcp_state"]["requests"].append({
+        "method": method,
+        "authorization": request.headers.get("Authorization"),
+    })
 
     if method == "initialize":
         return web.json_response({
@@ -1637,12 +2472,119 @@ async def mcp_oauth_token(request: web.Request) -> web.Response:
     })
 
 
+# ── Gmail API mocks (#3133 / #3166) ──────────────────────────────────────
+#
+# Per-app counters that the e2e test for the mission auto-resume path
+# inspects to confirm the gmail WASM tool actually fired against this
+# mock (rather than hitting the real Gmail API or silently no-oping).
+# Stored in `app["gmail_state"]` so each mock_llm instance owns its own
+# counters.
+
+
+def _new_gmail_state() -> dict:
+    return {
+        "drafts_created": 0,
+        "messages_sent": 0,
+        "messages_listed": 0,
+        "last_draft": None,
+        "last_send": None,
+    }
+
+
+async def gmail_create_draft(request: web.Request) -> web.Response:
+    """POST /gmail/v1/users/me/drafts — minimal create-draft mock.
+
+    Maps from the gmail WASM tool's `create_draft` action. The request
+    body shape mirrors the real Gmail API: `{"message": {"raw": "..."}}`.
+    Returns a deterministic draft id so the agent can quote it back.
+    """
+    body = await request.json()
+    state = request.app["gmail_state"]
+    state["drafts_created"] += 1
+    state["last_draft"] = body
+    draft_id = f"mock-draft-{state['drafts_created']}"
+    return web.json_response({
+        "id": draft_id,
+        "message": {
+            "id": f"mock-msg-{state['drafts_created']}",
+            "threadId": f"mock-thread-{state['drafts_created']}",
+            "labelIds": ["DRAFT"],
+        },
+    })
+
+
+async def gmail_send_message(request: web.Request) -> web.Response:
+    """POST /gmail/v1/users/me/messages/send — minimal send mock.
+
+    Maps from the gmail WASM tool's `send_message` and `reply_to_message`
+    actions. Returns the same shape Google does: `{id, threadId, labelIds}`.
+    """
+    body = await request.json()
+    state = request.app["gmail_state"]
+    state["messages_sent"] += 1
+    state["last_send"] = body
+    msg_id = f"mock-msg-{state['messages_sent']}"
+    return web.json_response({
+        "id": msg_id,
+        "threadId": body.get("threadId") or f"mock-thread-{state['messages_sent']}",
+        "labelIds": ["SENT"],
+    })
+
+
+async def gmail_list_messages(request: web.Request) -> web.Response:
+    """GET /gmail/v1/users/me/messages — minimal list mock.
+
+    Returns one canned message id so the agent has something to quote
+    back. The list endpoint only returns ids; the gmail WASM tool then
+    fetches metadata for each, which we serve from `gmail_get_message`.
+    """
+    state = request.app["gmail_state"]
+    state["messages_listed"] += 1
+    return web.json_response({
+        "messages": [{"id": "mock-canned-msg-1", "threadId": "mock-canned-thread-1"}],
+        "resultSizeEstimate": 1,
+    })
+
+
+async def gmail_get_message(request: web.Request) -> web.Response:
+    """GET /gmail/v1/users/me/messages/{id} — minimal get-message mock."""
+    msg_id = request.match_info["id"]
+    return web.json_response({
+        "id": msg_id,
+        "threadId": "mock-canned-thread-1",
+        "labelIds": ["INBOX", "UNREAD"],
+        "snippet": "Mock canned snippet for the e2e test",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "test@example.com"},
+                {"name": "To", "value": "owner@example.com"},
+                {"name": "Subject", "value": "Mock canned subject"},
+                {"name": "Date", "value": "Mon, 1 Jan 2026 00:00:00 +0000"},
+            ],
+            "body": {"data": ""},
+        },
+    })
+
+
+async def gmail_state_handler(request: web.Request) -> web.Response:
+    """GET /__mock/gmail/state — read the gmail counters in tests."""
+    return web.json_response(request.app["gmail_state"])
+
+
+async def gmail_state_reset(request: web.Request) -> web.Response:
+    """POST /__mock/gmail/reset — clear counters between tests."""
+    request.app["gmail_state"] = _new_gmail_state()
+    return web.json_response({"ok": True})
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
     app = web.Application()
     app["oauth_state"] = _new_oauth_state()
+    app["mcp_state"] = _new_mcp_state()
+    app["gmail_state"] = _new_gmail_state()
     # Register both /v1/ and non-/v1/ paths (rig-core omits the /v1/ prefix)
     app.router.add_post("/v1/chat/completions", chat_completions)
     app.router.add_post("/chat/completions", chat_completions)
@@ -1652,6 +2594,8 @@ def main():
     app.router.add_post("/oauth/refresh", oauth_refresh)
     app.router.add_get("/__mock/oauth/state", oauth_state_handler)
     app.router.add_post("/__mock/oauth/reset", oauth_reset)
+    app.router.add_get("/__mock/mcp/state", mcp_state_handler)
+    app.router.add_post("/__mock/mcp/reset", mcp_reset)
 
     async def set_github_api_url(request: web.Request) -> web.Response:
         global _github_api_url
@@ -1677,6 +2621,14 @@ def main():
     app.router.add_get("/.well-known/oauth-authorization-server/{tail:.*}", mcp_auth_server_metadata)
     app.router.add_post("/oauth/register", mcp_oauth_register)
     app.router.add_post("/oauth/token", mcp_oauth_token)
+    # Gmail API mocks (consumed by the WASM gmail tool when
+    # T3CLAW_TEST_HTTP_REWRITE_MAP routes gmail.googleapis.com here).
+    app.router.add_post("/gmail/v1/users/me/drafts", gmail_create_draft)
+    app.router.add_post("/gmail/v1/users/me/messages/send", gmail_send_message)
+    app.router.add_get("/gmail/v1/users/me/messages", gmail_list_messages)
+    app.router.add_get("/gmail/v1/users/me/messages/{id}", gmail_get_message)
+    app.router.add_get("/__mock/gmail/state", gmail_state_handler)
+    app.router.add_post("/__mock/gmail/reset", gmail_state_reset)
 
     async def start():
         runner = web.AppRunner(app)
@@ -1684,8 +2636,8 @@ def main():
         site = web.TCPSite(runner, "127.0.0.1", args.port)
         await site.start()
         port = site._server.sockets[0].getsockname()[1]
-        app["port"] = port  # used by MCP handlers
         print(f"MOCK_LLM_PORT={port}", flush=True)
+        app["port"] = port  # used by MCP handlers
         await asyncio.Event().wait()
 
     asyncio.run(start())

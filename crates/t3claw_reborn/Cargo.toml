@@ -1,0 +1,91 @@
+[package]
+name = "t3claw_reborn"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Standalone Reborn composition and adapters for T3Claw"
+authors = ["NEAR AI <support@near.ai>"]
+license = "MIT OR Apache-2.0"
+homepage = "https://github.com/Terminal-3/t3-claw"
+repository = "https://github.com/Terminal-3/t3-claw"
+publish = false
+
+[features]
+default = []
+root-llm-provider = ["dep:t3claw_llm"]
+libsql-secrets = [
+    "dep:t3claw_secrets",
+    "dep:libsql",
+    "dep:secrecy",
+    "dep:t3claw_filesystem",
+    "t3claw_filesystem/libsql",
+    "filesystem-goal-store",
+]
+filesystem-goal-store = ["dep:t3claw_filesystem"]
+# Local-dev trigger-fire access store (libSQL-backed). Named for its original
+# WebChat user-store home; the canonical user store has since moved to the
+# filesystem identity resolver, so this feature now only gates the
+# `local_trigger_access` module.
+webui-user-store = ["dep:libsql"]
+# Opt-in because the restart coverage opens real libSQL-backed turn/thread stores.
+# Keep separate from `libsql-secrets` so local `cargo test -p t3claw_reborn`
+# stays fast, while CI can exercise process-restart persistence explicitly.
+libsql-restart-tests = [
+    "dep:libsql",
+    "dep:t3claw_filesystem",
+    "t3claw_filesystem/libsql",
+    "filesystem-goal-store",
+]
+
+[dependencies]
+async-trait = "0.1"
+chrono = "0.4"
+futures-util = { version = "0.3", default-features = false }
+t3claw_agent_loop = { path = "../t3claw_agent_loop", version = "0.1.0" }
+t3claw_events = { path = "../t3claw_events", version = "0.1.0" }
+t3claw_hooks = { path = "../t3claw_hooks", version = "0.1.0" }
+t3claw_host_api = { path = "../t3claw_host_api", version = "0.1.0" }
+t3claw_host_runtime = { path = "../t3claw_host_runtime", version = "0.1.0" }
+t3claw_llm = { path = "../t3claw_llm", version = "0.1.0", optional = true, default-features = false }
+t3claw_loop_support = { path = "../t3claw_loop_support", version = "0.1.0" }
+t3claw_secrets = { path = "../t3claw_secrets", version = "0.1.0", optional = true }
+t3claw_filesystem = { path = "../t3claw_filesystem", version = "0.1.0", optional = true }
+t3claw_threads = { path = "../t3claw_threads", version = "0.1.0" }
+t3claw_turns = { path = "../t3claw_turns", version = "0.1.0" }
+libsql = { version = "0.6", optional = true, default-features = false, features = ["core", "replication", "remote", "tls"] }
+parking_lot = "0.12"
+secrecy = { version = "0.10", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+
+[dev-dependencies]
+chrono = "0.4"
+t3claw_agent_loop = { path = "../t3claw_agent_loop", version = "0.1.0", features = ["test-support"] }
+t3claw_authorization = { path = "../t3claw_authorization", version = "0.1.0" }
+t3claw_event_projections = { path = "../t3claw_event_projections", version = "0.1.0" }
+t3claw_extensions = { path = "../t3claw_extensions", version = "0.1.0" }
+t3claw_filesystem = { path = "../t3claw_filesystem", version = "0.1.0" }
+t3claw_processes = { path = "../t3claw_processes", version = "0.1.0" }
+t3claw_reborn_event_store = { path = "../t3claw_reborn_event_store", version = "0.1.0" }
+t3claw_resources = { path = "../t3claw_resources", version = "0.1.0" }
+t3claw_scripts = { path = "../t3claw_scripts", version = "0.1.0" }
+t3claw_skills = { path = "../t3claw_skills", version = "0.3.0", default-features = false }
+t3claw_trust = { path = "../t3claw_trust", version = "0.1.0" }
+rust_decimal = "1"
+serde = "1"
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+wat = "1.245.1"
+tracing-test = "0.2"
+
+[[test]]
+name = "llm_gateway"
+required-features = ["root-llm-provider"]
+
+[lints]
+workspace = true

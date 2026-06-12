@@ -4,8 +4,8 @@ Tests the full internal OAuth callback pipeline: install gmail → configure
 (get auth_url) → simulate OAuth callback → verify token stored. Uses gateway
 callback mode + mock token exchange (no real Google login).
 
-The conftest sets IRONCLAW_OAUTH_CALLBACK_URL (non-loopback, forces gateway
-mode) and IRONCLAW_OAUTH_EXCHANGE_URL (points to mock_llm.py's /oauth/exchange).
+The conftest sets T3CLAW_OAUTH_CALLBACK_URL (non-loopback, forces gateway
+mode) and T3CLAW_OAUTH_EXCHANGE_URL (points to mock_llm.py's /oauth/exchange).
 """
 
 from urllib.parse import parse_qs, urlparse

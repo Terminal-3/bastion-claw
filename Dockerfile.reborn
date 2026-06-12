@@ -1,0 +1,92 @@
+# Multi-stage Dockerfile for the standalone Reborn CLI HTTP service.
+#
+# Build:
+#   docker build -f Dockerfile.reborn -t t3claw-reborn:latest .
+#
+# Run locally:
+#   docker run --rm --env-file .env.reborn -p 127.0.0.1:3000:3000 t3claw-reborn:latest
+#
+# Railway:
+#   Set Dockerfile path to Dockerfile.reborn and T3CLAW_REBORN_SERVE_HOST=0.0.0.0.
+#   Railway supplies PORT. Set T3CLAW_REBORN_PROFILE=production plus
+#   T3CLAW_REBORN_POSTGRES_URL and T3CLAW_REBORN_SECRET_MASTER_KEY for
+#   durable production storage.
+
+FROM rust:1.92-bookworm AS chef
+
+RUN cargo install --locked cargo-chef@0.1.77
+
+WORKDIR /app
+
+FROM chef AS planner
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY skills/ skills/
+COPY tests/ tests/
+COPY wit/ wit/
+COPY providers.json providers.json
+RUN mkdir -p src \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && printf '\n' > src/lib.rs
+
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS deps
+
+ENV CARGO_PROFILE_DIST_PANIC=abort \
+    CARGO_PROFILE_DIST_CODEGEN_UNITS=1
+
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook \
+    --profile dist \
+    --package t3claw_reborn_cli \
+    --features webui-v2-beta,slack-v2-host-beta,postgres \
+    --recipe-path recipe.json
+
+FROM deps AS builder
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY migrations/ migrations/
+COPY skills/ skills/
+COPY tests/ tests/
+COPY wit/ wit/
+COPY providers.json providers.json
+RUN mkdir -p src \
+    && printf 'fn main() {}\n' > src/main.rs \
+    && printf '\n' > src/lib.rs
+
+RUN cargo build \
+    --profile dist \
+    --package t3claw_reborn_cli \
+    --features webui-v2-beta,slack-v2-host-beta,postgres \
+    --bin t3claw-reborn
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/dist/t3claw-reborn /usr/local/bin/t3claw-reborn
+COPY docker/reborn/config.toml /opt/t3claw/reborn/config.toml
+COPY docker/reborn/config.production.toml /opt/t3claw/reborn/config.production.toml
+COPY docker/reborn/entrypoint.sh /usr/local/bin/t3claw-reborn-entrypoint
+
+ENV HOME=/home/t3claw \
+    T3CLAW_REBORN_LOG=info \
+    T3CLAW_REBORN_SERVE_HOST=127.0.0.1
+
+RUN useradd -m -d /home/t3claw -u 1000 t3claw \
+    && mkdir -p /data/t3claw-reborn /workspace \
+    && chown -R t3claw:t3claw /home/t3claw /data/t3claw-reborn /workspace \
+    && chmod +x /usr/local/bin/t3claw-reborn-entrypoint
+
+WORKDIR /workspace
+
+EXPOSE 3000
+
+USER t3claw
+
+ENTRYPOINT ["t3claw-reborn-entrypoint"]

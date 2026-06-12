@@ -16,11 +16,11 @@ mod tests {
     use rust_decimal::Decimal;
     use t3claw::channels::IncomingMessage;
     use t3claw::config::Config;
-    use t3claw::llm::{
+    use t3claw::tools::permissions::{ADMIN_SETTINGS_USER_ID, ADMIN_TOOL_POLICY_KEY};
+    use t3claw_llm::{
         CompletionRequest, CompletionResponse, FinishReason, LlmProvider, ToolCompletionRequest,
         ToolCompletionResponse,
     };
-    use t3claw::tools::permissions::{ADMIN_SETTINGS_USER_ID, ADMIN_TOOL_POLICY_KEY};
 
     use crate::support::test_rig::TestRigBuilder;
 
@@ -48,6 +48,7 @@ mod tests {
                 input_tokens: 0,
                 output_tokens: 1,
                 finish_reason: FinishReason::Stop,
+                reasoning: None,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
             })
@@ -70,6 +71,7 @@ mod tests {
                 finish_reason: FinishReason::Stop,
                 cache_read_input_tokens: 0,
                 cache_creation_input_tokens: 0,
+                reasoning: None,
             })
         }
     }

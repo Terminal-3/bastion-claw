@@ -1,0 +1,24 @@
+[package]
+name = "t3claw_event_streams"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "Transport-neutral Reborn projection stream manager"
+publish = false
+
+[dependencies]
+async-trait = "0.1"
+t3claw_event_projections = { path = "../t3claw_event_projections" }
+t3claw_host_api = { path = "../t3claw_host_api" }
+t3claw_outbound = { path = "../t3claw_outbound" }
+t3claw_turns = { path = "../t3claw_turns" }
+parking_lot = "0.12"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "sync", "rt"] }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+t3claw_events = { path = "../t3claw_events" }
+tokio = { version = "1", features = ["macros", "rt", "time"] }

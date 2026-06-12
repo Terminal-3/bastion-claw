@@ -8,19 +8,22 @@
 //! - **MCP servers** — external API integrations via Model Context Protocol
 //!
 //! The agent can search a built-in registry (or discover online), install,
-//! authenticate, and activate extensions at runtime without CLI commands.
+//! and authenticate extensions at runtime without CLI commands.
 //!
 //! ```text
 //!  User: "add telegram"
 //!    -> tool_search("telegram")    -> finds channel in registry
-//!    -> tool_install("telegram")   -> installs and follows through setup/auth/activation when possible
-//!    -> tool_activate("telegram")  -> used only if an installed extension still needs explicit activation
+//!    -> tool_install("telegram")   -> installs and follows through setup/auth when possible
+//!  After install the new tools are direct-callable; missing OAuth tokens
+//!  raise an Authentication gate at execute time (see #3133 / #3166) and
+//!  resume automatically once the user completes the OAuth flow.
 //! ```
 
 pub mod discovery;
 pub mod manager;
 pub mod naming;
 pub mod registry;
+pub(crate) mod wechat_login;
 
 pub use discovery::OnlineDiscovery;
 pub use manager::ExtensionManager;
@@ -74,13 +77,19 @@ pub struct RegistryEntry {
     /// Where to get this extension.
     pub source: ExtensionSource,
     /// Fallback source when the primary source fails (e.g., download 404 → build from source).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_source: Option<Box<ExtensionSource>>,
     /// How authentication works.
     pub auth_hint: AuthHint,
     /// Extension version (semver), if known.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// When true, this entry is omitted from default-discovery surfaces
+    /// (agent prompt's `Activatable Integrations`, settings catalog). It is
+    /// still installable by explicit name. See `ExtensionManifest::hidden`
+    /// for the motivation (issue #3533).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 /// Where the extension binary or server lives.
@@ -92,17 +101,14 @@ pub enum ExtensionSource {
     /// Downloadable WASM binary.
     WasmDownload {
         wasm_url: String,
-        #[serde(default)]
         capabilities_url: Option<String>,
     },
     /// Build from local source directory.
     WasmBuildable {
         #[serde(alias = "repo_url")]
         source_dir: String,
-        #[serde(default)]
         build_dir: Option<String>,
         /// Crate name used to locate the build artifact binary.
-        #[serde(default)]
         crate_name: Option<String>,
     },
     /// Discovered online (not yet validated for a specific source type).
@@ -433,13 +439,9 @@ impl<'de> Deserialize<'de> for AuthResult {
         struct Raw {
             name: String,
             kind: ExtensionKind,
-            #[serde(default)]
             auth_url: Option<String>,
-            #[serde(default)]
             callback_type: Option<String>,
-            #[serde(default)]
             instructions: Option<String>,
-            #[serde(default)]
             setup_url: Option<String>,
             #[serde(default)]
             awaiting_token: bool,
@@ -484,6 +486,52 @@ impl<'de> Deserialize<'de> for AuthResult {
             status,
         })
     }
+}
+
+/// Interactive login metadata surfaced to setup UIs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractiveLoginInfo {
+    /// Login method identifier (for example `qr_code`).
+    pub method: String,
+    /// User-facing button label.
+    pub button_label: String,
+    /// Optional short instructions shown above the login control.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+/// Result of starting an interactive extension login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractiveLoginStartResult {
+    /// Opaque session identifier used by follow-up poll requests.
+    pub session_id: String,
+    /// Flow status (`pending`, `error`).
+    pub status: String,
+    /// Human-readable message for the UI.
+    pub message: String,
+    /// Optional QR/image URL for browser display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qr_code_url: Option<String>,
+    /// Optional short instructions shown alongside the QR code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
+}
+
+/// Result of polling an interactive extension login flow.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InteractiveLoginPollResult {
+    /// Session identifier associated with this poll result.
+    pub session_id: String,
+    /// Flow status (`pending`, `scanned`, `refreshed`, `succeeded`, `failed`).
+    pub status: String,
+    /// Human-readable message for the UI.
+    pub message: String,
+    /// Optional refreshed QR/image URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qr_code_url: Option<String>,
+    /// Whether the extension was successfully activated as part of login completion.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activated: Option<bool>,
 }
 
 /// Result of activating an extension.
@@ -573,7 +621,8 @@ impl EnsureReadyOutcome {
     }
 }
 
-/// Synthetic action advertised for an installed provider that is not yet ready.
+/// Synthetic provider-entry action used when a provider is present in discovery
+/// but not currently on the installed-ready callable surface.
 #[derive(Debug, Clone)]
 pub struct LatentProviderAction {
     pub action_name: String,
@@ -625,6 +674,10 @@ pub struct InstalledExtension {
     /// Whether this extension has an auth configuration (OAuth or manual token).
     #[serde(default)]
     pub has_auth: bool,
+    /// Whether this extension still needs owner binding / pairing before it should
+    /// be treated as fully active in the UI.
+    #[serde(default)]
+    pub requires_binding: bool,
     /// Whether this extension is installed locally (false = available in registry but not installed).
     #[serde(default = "default_true")]
     pub installed: bool,
@@ -1027,6 +1080,7 @@ mod tests {
             fallback_source: None,
             auth_hint: AuthHint::Dcr,
             version: None,
+            hidden: false,
         };
         let sr = SearchResult {
             entry,
@@ -1057,6 +1111,7 @@ mod tests {
             fallback_source: None,
             auth_hint: AuthHint::None,
             version: None,
+            hidden: false,
         };
         let sr = SearchResult {
             entry,
@@ -1142,6 +1197,7 @@ mod tests {
             tools: vec!["send_email".to_string(), "read_inbox".to_string()],
             needs_setup: true,
             has_auth: true,
+            requires_binding: false,
             installed: false,
             activation_error: Some("token expired".to_string()),
             version: None,
