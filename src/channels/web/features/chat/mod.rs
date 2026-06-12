@@ -1170,6 +1170,8 @@ fn turn_info_from_in_memory_turn(t: &crate::agent::session::Turn) -> TurnInfo {
                     result_preview: None,
                     error: tc.error.as_deref().map(tool_error_for_display),
                     rationale: tc.rationale.clone(),
+                    duration_ms: None,
+                    params_summary: None,
                 }
             })
             .collect(),
@@ -1508,6 +1510,8 @@ mod tests {
                 result: None,
                 error: Some("HTTP 502".to_string()),
                 rationale: None,
+                duration_ms: None,
+                params_summary: None,
             }],
             generated_images: Vec::new(),
             narrative: None,
@@ -1562,6 +1566,8 @@ mod tests {
                     result: None,
                     error: Some("HTTP 502 on first attempt".to_string()),
                     rationale: None,
+                    duration_ms: None,
+                    params_summary: None,
                 },
                 ToolCallInfo {
                     name: "telegram_send".to_string(),
@@ -1572,6 +1578,8 @@ mod tests {
                     result: Some("{\"message_id\":42}".to_string()),
                     error: None,
                     rationale: None,
+                    duration_ms: None,
+                    params_summary: None,
                 },
             ],
             generated_images: Vec::new(),

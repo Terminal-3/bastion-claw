@@ -356,11 +356,14 @@ function createToolCallsSummaryElement(toolCalls) {
 }
 
 function createActivityGroupFromHistory(toolCalls) {
+  // Durations are present on v2-persisted calls (duration_ms per call);
+  // older rows without them render without a duration label — both the
+  // card and the summary handle null/zero gracefully.
   return createActivityGroupFromEntries(
     toolCalls.map(normalizeHistoryToolCall),
     {
-      includeSummaryDuration: false,
-      showCardDurations: false,
+      includeSummaryDuration: true,
+      showCardDurations: true,
       expandErrors: true,
     }
   );

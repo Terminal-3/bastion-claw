@@ -6084,12 +6084,145 @@ pub(crate) async fn handle_mission_notification(
     }
 }
 
+/// Byte budget for persisted tool output previews and error strings.
+const TOOL_RESULT_PREVIEW_MAX_BYTES: usize = 500;
+
+/// Truncate tool output for the persisted preview without slicing a
+/// multi-byte UTF-8 sequence. The rule is "include every char whose start
+/// index is below the budget", so the last included char may extend past
+/// the budget by up to `len_utf8() - 1` bytes.
+fn truncate_tool_result_preview(content: &str) -> String {
+    if content.len() <= TOOL_RESULT_PREVIEW_MAX_BYTES {
+        return content.to_string();
+    }
+    let end = content
+        .char_indices()
+        .take_while(|(i, _)| *i < TOOL_RESULT_PREVIEW_MAX_BYTES)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &content[..end]) // safety: end is char-boundary via char_indices
+}
+
+/// Build the persisted `calls` JSON array for a completed v2 thread.
+///
+/// Action events are the authoritative call list: both execution tiers push
+/// `ActionExecuted`/`ActionFailed` onto `thread.events`, including CodeAct
+/// (Tier 1) calls whose outputs flow back into the Python VM and therefore
+/// never appear as `ActionResult` internal messages. Building from messages
+/// alone (the previous behaviour) silently dropped every CodeAct call — a
+/// payroll cycle's `t3n_mcp_*` calls were missing from chat history while
+/// only the Tier-0 `tool_info` discovery calls persisted.
+///
+/// `ActionResult` internal messages still matter — they carry the actual
+/// tool output, which events do not — so they are joined by call id to fill
+/// `result_preview`. Threads with no action events at all (legacy shapes)
+/// fall back to the message-only list.
+fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> {
+    use t3claw_engine::EventKind;
+
+    // call_id → output text, from ActionResult messages. CodeAct call ids
+    // (`code_call_N`) restart per code block, so an id seen twice is
+    // ambiguous and dropped rather than mis-joined; Tier-0 ids are unique.
+    let mut previews: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    let mut ambiguous: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for msg in &thread.internal_messages {
+        if msg.role != t3claw_engine::MessageRole::ActionResult {
+            continue;
+        }
+        let Some(call_id) = msg.action_call_id.as_deref().filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        if previews.insert(call_id, msg.content.as_str()).is_some() {
+            ambiguous.insert(call_id);
+        }
+    }
+    for call_id in &ambiguous {
+        previews.remove(call_id);
+    }
+
+    let mut calls = Vec::new();
+    for event in &thread.events {
+        let obj = match &event.kind {
+            EventKind::ActionExecuted {
+                action_name,
+                call_id,
+                duration_ms,
+                params_summary,
+                ..
+            } => {
+                // An empty preview still marks the call as completed for the
+                // history projection (`has_result` checks for a non-null
+                // value). CodeAct outputs are consumed inside the Python VM
+                // and have no per-call text to attach here.
+                let preview = previews.get(call_id.as_str()).copied().unwrap_or("");
+                let mut obj = serde_json::json!({
+                    "name": action_name,
+                    "result_preview": truncate_tool_result_preview(preview),
+                    "duration_ms": duration_ms,
+                });
+                if !call_id.is_empty() {
+                    obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+                }
+                if let Some(summary) = params_summary {
+                    obj["params_summary"] = serde_json::Value::String(summary.clone());
+                }
+                obj
+            }
+            EventKind::ActionFailed {
+                action_name,
+                call_id,
+                error,
+                duration_ms,
+                params_summary,
+                ..
+            } => {
+                let mut obj = serde_json::json!({
+                    "name": action_name,
+                    "error": truncate_tool_result_preview(error),
+                    "duration_ms": duration_ms,
+                });
+                if !call_id.is_empty() {
+                    obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+                }
+                if let Some(summary) = params_summary {
+                    obj["params_summary"] = serde_json::Value::String(summary.clone());
+                }
+                obj
+            }
+            _ => continue,
+        };
+        calls.push(obj);
+    }
+
+    if !calls.is_empty() {
+        return calls;
+    }
+
+    // Legacy fallback: threads whose action events were never persisted.
+    for msg in &thread.internal_messages {
+        if msg.role != t3claw_engine::MessageRole::ActionResult {
+            continue;
+        }
+        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
+        let mut obj = serde_json::json!({
+            "name": action_name,
+            "result_preview": truncate_tool_result_preview(&msg.content),
+        });
+        if let Some(ref call_id) = msg.action_call_id {
+            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
+        }
+        calls.push(obj);
+    }
+    calls
+}
+
 /// Persist v2 engine tool call metadata to the v1 conversation DB.
 ///
-/// Loads the completed thread from the v2 store, extracts ActionResult
-/// messages (which carry the actual tool output), and writes a
-/// `role="tool_calls"` message so the chat history API can reconstruct
-/// tool call info (name, result preview, errors) for the web UI.
+/// Loads the completed thread from the v2 store, builds the call list via
+/// [`v2_tool_calls_json`], and writes a `role="tool_calls"` message so the
+/// chat history API can reconstruct tool call info (name, result preview,
+/// errors, durations) for the web UI.
 async fn persist_v2_tool_calls(
     store: &std::sync::Arc<dyn Store>,
     db: &std::sync::Arc<dyn Database>,
@@ -6116,37 +6249,7 @@ async fn persist_v2_tool_calls(
         }
     };
 
-    // Extract ActionResult messages from the thread's internal transcript.
-    // `internal_messages` has the full execution chain including action
-    // results with actual tool output. `messages` only has user/assistant.
-    let mut calls = Vec::new();
-    for msg in &thread.internal_messages {
-        if msg.role != t3claw_engine::MessageRole::ActionResult {
-            continue;
-        }
-        let action_name = msg.action_name.as_deref().unwrap_or("unknown");
-        let preview = if msg.content.len() > 500 {
-            let end = msg
-                .content
-                .char_indices()
-                .take_while(|(i, _)| *i < 500)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(0);
-            format!("{}...", &msg.content[..end]) // safety: end is char-boundary via char_indices
-        } else {
-            msg.content.clone()
-        };
-        let mut obj = serde_json::json!({
-            "name": action_name,
-            "result_preview": preview,
-        });
-        if let Some(ref call_id) = msg.action_call_id {
-            obj["tool_call_id"] = serde_json::Value::String(call_id.clone());
-        }
-        calls.push(obj);
-    }
-
+    let calls = v2_tool_calls_json(&thread);
     if calls.is_empty() {
         return;
     }
@@ -12883,6 +12986,183 @@ mod tests {
             "body length must be a multiple of 3-byte char width, got {}",
             body.len()
         );
+    }
+
+    /// Regression: CodeAct (Tier 1) tool calls never appear as
+    /// `ActionResult` internal messages — their outputs flow back into the
+    /// Python VM — so building the persisted `tool_calls` row from messages
+    /// alone dropped every CodeAct call. A payroll run's `t3n_mcp_*` calls
+    /// were missing from chat history while only the Tier-0 `tool_info`
+    /// discovery calls persisted, leaving the web UI with nameless noise.
+    /// The call list must come from `ActionExecuted`/`ActionFailed` thread
+    /// events (emitted by both tiers), with message content joined by call
+    /// id for `result_preview` where it exists.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn persist_v2_tool_calls_includes_codeact_calls_from_events() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = Arc::new(TestStore::new());
+        let db: Arc<dyn crate::db::Database> = Arc::new(
+            crate::db::libsql::LibSqlBackend::new_local(&tmp.path().join("test.db"))
+                .await
+                .expect("local libsql"),
+        );
+        db.run_migrations().await.expect("migrations");
+
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let step_id = t3claw_engine::StepId::new();
+
+        // Tier-0 call: has both an event and an ActionResult message.
+        thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+            "tool_info_0",
+            "tool_info",
+            r#"{"description":"discovery output"}"#,
+        ));
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "tool_info".into(),
+            call_id: "tool_info_0".into(),
+            duration_ms: 3,
+            params_summary: Some("schema".into()),
+        });
+        // CodeAct call: event only, no ActionResult message.
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "t3n_mcp_finalizeAudit".into(),
+            call_id: "code_call_1".into(),
+            duration_ms: 196,
+            params_summary: Some("2026-06-2b7404".into()),
+        });
+        // Failed CodeAct call: must persist as an error entry.
+        thread.add_event(t3claw_engine::EventKind::ActionFailed {
+            step_id,
+            action_name: "__codeact__".into(),
+            call_id: "codeact-step-1".into(),
+            error: "TypeError: string indices must be integers".into(),
+            duration_ms: 51,
+            params_summary: None,
+        });
+        let thread_id = thread.id;
+        store.save_thread(&thread).await.unwrap();
+
+        let conv_id = db
+            .create_conversation("web", "test-user", None)
+            .await
+            .expect("create conversation");
+        let message = IncomingMessage::new("web", "test-user", "run payroll")
+            .with_thread(conv_id.to_string());
+
+        let store_arc: Arc<dyn Store> = store;
+        persist_v2_tool_calls(&store_arc, &db, thread_id, &message).await;
+
+        let messages = db
+            .list_conversation_messages(conv_id)
+            .await
+            .expect("list messages");
+        let tool_calls_msg = messages
+            .iter()
+            .find(|m| m.role == "tool_calls")
+            .expect("tool_calls row must be written");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&tool_calls_msg.content).expect("valid JSON");
+        let calls = parsed["calls"].as_array().expect("calls array");
+        assert_eq!(calls.len(), 3, "every action event becomes a call entry");
+
+        // Tier-0 call keeps its joined output preview.
+        assert_eq!(calls[0]["name"], "tool_info");
+        assert_eq!(calls[0]["tool_call_id"], "tool_info_0");
+        assert_eq!(calls[0]["params_summary"], "schema");
+        assert_eq!(calls[0]["duration_ms"], 3);
+        assert_eq!(
+            calls[0]["result_preview"],
+            r#"{"description":"discovery output"}"#
+        );
+
+        // CodeAct call carries its real name even with no message output.
+        assert_eq!(calls[1]["name"], "t3n_mcp_finalizeAudit");
+        assert_eq!(calls[1]["tool_call_id"], "code_call_1");
+        assert_eq!(calls[1]["params_summary"], "2026-06-2b7404");
+        assert_eq!(calls[1]["duration_ms"], 196);
+        // Empty (non-null) preview so the history projection marks the
+        // call completed (`has_result`) rather than perpetually running.
+        assert_eq!(calls[1]["result_preview"], "");
+
+        // Failed call persists the error, no result_preview.
+        assert_eq!(calls[2]["name"], "__codeact__");
+        assert_eq!(
+            calls[2]["error"],
+            "TypeError: string indices must be integers"
+        );
+        assert!(calls[2].get("result_preview").is_none());
+    }
+
+    /// CodeAct call ids restart per code block (`code_call_1`, …), so the
+    /// same id can map to different outputs across blocks. The preview join
+    /// must drop ambiguous ids rather than attach the wrong output to a
+    /// call.
+    #[test]
+    fn v2_tool_calls_json_drops_ambiguous_preview_joins() {
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        let step_id = t3claw_engine::StepId::new();
+        for (name, content) in [("alpha", "alpha output"), ("beta", "beta output")] {
+            thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+                "code_call_1",
+                name,
+                content,
+            ));
+            thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+                step_id,
+                action_name: name.into(),
+                call_id: "code_call_1".into(),
+                duration_ms: 1,
+                params_summary: None,
+            });
+        }
+
+        let calls = v2_tool_calls_json(&thread);
+        assert_eq!(calls.len(), 2);
+        for call in calls {
+            assert_eq!(
+                call["result_preview"], "",
+                "ambiguous call id must not mis-join a preview"
+            );
+        }
+    }
+
+    /// Threads with no persisted action events (legacy shape) must still
+    /// produce the message-derived call list.
+    #[test]
+    fn v2_tool_calls_json_falls_back_to_messages_without_events() {
+        let mut thread = t3claw_engine::Thread::new(
+            "goal",
+            t3claw_engine::ThreadType::Foreground,
+            t3claw_engine::ProjectId::new(),
+            "test-user",
+            t3claw_engine::ThreadConfig::default(),
+        );
+        thread.add_internal_message(t3claw_engine::ThreadMessage::action_result(
+            "call-1",
+            "echo",
+            r#"{"output":"hello"}"#,
+        ));
+
+        let calls = v2_tool_calls_json(&thread);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["name"], "echo");
+        assert_eq!(calls[0]["tool_call_id"], "call-1");
+        assert_eq!(calls[0]["result_preview"], r#"{"output":"hello"}"#);
     }
 
     /// Regression for the bug fixed in commit 652315e8:

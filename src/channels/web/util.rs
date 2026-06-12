@@ -447,6 +447,8 @@ fn parse_tool_call_infos(calls: &[serde_json::Value]) -> Vec<ToolCallInfo> {
                 result_preview,
                 error: c["error"].as_str().map(tool_error_for_display),
                 rationale: c["rationale"].as_str().map(String::from),
+                duration_ms: c.get("duration_ms").and_then(|v| v.as_u64()),
+                params_summary: c["params_summary"].as_str().map(String::from),
             }
         })
         .collect()

@@ -103,6 +103,13 @@ pub struct ToolCallInfo {
     /// Agent's reasoning for choosing this tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rationale: Option<String>,
+    /// Wall-clock execution time, when the persisted call recorded one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Short human-readable parameter summary (e.g. URL for the http tool),
+    /// matching the live SSE card's `name(summary)` display.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_summary: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -31,14 +31,20 @@ function getToolActivityBodyText(entry) {
 }
 
 function normalizeHistoryToolCall(toolCall) {
+  // Match the live SSE card label, which is `name(params_summary)` —
+  // see format_action_display_name in src/bridge/router.rs.
+  const baseName = toolCall.name || 'tool';
+  const name = toolCall.params_summary
+    ? baseName + '(' + toolCall.params_summary + ')'
+    : baseName;
   return {
     call_id: toolCall.call_id || null,
-    name: toolCall.name || 'tool',
+    name,
     status: toolCall.has_error ? 'fail' : (toolCall.has_result ? 'success' : 'running'),
     result_preview: toolCall.result_preview || '',
     result: toolCall.result || '',
     error: toolCall.error || '',
-    duration_ms: null,
+    duration_ms: typeof toolCall.duration_ms === 'number' ? toolCall.duration_ms : null,
   };
 }
 
