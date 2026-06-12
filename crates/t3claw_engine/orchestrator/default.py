@@ -219,6 +219,34 @@ def format_output(result, max_chars=8000):
     if ret is not None:
         parts.append("[return] " + str(ret))
 
+    # Recovery guidance for a failed code block. Without this, the model
+    # tends to re-run the whole block — repeating tool calls that already
+    # succeeded (observed live: a successful auth trio re-executed after the
+    # block errored on result parsing). Spell out what survived and what
+    # didn't so the model rebuilds from state[...] instead of re-calling.
+    if result.get("had_error"):
+        succeeded = []
+        for r in result.get("action_results", []):
+            name = r.get("action_name", "?")
+            if not r.get("is_error") and name not in succeeded:
+                succeeded.append(name)
+        if succeeded:
+            refs = ", ".join("state['" + n + "']" for n in succeeded)
+            parts.append(
+                "[orchestrator] The code block raised an error AFTER these tool calls "
+                "succeeded: " + ", ".join(succeeded) + ". Their outputs are already saved "
+                "in " + refs + " — do NOT call those tools again. Variables assigned in "
+                "the failed block are NOT available in your next code block; rebuild what "
+                "you need from state[...] instead of re-running tools."
+            )
+        else:
+            parts.append(
+                "[orchestrator] The code block raised an error. Variables assigned in it "
+                "are NOT available in your next code block. Tool results from earlier "
+                "steps remain saved in state['<tool_name>'] — read them from state "
+                "instead of calling those tools again."
+            )
+
     text = "\n\n".join(parts)
 
     # Truncate from the front (keep the tail with most recent results)

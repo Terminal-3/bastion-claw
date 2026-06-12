@@ -30,7 +30,9 @@ use monty::{
 };
 use tracing::{debug, warn};
 
-use super::scripting::{execute_code, json_to_monty, monty_to_json, monty_to_string};
+use super::scripting::{
+    execute_code, json_to_monty, monty_to_json, monty_to_string, normalise_result_envelope_for_vm,
+};
 use super::thread_context::thread_execution_context;
 use crate::capability::lease::LeaseManager;
 use crate::capability::policy::PolicyEngine;
@@ -1095,7 +1097,13 @@ async fn handle_execute_code_step(
                 .map(|r| {
                     serde_json::json!({
                         "action_name": r.action_name,
-                        "output": r.output,
+                        // VM-facing only: the orchestrator driver builds
+                        // `state[action_name]` from this, so JSON-string
+                        // outputs (MCP/sidecar text envelopes) must arrive
+                        // as structures, matching what a live `await`
+                        // returned inside the code block. Raw outputs were
+                        // already broadcast via events above.
+                        "output": crate::executor::scripting::normalise_tool_output_for_vm(&r.output),
                         "is_error": r.is_error,
                         "duration_ms": r.duration.as_millis(),
                     })
@@ -1437,7 +1445,12 @@ async fn handle_execute_action(
             &serde_json::json!({}),
         );
     }
-    ExtFunctionResult::Return(json_to_monty(&result_json))
+    // The events above carry the raw output; only the VM-facing envelope
+    // gets its `output` re-hydrated from a JSON-encoded string (MCP /
+    // sidecar text envelopes) into a structure Python can subscript.
+    ExtFunctionResult::Return(json_to_monty(&normalise_result_envelope_for_vm(
+        &result_json,
+    )))
 }
 
 /// Handle `__execute_actions_parallel__(calls)`.
@@ -1907,7 +1920,9 @@ async fn handle_execute_actions_parallel(
             }
         }
 
-        results_json.push(result_json.clone());
+        // Events were emitted with the raw output above; normalise only
+        // the VM-facing copy (JSON-string outputs become structures).
+        results_json.push(normalise_result_envelope_for_vm(&result_json));
     }
 
     thread.updated_at = chrono::Utc::now();
@@ -3593,6 +3608,108 @@ mod tests {
             MontyObject::Int(v) => v,
             other => panic!("Expected int, got: {other:?}"),
         }
+    }
+
+    /// Run a Python program (with orchestrator helpers in scope) that ends
+    /// with `FINAL(str_expr)` and return the string value.
+    fn eval_python_str(program: &str) -> String {
+        let helpers_end = DEFAULT_ORCHESTRATOR
+            .find("\ndef run_loop(")
+            .unwrap_or(DEFAULT_ORCHESTRATOR.len());
+        let helpers = &DEFAULT_ORCHESTRATOR[..helpers_end];
+
+        let code = format!("{helpers}\n{program}");
+        match run_python_final(code) {
+            MontyObject::String(v) => v,
+            other => panic!("Expected string, got: {other:?}"),
+        }
+    }
+
+    // ── format_output failed-block recovery note ─────────────────
+    //
+    // Regression for the live payroll repeat-auth incident: a CodeAct block
+    // ran t3n_mcp_createT3nAuthSession / addUserDid / listMyContext
+    // successfully, then errored on result parsing. The next steps re-ran
+    // the entire trio because nothing told the model that (a) the calls had
+    // already succeeded and their outputs were saved in state[...], and
+    // (b) variables assigned in the failed block would not be available in
+    // the next block. format_output must spell both out on failure.
+
+    #[test]
+    fn format_output_failed_block_lists_succeeded_calls_and_blocks_rerun() {
+        let program = r#"
+result = {
+    "stdout": "=== Session ===\n\nError: Traceback (most recent call last): ...",
+    "had_error": True,
+    "return_value": None,
+    "action_results": [
+        {"action_name": "t3n_mcp_createT3nAuthSession", "output": "{\"status\": \"success\"}", "is_error": False},
+        {"action_name": "t3n_mcp_addUserDid", "output": "{\"status\": \"success\"}", "is_error": False},
+    ],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(out.contains("do NOT call those tools again"), "{out}");
+        assert!(
+            out.contains("state['t3n_mcp_createT3nAuthSession']"),
+            "{out}"
+        );
+        assert!(out.contains("state['t3n_mcp_addUserDid']"), "{out}");
+        assert!(
+            out.contains("NOT available in your next code block"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn format_output_failed_block_without_calls_points_at_state() {
+        let program = r#"
+result = {
+    "stdout": "NameError: name 'session' is not defined",
+    "had_error": True,
+    "action_results": [],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(
+            out.contains("NOT available in your next code block"),
+            "{out}"
+        );
+        assert!(out.contains("state['<tool_name>']"), "{out}");
+    }
+
+    #[test]
+    fn format_output_successful_block_has_no_recovery_note() {
+        let program = r#"
+result = {
+    "stdout": "ok",
+    "had_error": False,
+    "action_results": [{"action_name": "time", "output": "{}", "is_error": False}],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(!out.contains("[orchestrator]"), "{out}");
+    }
+
+    #[test]
+    fn format_output_recovery_note_survives_front_truncation() {
+        // format_output truncates from the FRONT (keeps the tail), so the
+        // recovery note appended after a huge stdout must still be present.
+        let program = r#"
+result = {
+    "stdout": "x" * 9000,
+    "had_error": True,
+    "action_results": [{"action_name": "tool_a", "output": "ok", "is_error": False}],
+}
+FINAL(format_output(result))
+"#;
+        let out = eval_python_str(program);
+        assert!(out.starts_with("... (truncated) ..."), "{out}");
+        assert!(out.contains("do NOT call those tools again"), "{out}");
+        assert!(out.contains("state['tool_a']"), "{out}");
     }
 
     // ── __regex_match__ host function reachability ───────────────

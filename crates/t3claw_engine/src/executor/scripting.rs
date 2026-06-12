@@ -484,9 +484,14 @@ fn build_context_inputs(
         .filter(|m| m.role == MessageRole::ActionResult)
         .filter_map(|m| {
             let call_id = m.action_call_id.as_ref()?;
+            // Hand structures to Python, not JSON-encoded strings, so
+            // `previous_results[call_id]["field"]` works the same as a
+            // live tool result. Non-JSON content stays a plain string.
+            let content =
+                normalise_tool_output_for_vm(&serde_json::Value::String(m.content.clone()));
             Some((
                 MontyObject::String(call_id.clone()),
-                MontyObject::String(m.content.clone()),
+                json_to_monty(&content),
             ))
         })
         .collect();
@@ -2247,7 +2252,7 @@ async fn drive_inline_gate(
                 params_summary,
                 result_preview: crate::types::event::result_preview_from_output(&cached_output),
             });
-            let monty_val = json_to_monty(&cached_output);
+            let monty_val = json_to_monty(&normalise_tool_output_for_vm(&cached_output));
             action_results.push(ActionResult {
                 call_id: gate.call_id.clone(),
                 action_name: gate.action_name.clone(),
@@ -2333,7 +2338,7 @@ async fn drive_inline_gate(
                         ),
                     });
                 }
-                let monty_val = json_to_monty(&result.output);
+                let monty_val = json_to_monty(&normalise_tool_output_for_vm(&result.output));
                 action_results.push(result);
                 return ExtFunctionResult::Return(monty_val);
             }
@@ -2479,7 +2484,7 @@ async fn resolve_tool_future(
                     result_preview: crate::types::event::result_preview_from_output(&result.output),
                 });
             }
-            let monty_val = json_to_monty(&result.output);
+            let monty_val = json_to_monty(&normalise_tool_output_for_vm(&result.output));
             action_results.push(result);
             ExtFunctionResult::Return(monty_val)
         }
@@ -2711,6 +2716,70 @@ pub(crate) fn monty_to_json(obj: &MontyObject) -> serde_json::Value {
         }
         other => serde_json::Value::String(format!("{other:?}")),
     }
+}
+
+/// Parse a string as JSON only when it encodes a JSON object or array.
+///
+/// Conservative by design: scalar JSON (`"\"hello\""`, `"42"`, `"true"`),
+/// non-JSON text (dates like `"2026-06-12"`, prose) and malformed JSON are
+/// all rejected, so a tool that legitimately returns a plain string is
+/// never mangled.
+fn parse_json_container(s: &str) -> Option<serde_json::Value> {
+    let trimmed = s.trim_start();
+    if !trimmed.starts_with('{') && !trimmed.starts_with('[') {
+        return None;
+    }
+    match serde_json::from_str::<serde_json::Value>(s) {
+        Ok(value @ (serde_json::Value::Object(_) | serde_json::Value::Array(_))) => Some(value),
+        _ => None,
+    }
+}
+
+/// Normalise a tool output for the Python VM.
+///
+/// MCP tools deliver their payload as a text content block
+/// (`McpToolWrapper::execute` builds `ToolOutput::text(...)`), so by the
+/// time the output reaches this boundary it is a JSON-encoded *string*,
+/// not a structure. Handing that string to the VM verbatim makes the
+/// model's `result["field"]` / `result.did` accesses explode with
+/// `TypeError` / `AttributeError`. This helper re-hydrates the structure
+/// for the VM only — the raw output recorded in events, previews and
+/// persistence is untouched.
+///
+/// Two levels are handled:
+/// 1. the output itself being a JSON-object/array string (MCP text
+///    envelope);
+/// 2. the t3n sidecar's envelope `{"status": ..., "result": "<json>"}`,
+///    whose `result` field is itself a JSON-encoded string (the sidecar
+///    double-encodes it).
+pub(crate) fn normalise_tool_output_for_vm(output: &serde_json::Value) -> serde_json::Value {
+    let mut value = match output {
+        serde_json::Value::String(s) => match parse_json_container(s) {
+            Some(parsed) => parsed,
+            None => return output.clone(),
+        },
+        other => other.clone(),
+    };
+    if let serde_json::Value::Object(map) = &mut value
+        && let Some(serde_json::Value::String(inner)) = map.get("result")
+        && let Some(parsed) = parse_json_container(inner)
+    {
+        map.insert("result".into(), parsed);
+    }
+    value
+}
+
+/// Clone an `__execute_action__`-style result envelope with its `output`
+/// field normalised for the VM. Events and persistence consume the raw
+/// envelope; only the value handed to Python goes through this.
+pub(crate) fn normalise_result_envelope_for_vm(
+    result_json: &serde_json::Value,
+) -> serde_json::Value {
+    let mut vm = result_json.clone();
+    if let Some(output) = vm.get_mut("output") {
+        *output = normalise_tool_output_for_vm(output);
+    }
+    vm
 }
 
 pub(crate) fn json_to_monty(val: &serde_json::Value) -> MontyObject {
@@ -2971,6 +3040,150 @@ mod tests {
         ));
     }
 
+    // ── normalise_tool_output_for_vm ────────────────────────
+
+    #[test]
+    fn normalise_plain_string_stays_string() {
+        let output = serde_json::Value::String("two results found".into());
+        assert_eq!(normalise_tool_output_for_vm(&output), output);
+    }
+
+    #[test]
+    fn normalise_date_like_string_stays_string() {
+        let output = serde_json::Value::String("2026-06-12".into());
+        assert_eq!(normalise_tool_output_for_vm(&output), output);
+    }
+
+    #[test]
+    fn normalise_scalar_json_string_stays_string() {
+        // Quoted scalars, bare numbers and booleans are valid JSON but
+        // must NOT be converted — only objects/arrays re-hydrate.
+        for s in ["\"hello\"", "42", "true", "null", "3.14"] {
+            let output = serde_json::Value::String(s.into());
+            assert_eq!(normalise_tool_output_for_vm(&output), output, "input: {s}");
+        }
+    }
+
+    #[test]
+    fn normalise_malformed_json_stays_string() {
+        let output = serde_json::Value::String("{\"status\": \"ok\"".into());
+        assert_eq!(normalise_tool_output_for_vm(&output), output);
+    }
+
+    #[test]
+    fn normalise_json_object_string_parses() {
+        let output = serde_json::Value::String(r#"{"did": "did:example:123"}"#.into());
+        assert_eq!(
+            normalise_tool_output_for_vm(&output),
+            serde_json::json!({"did": "did:example:123"})
+        );
+    }
+
+    #[test]
+    fn normalise_json_array_string_parses() {
+        let output = serde_json::Value::String(r#"[1, 2, 3]"#.into());
+        assert_eq!(
+            normalise_tool_output_for_vm(&output),
+            serde_json::json!([1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn normalise_nested_sidecar_result_field_parses() {
+        // The t3n sidecar envelope: outer payload arrives as a JSON-encoded
+        // string AND its `result` field is itself a JSON-encoded string.
+        let envelope =
+            r#"{"status":"success","result":"{\"status\":\"ok\",\"did\":\"did:example:123\"}"}"#;
+        let output = serde_json::Value::String(envelope.into());
+        assert_eq!(
+            normalise_tool_output_for_vm(&output),
+            serde_json::json!({
+                "status": "success",
+                "result": {"status": "ok", "did": "did:example:123"}
+            })
+        );
+    }
+
+    #[test]
+    fn normalise_object_with_encoded_result_field_parses() {
+        // Outer value already structured, only the `result` field is a
+        // JSON-encoded string.
+        let output = serde_json::json!({
+            "status": "success",
+            "result": "{\"expires_at\": \"2026-07-01\"}"
+        });
+        assert_eq!(
+            normalise_tool_output_for_vm(&output),
+            serde_json::json!({
+                "status": "success",
+                "result": {"expires_at": "2026-07-01"}
+            })
+        );
+    }
+
+    #[test]
+    fn normalise_object_with_plain_result_field_untouched() {
+        let output = serde_json::json!({"status": "success", "result": "all done"});
+        assert_eq!(normalise_tool_output_for_vm(&output), output);
+    }
+
+    #[test]
+    fn normalise_result_envelope_only_touches_output_field() {
+        let envelope = serde_json::json!({
+            "action_name": "t3n_mcp_createT3nAuthSession",
+            "output": "{\"did\": \"did:example:123\"}",
+            "is_error": false,
+            "duration_ms": 5,
+        });
+        let vm = normalise_result_envelope_for_vm(&envelope);
+        assert_eq!(vm["output"], serde_json::json!({"did": "did:example:123"}));
+        assert_eq!(vm["action_name"], envelope["action_name"]);
+        assert_eq!(vm["is_error"], envelope["is_error"]);
+        // No `output` key (gate_paused sentinel shape) — passthrough.
+        let sentinel = serde_json::json!({"gate_paused": true, "gate_name": "approval"});
+        assert_eq!(normalise_result_envelope_for_vm(&sentinel), sentinel);
+    }
+
+    #[test]
+    fn previous_results_injects_structures_for_json_content() {
+        let mut thread = make_test_thread();
+        thread.add_message(ThreadMessage::action_result(
+            "call-1",
+            "t3n_session",
+            r#"{"status":"success","result":"{\"did\":\"did:example:123\"}"}"#,
+        ));
+        thread.add_message(ThreadMessage::action_result(
+            "call-2",
+            "echo",
+            "plain text result",
+        ));
+        let (names, values) = build_context_inputs(&thread, &serde_json::json!({}));
+        let idx = names
+            .iter()
+            .position(|n| n == "previous_results")
+            .expect("previous_results variable");
+        let MontyObject::Dict(pairs) = &values[idx] else {
+            panic!("previous_results should be a dict");
+        };
+        let lookup = |key: &str| {
+            pairs
+                .into_iter()
+                .find(|(k, _)| matches!(k, MontyObject::String(s) if s == key))
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| panic!("missing key {key}"))
+        };
+        // JSON content (including the sidecar's nested `result`) becomes a dict.
+        assert!(
+            matches!(lookup("call-1"), MontyObject::Dict(_)),
+            "JSON result should inject as a dict"
+        );
+        // Non-JSON content stays a plain string.
+        assert!(
+            matches!(lookup("call-2"), MontyObject::String(s) if s == "plain text result"),
+            "plain text result should stay a string"
+        );
+    }
+
     /// Stub LLM that always returns text "stub". Only used so execute_code
     /// doesn't need a real LLM — our tests exercise tool dispatch, not LLM calls.
     struct StubLlm;
@@ -3163,6 +3376,55 @@ FINAL(str(result))
             result.stdout
         );
         assert_eq!(result.action_results.len(), 1);
+    }
+
+    // ── JSON-string tool outputs reach the VM as structures ─
+
+    #[tokio::test]
+    async fn json_string_tool_output_reaches_vm_as_dict() {
+        // Regression for the payroll Tier-1 failures: MCP tools deliver
+        // their payload as a JSON-encoded string (text content block), and
+        // the t3n sidecar double-encodes its `result` field. The VM must
+        // see a subscriptable dict, while the recorded ActionResult keeps
+        // the raw string.
+        let raw_envelope =
+            r#"{"status":"success","result":"{\"status\":\"ok\",\"did\":\"did:example:123\"}"}"#;
+        let thread = make_test_thread();
+        let effects: Arc<dyn EffectExecutor> = Arc::new(MockEffects::new(
+            vec![test_action("t3n_session")],
+            vec![Ok(ActionResult {
+                call_id: String::new(),
+                action_name: "t3n_session".into(),
+                output: serde_json::Value::String(raw_envelope.into()),
+                is_error: false,
+                duration: Duration::from_millis(1),
+            })],
+        ));
+
+        let code = r#"
+session = await t3n_session()
+FINAL(session["result"]["did"])
+"#;
+
+        let result = run_code(code, effects, &thread).await.unwrap();
+        assert!(
+            result.failure.is_none(),
+            "should not error, stdout: {}",
+            result.stdout
+        );
+        assert_eq!(
+            result.final_answer.as_deref(),
+            Some("did:example:123"),
+            "VM should see a dict, stdout: {}",
+            result.stdout
+        );
+        // Persistence-facing output is untouched: still the raw string.
+        assert_eq!(result.action_results.len(), 1);
+        assert_eq!(
+            result.action_results[0].output,
+            serde_json::Value::String(raw_envelope.into()),
+            "recorded ActionResult must keep the raw output"
+        );
     }
 
     // ── asyncio.gather parallel execution ───────────────────
