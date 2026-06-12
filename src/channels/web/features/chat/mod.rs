@@ -2350,6 +2350,183 @@ mod tests {
         assert_eq!(turns[0]["response"], "4");
     }
 
+    /// Engine v2 mid-turn projection: the bridge dual-writes the bare user
+    /// message and the dispatch path stamps `live_state` with
+    /// `user_message_id: null` (the row id is unknown to the dispatcher).
+    /// History must project the open turn as `Processing` with
+    /// `in_progress` set — not as a `Failed` turn with `in_progress: null`
+    /// — otherwise any mid-turn re-render blanks the conversation for the
+    /// whole multi-minute engine turn.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_projects_engine_v2_open_turn_as_processing() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        // Prior completed turn, then the v2 bridge's dual-written user row
+        // for the in-flight turn (no assistant row yet).
+        db.add_conversation_message(thread_id, "user", "first question")
+            .await
+            .expect("add prior user message");
+        db.add_conversation_message(thread_id, "assistant", "first answer")
+            .await
+            .expect("add prior assistant message");
+        db.add_conversation_message(thread_id, "user", "run payroll")
+            .await
+            .expect("add open user message");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 1,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                "started_at": chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        let in_progress = payload
+            .get("in_progress")
+            .filter(|v| !v.is_null())
+            .expect("in_progress present mid-turn");
+        assert_eq!(in_progress["state"], "Processing");
+        assert_eq!(in_progress["user_input"], "run payroll");
+
+        let turns = payload["turns"].as_array().expect("turns array");
+        assert_eq!(turns.len(), 2);
+        assert_eq!(turns[0]["state"], "Completed");
+        assert_eq!(turns[0]["response"], "first answer");
+        assert_eq!(
+            turns[1]["state"], "Processing",
+            "open v2 turn must not project as Failed"
+        );
+        assert_eq!(turns[1]["user_input"], "run payroll");
+    }
+
+    /// Engine v2 post-park completion: when the foreground dispatch returned
+    /// `Pending` the live_state is deliberately left in place, and the
+    /// post-park continuation later persists the assistant row without
+    /// clearing it. The projection must treat the persisted response as
+    /// terminal — completed turn, `in_progress` gone — despite the leftover
+    /// `Processing` metadata.
+    #[cfg(feature = "libsql")]
+    #[tokio::test]
+    async fn test_chat_history_handler_retires_engine_v2_live_state_after_post_park_response() {
+        use axum::body::Body;
+        use tower::ServiceExt;
+
+        let (db, _tmp) = crate::testing::test_db().await;
+        let session_manager = Arc::new(SessionManager::new());
+        let state =
+            test_gateway_state_with_store_and_session_manager(Arc::clone(&db), session_manager);
+        let app = Router::new()
+            .route("/api/chat/history", get(chat_history_handler))
+            .with_state(state);
+
+        let thread_id = db
+            .create_conversation("gateway", "test-user", None)
+            .await
+            .expect("create conversation");
+        db.update_conversation_metadata_field(
+            thread_id,
+            "live_state",
+            &serde_json::json!({
+                "turn_number": 0,
+                "user_message_id": null,
+                "state": "Processing",
+                "user_input": "run payroll",
+                // Fresh enough to pass the staleness guard, but older than
+                // the assistant row written below.
+                "started_at": (chrono::Utc::now() - chrono::Duration::minutes(2)).to_rfc3339(),
+            }),
+        )
+        .await
+        .expect("set engine v2 live_state");
+        db.add_conversation_message(thread_id, "user", "run payroll")
+            .await
+            .expect("add user message");
+        // Post-park continuation persisted the final response (or the
+        // sanitized failure summary — same projection shape).
+        db.add_conversation_message(thread_id, "assistant", "payroll complete")
+            .await
+            .expect("add assistant message");
+
+        let mut req = axum::http::Request::builder()
+            .method("GET")
+            .uri(format!("/api/chat/history?thread_id={thread_id}"))
+            .body(Body::empty())
+            .expect("request");
+        req.extensions_mut().insert(UserIdentity {
+            user_id: "test-user".to_string(),
+            role: "member".to_string(),
+            workspace_read_scopes: Vec::new(),
+        });
+
+        let resp = ServiceExt::<axum::http::Request<Body>>::oneshot(app, req)
+            .await
+            .expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024 * 64)
+            .await
+            .expect("body");
+        let payload: serde_json::Value =
+            serde_json::from_slice(&body).expect("history response json");
+
+        assert!(
+            payload
+                .get("in_progress")
+                .map(|v| v.is_null())
+                .unwrap_or(true),
+            "completed turn must retire the leftover Processing live_state"
+        );
+        let turns = payload["turns"].as_array().expect("turns array");
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0]["state"], "Completed");
+        assert_eq!(turns[0]["response"], "payroll complete");
+        assert!(
+            turns[0]["completed_at"].as_str().is_some(),
+            "concluded turn must carry completed_at"
+        );
+    }
+
     #[cfg(feature = "libsql")]
     #[tokio::test]
     async fn test_chat_history_handler_drops_stale_in_progress_when_history_is_windowed() {
