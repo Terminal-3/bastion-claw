@@ -141,6 +141,11 @@ const STREAM_DEBOUNCE_MS = 50;
 // --- Connection Status Banner State ---
 let _connectionLostTimer = null;
 let _reconnectAttempts = 0;
+// Pending manual SSE reconnect. The browser only auto-reconnects retryable
+// failures (readyState CONNECTING); a non-retryable response (401/5xx during
+// a restart, wrong content type) closes the EventSource for good, so
+// `onerror` arms this timer to call connectSSE() with capped backoff.
+let _sseRetryTimer = null;
 let _lastSseEventId = null;
 // Timestamp of the most recent SSE disconnect (tab hide or onerror). Cleared
 // on successful reconnect. Used to decide whether to reload chat history on
@@ -170,6 +175,7 @@ function cleanupConnectionState() {
   if (_streamDebounceTimer) { clearInterval(_streamDebounceTimer); _streamDebounceTimer = null; }
   _streamBuffer = '';
   if (_connectionLostTimer) { clearTimeout(_connectionLostTimer); _connectionLostTimer = null; }
+  if (_sseRetryTimer) { clearTimeout(_sseRetryTimer); _sseRetryTimer = null; }
   if (jobListRefreshTimer) { clearTimeout(jobListRefreshTimer); jobListRefreshTimer = null; }
   if (_loadThreadsTimer) { clearTimeout(_loadThreadsTimer); _loadThreadsTimer = null; }
   if (missionMappingRefreshTimer) { clearTimeout(missionMappingRefreshTimer); missionMappingRefreshTimer = null; }
