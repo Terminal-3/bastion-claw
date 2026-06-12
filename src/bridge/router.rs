@@ -4900,6 +4900,7 @@ fn spawn_deferred_context_cleanup(
 fn spawn_post_park_continuation(
     state: &EngineState,
     channels: Arc<crate::channels::ChannelManager>,
+    hooks: Arc<crate::hooks::HookRegistry>,
     message: IncomingMessage,
     conv_id: t3claw_engine::ConversationId,
     thread_id: t3claw_engine::ThreadId,
@@ -5150,6 +5151,38 @@ fn spawn_post_park_continuation(
             }
         };
 
+        // Hook: BeforeOutbound — mirror the agent loop's outbound hook so
+        // post-park responses get the same filter/transform treatment as
+        // foreground turns (which return through `handle_message` and hit
+        // the hook there). Without this, a gate-resumed thread's final
+        // response would bypass outbound hooks entirely.
+        let mut hook_suppressed = false;
+        let response_text = match response_text {
+            Some(text) => {
+                let event = crate::hooks::HookEvent::Outbound {
+                    user_id: user_id.clone(),
+                    channel: channel_name.clone(),
+                    content: text.clone(),
+                    thread_id: message.thread_id.as_ref().map(|t| t.as_str().to_string()),
+                };
+                match hooks.run(&event).await {
+                    Err(err) => {
+                        tracing::warn!(
+                            thread_id = %thread_id,
+                            "BeforeOutbound hook blocked post-park response: {err}"
+                        );
+                        hook_suppressed = true;
+                        None
+                    }
+                    Ok(crate::hooks::HookOutcome::Continue {
+                        modified: Some(new_content),
+                    }) => Some(new_content),
+                    Ok(_) => Some(text),
+                }
+            }
+            None => None,
+        };
+
         if let Some(ref text) = response_text {
             // SSE Response broadcast (web).
             if let Some(ref sse) = sse {
@@ -5202,6 +5235,19 @@ fn spawn_post_park_continuation(
                     }
                 }
             }
+        }
+
+        if hook_suppressed {
+            // Response suppressed by hook but the turn is complete — still
+            // emit Done so the client knows not to keep waiting (mirrors
+            // the agent loop's suppression path).
+            let _ = channels
+                .send_status(
+                    &channel_name,
+                    StatusUpdate::Status("Done".into()),
+                    &metadata,
+                )
+                .await;
         }
 
         gate_controller
@@ -5398,6 +5444,7 @@ async fn await_thread_outcome(
         spawn_post_park_continuation(
             state,
             agent.channels.clone(),
+            Arc::clone(agent.hooks()),
             message.clone(),
             conv_id,
             thread_id,
