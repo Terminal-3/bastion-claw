@@ -4932,7 +4932,22 @@ fn spawn_post_park_continuation(
                     match event {
                         Ok(ref evt) if evt.thread_id == thread_id => {
                             forward_event_to_channel(evt, &channels, &channel_name, &metadata).await;
-                            if let Some(ref sse) = sse {
+                            // When the originating channel is the web
+                            // gateway, `forward_event_to_channel` above has
+                            // already rendered this event as SSE via the
+                            // gateway's `send_status` (stamped with the chat
+                            // thread id from metadata). Broadcasting the same
+                            // kinds again here — stamped with the *engine*
+                            // thread id — duplicated every tool/thinking
+                            // event on the SSE stream under two ids. Only
+                            // the kinds the channel path cannot express
+                            // (CodeExecuted, StateChanged, …) still flow
+                            // through the direct path.
+                            let skip_channel_covered = channel_name == GATEWAY_CHANNEL_NAME
+                                && channel_status_covers_event(&evt.kind);
+                            if let Some(ref sse) = sse
+                                && !skip_channel_covered
+                            {
                                 let skip_verbose = !sse.has_verbose_receivers();
                                 let leak_detector = effect_adapter.safety().leak_detector();
                                 for mut app_event in thread_event_to_app_events(evt, &tid_str) {
@@ -5400,7 +5415,18 @@ async fn await_thread_outcome(
                 match event {
                     Ok(ref evt) if evt.thread_id == thread_id => {
                         forward_event_to_channel(evt, channels, channel_name, metadata).await;
-                        if let Some(sse) = sse {
+                        // Gateway-originated turns already get this event as
+                        // SSE through `forward_event_to_channel` → gateway
+                        // `send_status` (stamped with the chat thread id) —
+                        // broadcasting the channel-covered kinds again here,
+                        // stamped with the engine thread id, duplicated the
+                        // whole stream under two ids. Direct-path-only kinds
+                        // (CodeExecuted, StateChanged, …) still flow.
+                        let skip_channel_covered = channel_name == GATEWAY_CHANNEL_NAME
+                            && channel_status_covers_event(&evt.kind);
+                        if let Some(sse) = sse
+                            && !skip_channel_covered
+                        {
                             // Mirror the `send_status` gate: verbose-only
                             // events (e.g. `CodeExecuted`, `Warning`) are
                             // only useful when a debug subscriber is
@@ -6216,13 +6242,22 @@ fn v2_tool_calls_json(thread: &t3claw_engine::Thread) -> Vec<serde_json::Value> 
                 call_id,
                 duration_ms,
                 params_summary,
+                result_preview,
                 ..
             } => {
-                // An empty preview still marks the call as completed for the
-                // history projection (`has_result` checks for a non-null
-                // value). CodeAct outputs are consumed inside the Python VM
-                // and have no per-call text to attach here.
-                let preview = previews.get(call_id.as_str()).copied().unwrap_or("");
+                // Prefer the joined `ActionResult` message preview (richer —
+                // Tier-0 messages carry the full sanitised output text), then
+                // the event-carried preview (the only output text CodeAct
+                // calls have, since their outputs are consumed inside the
+                // Python VM). An empty preview still marks the call as
+                // completed for the history projection (`has_result` checks
+                // for a non-null value).
+                let preview = previews
+                    .get(call_id.as_str())
+                    .copied()
+                    .filter(|p| !p.is_empty())
+                    .or(result_preview.as_deref())
+                    .unwrap_or("");
                 let mut obj = serde_json::json!({
                     "name": action_name,
                     "result_preview": truncate_tool_result_preview(preview),
@@ -6351,6 +6386,29 @@ async fn persist_v2_tool_calls(
 }
 
 /// Forward an engine ThreadEvent to the channel as a StatusUpdate.
+/// Event kinds that [`forward_event_to_channel`] converts into
+/// `StatusUpdate`s. For gateway-originated turns those StatusUpdates are
+/// rendered as SSE `AppEvent`s by the gateway channel's `send_status`
+/// (stamped with the chat thread id from metadata), so the direct
+/// `thread_event_to_app_events` broadcast must skip exactly these kinds or
+/// every tool/thinking event reaches the browser twice — once per pipeline,
+/// under two different thread ids. Keep this list in lock-step with the
+/// match arms in [`forward_event_to_channel`]; the
+/// `channel_status_covers_event_matches_forwarder` test pins the
+/// correspondence.
+fn channel_status_covers_event(kind: &t3claw_engine::EventKind) -> bool {
+    use t3claw_engine::EventKind;
+    matches!(
+        kind,
+        EventKind::StepStarted { .. }
+            | EventKind::ActionExecuted { .. }
+            | EventKind::ActionFailed { .. }
+            | EventKind::StepCompleted { .. }
+            | EventKind::MessageAdded { .. }
+            | EventKind::SkillActivated { .. }
+    )
+}
+
 async fn forward_event_to_channel(
     event: &t3claw_engine::ThreadEvent,
     channels: &std::sync::Arc<crate::channels::ChannelManager>,
@@ -6374,6 +6432,7 @@ async fn forward_event_to_channel(
             call_id,
             duration_ms,
             params_summary,
+            result_preview,
             ..
         } => {
             let display_name = format_action_display_name(action_name, params_summary);
@@ -6388,6 +6447,19 @@ async fn forward_event_to_channel(
                     metadata,
                 )
                 .await;
+            if let Some(preview) = result_preview.as_deref().filter(|p| !p.is_empty()) {
+                let _ = channels
+                    .send_status(
+                        channel_name,
+                        StatusUpdate::ToolResult {
+                            name: display_name.clone(),
+                            preview: preview.to_string(),
+                            call_id: Some(call_id.clone()),
+                        },
+                        metadata,
+                    )
+                    .await;
+            }
             let _ = channels
                 .send_status(
                     channel_name,
@@ -6640,26 +6712,37 @@ fn thread_event_to_app_events(
             call_id,
             duration_ms,
             params_summary,
+            result_preview,
             ..
         } => {
             let display_name = format_action_display_name(action_name, params_summary);
-            vec![
-                AppEvent::ToolStarted {
+            let mut events = vec![AppEvent::ToolStarted {
+                name: display_name.clone(),
+                detail: params_summary.clone(),
+                call_id: Some(call_id.clone()),
+                thread_id: Some(thread_id.into()),
+            }];
+            // The FE's `tool_result` listener fills the expandable card body
+            // (`setToolCardOutput`, matched by call_id) — without it CodeAct
+            // calls render empty cards.
+            if let Some(preview) = result_preview.as_deref().filter(|p| !p.is_empty()) {
+                events.push(AppEvent::ToolResult {
                     name: display_name.clone(),
-                    detail: params_summary.clone(),
+                    preview: preview.to_string(),
                     call_id: Some(call_id.clone()),
                     thread_id: Some(thread_id.into()),
-                },
-                AppEvent::ToolCompleted {
-                    name: display_name,
-                    success: true,
-                    error: None,
-                    parameters: params_summary.clone(),
-                    call_id: Some(call_id.clone()),
-                    duration_ms: Some(*duration_ms),
-                    thread_id: Some(thread_id.into()),
-                },
-            ]
+                });
+            }
+            events.push(AppEvent::ToolCompleted {
+                name: display_name,
+                success: true,
+                error: None,
+                parameters: params_summary.clone(),
+                call_id: Some(call_id.clone()),
+                duration_ms: Some(*duration_ms),
+                thread_id: Some(thread_id.into()),
+            });
+            events
         }
         EventKind::ActionFailed {
             action_name,
@@ -9339,6 +9422,90 @@ mod tests {
         );
     }
 
+    /// Pins `channel_status_covers_event` to the actual behaviour of
+    /// `forward_event_to_channel`: a kind is "covered" iff the forwarder
+    /// sends at least one StatusUpdate for it. If a new arm is added to the
+    /// forwarder without updating the predicate (or vice versa), gateway
+    /// SSE either duplicates that kind under two thread ids again or drops
+    /// it entirely.
+    #[tokio::test]
+    async fn channel_status_covers_event_matches_forwarder() {
+        use t3claw_engine::EventKind;
+
+        let step_id = t3claw_engine::StepId::new();
+        let kinds: Vec<EventKind> = vec![
+            EventKind::StepStarted { step_id },
+            EventKind::ActionExecuted {
+                step_id,
+                action_name: "echo".into(),
+                call_id: "c1".into(),
+                duration_ms: 1,
+                params_summary: None,
+                result_preview: None,
+            },
+            EventKind::ActionFailed {
+                step_id,
+                action_name: "echo".into(),
+                call_id: "c2".into(),
+                error: "boom".into(),
+                duration_ms: 1,
+                params_summary: None,
+            },
+            EventKind::StepCompleted {
+                step_id,
+                tokens: t3claw_engine::TokenUsage::default(),
+            },
+            // Payload chosen so interpret_message_event returns Some — the
+            // predicate claims the *kind* is covered, so the test fixture
+            // must exercise the emitting branch.
+            EventKind::MessageAdded {
+                role: "Assistant".into(),
+                content_preview: "thinking...".into(),
+            },
+            EventKind::SkillActivated {
+                skill_names: vec!["payroll".into()],
+            },
+            // Direct-path-only kinds: must NOT be covered, so the gateway
+            // suppression never silences them.
+            EventKind::StateChanged {
+                from: t3claw_engine::ThreadState::Created,
+                to: t3claw_engine::ThreadState::Running,
+                reason: None,
+            },
+            EventKind::CodeExecuted {
+                step_id,
+                code: "print(1)".into(),
+                stdout: "1".into(),
+                return_value: None,
+                duration_ms: 1,
+            },
+        ];
+
+        for kind in kinds {
+            let statuses = Arc::new(TokioMutex::new(Vec::new()));
+            let manager = ChannelManager::new();
+            manager
+                .add(Box::new(RecordingStatusChannel {
+                    name: "test".to_string(),
+                    statuses: Arc::clone(&statuses),
+                }))
+                .await;
+            let manager = Arc::new(manager);
+
+            let covered = channel_status_covers_event(&kind);
+            let event = t3claw_engine::ThreadEvent::new(t3claw_engine::ThreadId::new(), kind);
+            forward_event_to_channel(&event, &manager, "test", &serde_json::json!({})).await;
+
+            let sent = !statuses.lock().await.is_empty();
+            assert_eq!(
+                covered, sent,
+                "channel_status_covers_event disagrees with forward_event_to_channel \
+                 for {:?}",
+                event.kind
+            );
+        }
+    }
+
     #[tokio::test]
     async fn forward_event_to_channel_preserves_call_id_for_action_events() {
         let statuses = Arc::new(TokioMutex::new(Vec::new()));
@@ -9359,6 +9526,7 @@ mod tests {
                 call_id: "call-memory-read-1".to_string(),
                 duration_ms: 42,
                 params_summary: Some("notes/today.md".to_string()),
+                result_preview: None,
             },
         );
 
@@ -9386,6 +9554,47 @@ mod tests {
                 && duration_ms == &Some(42)
                 && *success
         ));
+    }
+
+    #[tokio::test]
+    async fn forward_event_to_channel_emits_tool_result_for_event_preview() {
+        let statuses = Arc::new(TokioMutex::new(Vec::new()));
+        let manager = ChannelManager::new();
+        manager
+            .add(Box::new(RecordingStatusChannel {
+                name: "test".to_string(),
+                statuses: Arc::clone(&statuses),
+            }))
+            .await;
+        let manager = Arc::new(manager);
+
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_read".to_string(),
+                call_id: "call-memory-read-1".to_string(),
+                duration_ms: 42,
+                params_summary: Some("notes/today.md".to_string()),
+                result_preview: Some("note contents".to_string()),
+            },
+        );
+
+        forward_event_to_channel(&event, &manager, "test", &serde_json::json!({})).await;
+
+        let statuses = statuses.lock().await;
+        assert_eq!(statuses.len(), 3);
+        assert!(matches!(&statuses[0], StatusUpdate::ToolStarted { .. }));
+        assert!(matches!(
+            &statuses[1],
+            StatusUpdate::ToolResult {
+                call_id,
+                preview,
+                ..
+            } if call_id.as_deref() == Some("call-memory-read-1")
+                && preview == "note contents"
+        ));
+        assert!(matches!(&statuses[2], StatusUpdate::ToolCompleted { .. }));
     }
 
     #[test]
@@ -9431,6 +9640,66 @@ mod tests {
                 && duration_ms == &Some(17)
                 && thread_id.as_deref() == Some("thread-123")
         ));
+    }
+
+    /// Regression: CodeAct (Tier 1) calls never produced a `tool_result`
+    /// SSE event, so live tool-call cards in the web UI had empty bodies.
+    /// An `ActionExecuted` carrying a `result_preview` must bridge to
+    /// `AppEvent::ToolResult` (the FE's `setToolCardOutput` matches it by
+    /// call_id) between ToolStarted and ToolCompleted.
+    #[test]
+    fn thread_event_to_app_events_emits_tool_result_for_event_preview() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "t3n_mcp_finalizeAudit".to_string(),
+                call_id: "code_call_1".to_string(),
+                duration_ms: 196,
+                params_summary: None,
+                result_preview: Some(r#"{"audit":"finalised"}"#.to_string()),
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-123");
+
+        assert_eq!(app_events.len(), 3);
+        assert!(matches!(&app_events[0], AppEvent::ToolStarted { .. }));
+        assert!(matches!(
+            &app_events[1],
+            AppEvent::ToolResult {
+                call_id,
+                preview,
+                thread_id,
+                ..
+            } if call_id.as_deref() == Some("code_call_1")
+                && preview == r#"{"audit":"finalised"}"#
+                && thread_id.as_deref() == Some("thread-123")
+        ));
+        assert!(matches!(&app_events[2], AppEvent::ToolCompleted { .. }));
+    }
+
+    /// Events without a preview (legacy persisted shape, or sites with no
+    /// output in hand) must not emit an empty `tool_result`.
+    #[test]
+    fn thread_event_to_app_events_skips_tool_result_without_preview() {
+        let event = t3claw_engine::ThreadEvent::new(
+            t3claw_engine::ThreadId::new(),
+            t3claw_engine::EventKind::ActionExecuted {
+                step_id: t3claw_engine::StepId::new(),
+                action_name: "memory_read".to_string(),
+                call_id: "call-1".to_string(),
+                duration_ms: 5,
+                params_summary: None,
+                result_preview: None,
+            },
+        );
+
+        let app_events = thread_event_to_app_events(&event, "thread-123");
+
+        assert_eq!(app_events.len(), 2);
+        assert!(matches!(&app_events[0], AppEvent::ToolStarted { .. }));
+        assert!(matches!(&app_events[1], AppEvent::ToolCompleted { .. }));
     }
 
     #[test]
@@ -13099,14 +13368,27 @@ mod tests {
             call_id: "tool_info_0".into(),
             duration_ms: 3,
             params_summary: Some("schema".into()),
+            result_preview: Some("event-side preview".into()),
         });
-        // CodeAct call: event only, no ActionResult message.
+        // CodeAct call: event only (with event-carried preview), no
+        // ActionResult message.
         thread.add_event(t3claw_engine::EventKind::ActionExecuted {
             step_id,
             action_name: "t3n_mcp_finalizeAudit".into(),
             call_id: "code_call_1".into(),
             duration_ms: 196,
             params_summary: Some("2026-06-2b7404".into()),
+            result_preview: Some(r#"{"audit":"finalised"}"#.into()),
+        });
+        // CodeAct call from before previews were recorded: event only,
+        // no preview anywhere.
+        thread.add_event(t3claw_engine::EventKind::ActionExecuted {
+            step_id,
+            action_name: "t3n_mcp_getStatus".into(),
+            call_id: "code_call_2".into(),
+            duration_ms: 12,
+            params_summary: None,
+            result_preview: None,
         });
         // Failed CodeAct call: must persist as an error entry.
         thread.add_event(t3claw_engine::EventKind::ActionFailed {
@@ -13141,9 +13423,10 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&tool_calls_msg.content).expect("valid JSON");
         let calls = parsed["calls"].as_array().expect("calls array");
-        assert_eq!(calls.len(), 3, "every action event becomes a call entry");
+        assert_eq!(calls.len(), 4, "every action event becomes a call entry");
 
-        // Tier-0 call keeps its joined output preview.
+        // Tier-0 call keeps its joined output preview — the richer
+        // ActionResult message wins over the event-carried preview.
         assert_eq!(calls[0]["name"], "tool_info");
         assert_eq!(calls[0]["tool_call_id"], "tool_info_0");
         assert_eq!(calls[0]["params_summary"], "schema");
@@ -13153,22 +13436,28 @@ mod tests {
             r#"{"description":"discovery output"}"#
         );
 
-        // CodeAct call carries its real name even with no message output.
+        // CodeAct call carries its real name, and the event-carried
+        // preview lands in the persisted row when no ActionResult
+        // message exists.
         assert_eq!(calls[1]["name"], "t3n_mcp_finalizeAudit");
         assert_eq!(calls[1]["tool_call_id"], "code_call_1");
         assert_eq!(calls[1]["params_summary"], "2026-06-2b7404");
         assert_eq!(calls[1]["duration_ms"], 196);
-        // Empty (non-null) preview so the history projection marks the
-        // call completed (`has_result`) rather than perpetually running.
-        assert_eq!(calls[1]["result_preview"], "");
+        assert_eq!(calls[1]["result_preview"], r#"{"audit":"finalised"}"#);
+
+        // Legacy CodeAct call with no preview anywhere keeps the empty
+        // (non-null) preview so the history projection marks the call
+        // completed (`has_result`) rather than perpetually running.
+        assert_eq!(calls[2]["name"], "t3n_mcp_getStatus");
+        assert_eq!(calls[2]["result_preview"], "");
 
         // Failed call persists the error, no result_preview.
-        assert_eq!(calls[2]["name"], "__codeact__");
+        assert_eq!(calls[3]["name"], "__codeact__");
         assert_eq!(
-            calls[2]["error"],
+            calls[3]["error"],
             "TypeError: string indices must be integers"
         );
-        assert!(calls[2].get("result_preview").is_none());
+        assert!(calls[3].get("result_preview").is_none());
     }
 
     /// CodeAct call ids restart per code block (`code_call_1`, …), so the
@@ -13197,6 +13486,7 @@ mod tests {
                 call_id: "code_call_1".into(),
                 duration_ms: 1,
                 params_summary: None,
+                result_preview: None,
             });
         }
 
