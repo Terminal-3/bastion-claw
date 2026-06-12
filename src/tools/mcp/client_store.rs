@@ -146,7 +146,16 @@ impl McpClientKey {
     pub fn new(user_id: &str, server_name: &str) -> Self {
         Self {
             user_id: user_id.to_string(),
-            server_name: server_name.to_string(),
+            // Canonicalise to the underscore form used everywhere the
+            // client is dispatched: `McpClient::new` and the generated
+            // tool wrappers normalise hyphens to underscores, so the
+            // store must too. Callers holding the raw config name
+            // (e.g. `t3n-mcp`) would otherwise miss entries inserted
+            // under the normalised name (`t3n_mcp`) — which made
+            // `ExtensionManager::list()` report a live startup-injected
+            // server as `active: false`, demoting its tools out of the
+            // engine v2 inline action inventory.
+            server_name: server_name.replace('-', "_"),
         }
     }
 }
@@ -214,8 +223,10 @@ impl McpClientStore {
     /// serialises activate and remove end-to-end.
     pub async fn remove_and_check_empty(&self, user_id: &str, server_name: &str) -> bool {
         let mut clients = self.clients.write().await;
-        clients.remove(&McpClientKey::new(user_id, server_name));
-        !clients.keys().any(|key| key.server_name == server_name)
+        let key = McpClientKey::new(user_id, server_name);
+        let normalized = key.server_name.clone();
+        clients.remove(&key);
+        !clients.keys().any(|k| k.server_name == normalized)
     }
 
     /// Look up the client for `(user_id, server_name)`. Returns `None` if
@@ -241,11 +252,12 @@ impl McpClientStore {
     /// unregistered — they must survive as long as some user is still
     /// holding the server active.
     pub async fn any_active_for_server(&self, server_name: &str) -> bool {
+        let normalized = server_name.replace('-', "_");
         self.clients
             .read()
             .await
             .keys()
-            .any(|key| key.server_name == server_name)
+            .any(|key| key.server_name == normalized)
     }
 
     /// Check whether the tool surface `incoming` — fingerprint of the
@@ -269,9 +281,10 @@ impl McpClientStore {
         server_name: &str,
         incoming: &str,
     ) -> Option<String> {
+        let normalized = server_name.replace('-', "_");
         let clients = self.clients.read().await;
         for (key, entry) in clients.iter() {
-            if key.server_name == server_name && key.user_id != user_id && entry.surface != incoming
+            if key.server_name == normalized && key.user_id != user_id && entry.surface != incoming
             {
                 return Some(key.user_id.clone());
             }
@@ -293,6 +306,24 @@ mod tests {
             input_schema: serde_json::json!({"type": "object", "properties": {}}),
             annotations,
         }
+    }
+
+    #[test]
+    fn client_key_normalizes_hyphens_to_underscores() {
+        // Startup injection stores clients under the normalised name
+        // (`t3n_mcp`) while config rows keep the raw form (`t3n-mcp`).
+        // `ExtensionManager::list()` and `activate()` query with the raw
+        // form, so the key must canonicalise or a live server reports
+        // `active: false` (which drops its tools from the engine v2
+        // inline inventory).
+        assert_eq!(
+            McpClientKey::new("default", "t3n-mcp"),
+            McpClientKey::new("default", "t3n_mcp"),
+        );
+        assert_ne!(
+            McpClientKey::new("default", "t3n-mcp"),
+            McpClientKey::new("other", "t3n-mcp"),
+        );
     }
 
     #[test]
