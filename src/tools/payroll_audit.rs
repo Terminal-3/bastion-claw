@@ -689,13 +689,16 @@ mod tests {
             format_milestone("t3n_mcp_zExecuteDisbursement", None, None, Some("boom")).unwrap();
         assert_eq!(msg, "⚠️ Payroll disbursement failed — boom");
 
-        let msg =
-            format_milestone("t3n_mcp_zFinalizeAudit", None, None, Some("err")).unwrap();
+        let msg = format_milestone("t3n_mcp_zFinalizeAudit", None, None, Some("err")).unwrap();
         assert!(msg.contains("finalisation failed"), "{msg}");
 
-        let msg =
-            format_milestone("t3n_mcp_zSubmitEscalationResolutions", None, None, Some("err"))
-                .unwrap();
+        let msg = format_milestone(
+            "t3n_mcp_zSubmitEscalationResolutions",
+            None,
+            None,
+            Some("err"),
+        )
+        .unwrap();
         assert!(msg.contains("escalation resolution failed"), "{msg}");
     }
 
