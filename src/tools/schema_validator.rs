@@ -26,7 +26,9 @@
 /// 2. Must have `"properties"` as a JSON object
 /// 3. Every key in `"required"` must exist in `"properties"`
 /// 4. Every property must have a `"type"` field (freeform/any-type is flagged)
-/// 5. `"additionalProperties"` must be explicitly `false` if present
+/// 5. `"additionalProperties"`, if present, must be a boolean (`false` =
+///    closed strict object, `true` = open map) or a schema object (a value
+///    subschema or an empty `{}` map)
 /// 6. Nested objects follow the same rules recursively
 /// 7. `"enum"` values must match the declared type
 /// 8. Array properties must have an `"items"` definition
@@ -56,6 +58,20 @@ fn has_object_combinator_variants(schema: &serde_json::Value) -> bool {
         }
     }
     false
+}
+
+/// True if an `additionalProperties` value is a valid strict-mode / open-map
+/// marker. Accepted shapes:
+/// - `false` — a closed strict object;
+/// - `true` or an empty `{}` schema — an open map;
+/// - any schema object (e.g. `{"type": "string"}`) — a value-typed map.
+///
+/// `normalize_schema_strict` emits the open-map markers (`true` / `{}`) for
+/// map-typed objects, so accepting them here keeps this debug check in step
+/// with the normaliser. Only a non-boolean, non-object value (a bare scalar,
+/// array, or `null`) is malformed.
+fn is_valid_additional_properties(value: &serde_json::Value) -> bool {
+    value.is_boolean() || value.is_object()
 }
 
 /// Recursively validate an object-typed schema node.
@@ -174,15 +190,13 @@ fn check_object_schema(schema: &serde_json::Value, path: &str) -> Vec<String> {
 
         let prop_type = prop.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-        // Rule 5: additionalProperties must be false if present
+        // Rule 5: additionalProperties must be a valid strict-mode / open-map
+        // marker (see `is_valid_additional_properties`).
         if let Some(additional) = prop.get("additionalProperties")
-            && additional != &serde_json::Value::Bool(false)
-            // Allow additionalProperties with a type schema (e.g. {"type": "string"})
-            // which is valid in JSON Schema and used by tools like create_job's credentials.
-            && additional.get("type").is_none()
+            && !is_valid_additional_properties(additional)
         {
             errors.push(format!(
-                "{prop_path}: \"additionalProperties\" should be false or a type schema"
+                "{prop_path}: \"additionalProperties\" must be a boolean or a schema object"
             ));
         }
 
@@ -230,11 +244,10 @@ fn check_object_schema(schema: &serde_json::Value, path: &str) -> Vec<String> {
 
     // Also check top-level additionalProperties (rule 5)
     if let Some(additional) = schema.get("additionalProperties")
-        && additional != &serde_json::Value::Bool(false)
-        && additional.get("type").is_none()
+        && !is_valid_additional_properties(additional)
     {
         errors.push(format!(
-            "{path}: top-level \"additionalProperties\" should be false or a type schema"
+            "{path}: top-level \"additionalProperties\" must be a boolean or a schema object"
         ));
     }
 
@@ -424,6 +437,36 @@ mod tests {
             }
         });
         assert!(validate_strict_schema(&schema, "test").is_ok());
+    }
+
+    #[test]
+    fn test_open_map_markers_pass() {
+        // The strict normaliser exempts map-typed objects from the closed
+        // clamp and emits them with `additionalProperties: {}` (empty schema)
+        // or `additionalProperties: true`. This debug validator must accept
+        // both, otherwise its post-normalise check disagrees with the
+        // normaliser's own output.
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "args":     { "type": "object", "additionalProperties": {} },
+                "metadata": { "type": "object", "additionalProperties": true }
+            }
+        });
+        assert!(validate_strict_schema(&schema, "test").is_ok());
+    }
+
+    #[test]
+    fn test_malformed_additional_properties_flagged() {
+        // A non-boolean, non-object `additionalProperties` (here a bare
+        // string) is malformed JSON Schema and must still be reported.
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "bad": { "type": "object", "additionalProperties": "string" }
+            }
+        });
+        assert!(validate_strict_schema(&schema, "test").is_err());
     }
 
     // ── Comprehensive test: validate ALL built-in tool schemas ───────────
