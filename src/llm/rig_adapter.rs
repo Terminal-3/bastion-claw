@@ -537,15 +537,19 @@ fn normalize_schema_recursive(schema: &mut JsonValue) {
     // `dispatchContractCall` tool declares `args` as
     // `{"type": "object", "additionalProperties": {}}`. The closed-object
     // clamp below would rewrite that to `additionalProperties: false` +
-    // `properties: {}`, leaving `{}` as the schema's only valid instance,
-    // so the open shape is preserved and only the value subschema is
-    // normalized. Sending the open shape is safe at the API level: no
-    // provider path sets `strict: true` on tool definitions (rig-core
-    // serializes tools with `strict` omitted, and the NEAR AI / Codex wire
-    // formats carry no such field), and OpenAI only rejects open objects
-    // under explicit `strict: true` — with `strict` omitted, both the Chat
-    // Completions and Responses APIs fall back to non-strict function
-    // calling for schemas that cannot be made strict.
+    // `properties: {}`, leaving `{}` as the schema's only valid instance, so
+    // the open shape is preserved and only the value subschema is normalised.
+    //
+    // The open shape is safe because the rig OpenAI-compatible path selects
+    // the Chat Completions client at src/llm/mod.rs:325 (`.completions_api()`),
+    // whose `FunctionDefinition.strict` defaults to `None` (omitted on the
+    // wire) and is never set by this adapter; OpenAI only rejects open objects
+    // under explicit `strict: true`. This is a coupling to that client choice,
+    // not an absolute invariant: rig-core's Responses API
+    // (`ResponsesToolDefinition`) hardcodes `strict: true` and runs
+    // `sanitize_schema`, so switching this path to the Responses model — or
+    // enabling `strict` on the Chat Completions definition — would make open
+    // maps API-rejected and require re-clamping here.
     if is_map_object_schema(obj) {
         if let Some(value_schema @ JsonValue::Object(_)) = obj.get_mut("additionalProperties") {
             normalize_schema_recursive(value_schema);
@@ -616,6 +620,15 @@ fn normalize_schema_recursive(schema: &mut JsonValue) {
 /// `properties` map is not a map type even when `additionalProperties` is
 /// open, and `additionalProperties: false` with no properties is a closed
 /// empty object, not a map.
+/// True if `obj` is an open map-typed object: no fixed `properties` and an
+/// open `additionalProperties` marker (`true` or a value subschema). Such
+/// schemas are exempt from the closed-object strict clamp so their non-empty
+/// instances stay valid.
+///
+/// A bare `{"type": "object"}` with no `additionalProperties` is deliberately
+/// NOT a map: `open_additional` is `false`, so it falls through to the clamp
+/// and becomes a closed empty object. Treating a bare object as open would
+/// weaken strict mode for genuinely-closed empty objects.
 fn is_map_object_schema(obj: &serde_json::Map<String, JsonValue>) -> bool {
     let no_fixed_properties = match obj.get("properties") {
         None => true,
@@ -1818,6 +1831,134 @@ mod tests {
         assert!(
             result["properties"].is_object(),
             "closed empty objects still get an explicit properties map, got: {result}"
+        );
+    }
+
+    /// The `additionalProperties: true` exemption arm (as distinct from a
+    /// subschema value) must also preserve the open shape. A property that is
+    /// a bare open map with no fixed `properties` keeps `additionalProperties:
+    /// true` rather than being clamped to a closed empty object.
+    #[test]
+    fn test_normalize_schema_strict_preserves_additional_properties_true_map() {
+        let input = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "metadata": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["metadata"]
+        });
+        let mut description = "tool".to_string();
+        let result = normalize_schema_strict(&input, &mut description);
+
+        let metadata = &result["properties"]["metadata"];
+        assert_eq!(
+            metadata["additionalProperties"],
+            serde_json::json!(true),
+            "`additionalProperties: true` map must keep its open marker, got: {metadata}"
+        );
+        assert!(
+            metadata.get("properties").is_none(),
+            "no properties map may be injected into an open map, got: {metadata}"
+        );
+        // A populated instance must validate against the normalised schema.
+        let instance = serde_json::json!({
+            "metadata": { "trace_id": "abc-123", "attempt": 2 }
+        });
+        assert!(
+            jsonschema::validate(&result, &instance).is_ok(),
+            "non-empty map must validate against the normalised schema: {result}"
+        );
+    }
+
+    /// A map living inside a combinator branch survives normalisation via the
+    /// `anyOf`/`oneOf`/`allOf` recursion. The combinator is nested (a property
+    /// value), so it is not subject to the top-level flatten: the map branch
+    /// keeps its open `additionalProperties` while a sibling closed-object
+    /// branch is still strict-clamped.
+    #[test]
+    fn test_normalize_schema_strict_preserves_map_inside_combinator() {
+        let input = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "anyOf": [
+                        { "type": "object", "additionalProperties": { "type": "string" } },
+                        {
+                            "type": "object",
+                            "properties": { "kind": { "type": "string" } },
+                            "required": ["kind"]
+                        }
+                    ]
+                }
+            },
+            "required": ["filter"]
+        });
+        let mut description = "search".to_string();
+        let result = normalize_schema_strict(&input, &mut description);
+
+        let branches = result["properties"]["filter"]["anyOf"]
+            .as_array()
+            .expect("nested anyOf must be preserved");
+        assert_eq!(branches.len(), 2);
+
+        // Branch 0 is an open map: its value schema survives and no fixed
+        // `properties` are injected.
+        assert_eq!(
+            branches[0]["additionalProperties"]["type"], "string",
+            "map branch value schema must survive, got: {}",
+            branches[0]
+        );
+        assert!(
+            branches[0].get("properties").is_none(),
+            "no properties map may be injected into the map branch, got: {}",
+            branches[0]
+        );
+
+        // Branch 1 is a closed object: still strict-clamped.
+        assert_eq!(
+            branches[1]["additionalProperties"], false,
+            "closed-object branch must still be clamped, got: {}",
+            branches[1]
+        );
+
+        // Instances matching either branch validate against the schema.
+        let map_instance = serde_json::json!({ "filter": { "a": "x", "b": "y" } });
+        let object_instance = serde_json::json!({ "filter": { "kind": "recent" } });
+        assert!(
+            jsonschema::validate(&result, &map_instance).is_ok(),
+            "map-shaped filter must validate: {result}"
+        );
+        assert!(
+            jsonschema::validate(&result, &object_instance).is_ok(),
+            "object-shaped filter must validate: {result}"
+        );
+    }
+
+    /// Boundary pin: a bare `{"type": "object"}` with no `properties` and no
+    /// `additionalProperties` is NOT treated as an open map. It carries no
+    /// open `additionalProperties` marker, so the strict clamp applies and it
+    /// becomes a closed empty object. `is_map_object_schema` must not be
+    /// broadened to exempt this shape — doing so would weaken strict mode for
+    /// genuinely-closed empty objects.
+    #[test]
+    fn test_normalize_schema_strict_clamps_bare_object_not_a_map() {
+        let input = serde_json::json!({ "type": "object" });
+        let mut description = "bare".to_string();
+        let result = normalize_schema_strict(&input, &mut description);
+
+        assert_eq!(
+            result["additionalProperties"], false,
+            "bare object must be clamped closed, got: {result}"
+        );
+        assert!(
+            result["properties"].is_object(),
+            "bare object must get an explicit empty properties map, got: {result}"
+        );
+        // Being closed, it rejects any populated instance.
+        let instance = serde_json::json!({ "anything": 1 });
+        assert!(
+            jsonschema::validate(&result, &instance).is_err(),
+            "closed bare object must reject extra keys: {result}"
         );
     }
 
